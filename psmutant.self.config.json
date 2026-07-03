@@ -1,0 +1,20 @@
+{
+  "_comment": "PSComplexity self-assessment: PSMutant mutation-tests PSComplexity's own metric logic against its reference-score test suite. Complements the self-complexity gate (how complex is our code?) with a self-mutation gate (how good are our tests?). Run: Invoke-PSMutation -ConfigFile ./psmutant.self.config.json -SourceRoot .",
+  "sandboxSubtrees": ["src", "tests"],
+  "mutate": [
+    "src/Ast.ps1",
+    "src/Cognitive.ps1",
+    "src/Cyclomatic.ps1",
+    "src/Measure-PSComplexity.ps1"
+  ],
+  "tests": {
+    "src/Ast.ps1": ["tests/Cognitive.Tests.ps1", "tests/Measure.Tests.ps1"],
+    "src/Cognitive.ps1": ["tests/Cognitive.Tests.ps1"],
+    "src/Cyclomatic.ps1": ["tests/Cyclomatic.Tests.ps1"],
+    "src/Measure-PSComplexity.ps1": ["tests/Measure.Tests.ps1"]
+  },
+  "coveredLinesOnly": true,
+  "operators": ["BinaryOperator", "BooleanLiteral", "NumberLiteral", "NegationRemoval"],
+  "thresholds": { "high": 90, "low": 75, "break": 85 },
+  "reportPath": "reports/ps-mutation-self.json"
+}

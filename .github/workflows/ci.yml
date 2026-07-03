@@ -53,3 +53,15 @@ jobs:
           $cfg.Output.Verbosity = 'Detailed'
           $r = Invoke-Pester -Configuration $cfg
           if ($r.FailedCount -gt 0) { throw "$($r.FailedCount) test(s) failed" }
+
+      # Self-assess: mutation-test our own metric logic with our sibling module PSMutant,
+      # gating on the score. (Linux only -- test quality is platform-independent.)
+      - name: Self-assess (PSMutant mutation testing)
+        if: matrix.os == 'ubuntu-latest'
+        shell: pwsh
+        run: |
+          Install-Module PSMutant -RequiredVersion 0.1.0 -Force -Scope CurrentUser
+          Import-Module PSMutant -Force
+          $r = Invoke-PSMutation -ConfigFile ./psmutant.self.config.json -SourceRoot . -Quiet
+          Write-Host "Self mutation score: $($r.Score)% ($($r.Killed)/$($r.Total))"
+          if ($r.ExitCode -ne 0) { throw "Mutation score $($r.Score)% is below the break threshold" }
