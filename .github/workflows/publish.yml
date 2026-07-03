@@ -1,0 +1,74 @@
+# Publish to the PowerShell Gallery.
+#   * Push a version tag (e.g. v0.1.0)  -> real publish.
+#   * Run manually (workflow_dispatch)  -> dry run by default (Publish-Module -WhatIf).
+#
+# Unlike a tests-only gate, this re-runs the FULL quality set (lint + reference-score
+# tests + self-complexity gate) before publishing, so a release can't ship on a partial
+# gate. One-time: add the PSGALLERY_API_KEY repo secret (Settings -> Secrets -> Actions).
+name: Publish
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: 'Dry run (Publish-Module -WhatIf, nothing is pushed)'
+        type: boolean
+        default: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Install pinned Pester + PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.8.0 -Force -Scope CurrentUser
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
+
+      - name: Full quality gate (lint + tests + self-complexity)
+        shell: pwsh
+        run: |
+          $f = @()
+          foreach ($p in './src', './tests', './PSComplexity.psm1', './PSComplexity.psd1') {
+            $f += Invoke-ScriptAnalyzer -Path $p -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error, Warning
+          }
+          if ($f) { $f | Format-Table -AutoSize; throw "$($f.Count) lint finding(s) -- not publishing" }
+          Import-Module ./PSComplexity.psd1 -Force
+          $cfg = New-PesterConfiguration
+          $cfg.Run.Path = './tests'; $cfg.Run.PassThru = $true; $cfg.Output.Verbosity = 'Normal'
+          $r = Invoke-Pester -Configuration $cfg
+          if ($r.FailedCount -gt 0) { throw "$($r.FailedCount) test(s) failed -- not publishing" }
+
+      - name: Verify tag matches ModuleVersion
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart('v')
+          $ver = (Import-PowerShellDataFile ./PSComplexity.psd1).ModuleVersion
+          if ($tag -ne $ver) { throw "Tag $tag does not match ModuleVersion $ver" }
+
+      - name: Publish to PSGallery
+        shell: pwsh
+        env:
+          PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dryRun }}
+        run: |
+          if (-not $env:PSGALLERY_API_KEY) { throw 'PSGALLERY_API_KEY secret is not set' }
+          $stage = Join-Path ([System.IO.Path]::GetTempPath()) 'PSComplexity'
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item ./PSComplexity.psd1, ./PSComplexity.psm1, ./src, ./LICENSE, ./README.md -Destination $stage -Recurse -Force
+
+          if ($env:DRY_RUN -eq 'true') {
+              Write-Host '### DRY RUN -- Publish-Module -WhatIf ###' -ForegroundColor Yellow
+              Publish-Module -Path $stage -NuGetApiKey $env:PSGALLERY_API_KEY -WhatIf -Verbose
+              Write-Host '### DRY RUN complete -- nothing published. ###' -ForegroundColor Green
+          }
+          else {
+              Publish-Module -Path $stage -NuGetApiKey $env:PSGALLERY_API_KEY -Verbose
+              Write-Host '### Published to the PowerShell Gallery. ###' -ForegroundColor Green
+          }
