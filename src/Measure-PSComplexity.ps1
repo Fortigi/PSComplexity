@@ -8,9 +8,9 @@ function Get-PSCxSourceFile {
     [OutputType([string[]])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string]$Path, [switch]$Recurse)
-    if (Test-Path -LiteralPath $Path -PathType Leaf) { return @((Resolve-Path -LiteralPath $Path).Path) }
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { return [string[]]@((Resolve-Path -LiteralPath $Path).Path) }
     $gci = @{ Path = $Path; Include = @('*.ps1', '*.psm1'); File = $true; Recurse = [bool]$Recurse }
-    return @(Get-ChildItem @gci | ForEach-Object { $_.FullName })
+    return [string[]]@(Get-ChildItem @gci | ForEach-Object { $_.FullName })
 }
 
 function Measure-PSComplexity {

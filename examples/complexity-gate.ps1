@@ -14,4 +14,4 @@ Measure-PSComplexity -Path ./src -Recurse |
 if (-not (Test-PSComplexity -Path ./src -Recurse -MaxCyclomatic 15 -MaxCognitive 15)) {
     throw 'Complexity gate failed - see the warnings above.'
 }
-Write-Host 'Complexity gate passed.' -ForegroundColor Green
+Write-Information 'Complexity gate passed.' -InformationAction Continue
