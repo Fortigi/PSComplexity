@@ -60,3 +60,62 @@ Describe 'Test-PSComplexity' {
         Test-PSComplexity -Path $script:work -Recurse -MaxCognitive 2 -WarningAction SilentlyContinue | Should -BeFalse
     }
 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Top-level script code: decisions and calls that sit OUTSIDE any function.
+# Every fixture above wraps its logic in one, so the "walked to the top without
+# finding a function" fallbacks in Ast.ps1 were never reached. That shape is not
+# exotic — a crawler entry point, a build script or a profile is exactly this,
+# and it is the code most likely to be complex and least likely to be tested.
+# ─────────────────────────────────────────────────────────────────────────────
+
+Describe 'Measure-PSComplexity - script-level code outside any function' {
+
+    # NOTE: no angle brackets in It names here. Pester expands <...> in a test
+    # name as a -ForEach data placeholder, so 'to <script-body>' is parsed as the
+    # expression $script-body and the test dies with a token error before it runs.
+    It 'attributes a top-level decision to the script-body unit' {
+        # Get-PSCxUnitName walks to the nearest enclosing function; with none, it
+        # falls back to '<script-body>'. Without a top-level DECISION that fallback
+        # never runs: an assignment at script level creates the unit but asks
+        # nothing about which unit a decision belongs to.
+        $p = Join-Path $script:work 'toplevel-if.ps1'
+        Set-Content $p 'if ($env:CI) { "ci" } else { "local" }' -Encoding utf8
+        $body = Measure-PSComplexity -Path $p | Where-Object Unit -eq '<script-body>'
+        $body            | Should -Not -BeNullOrEmpty
+        $body.Cyclomatic | Should -Be 2   # baseline 1 + the if
+        $body.Cognitive  | Should -Be 2   # +1 the if, +1 the else branch
+    }
+
+    It 'nests top-level decisions the same way it nests them inside a function' {
+        # Pins that the script body is a real unit for cognitive scoring, not a
+        # bucket that only collects a flat count: the inner if is +2 (nesting), so
+        # a body that ignored depth would score 2 instead of 3.
+        $p = Join-Path $script:work 'toplevel-nested.ps1'
+        Set-Content $p 'if ($a) { if ($b) { "x" } }' -Encoding utf8
+        $body = Measure-PSComplexity -Path $p | Where-Object Unit -eq '<script-body>'
+        $body.Cyclomatic | Should -Be 3
+        $body.Cognitive  | Should -Be 3
+    }
+
+    It 'does not count a top-level call as recursion' {
+        # Recursion detection compares a call name against its ENCLOSING function
+        # name. At script level there is none, so the lookup returns $null and the
+        # call must not be scored — a script that calls a command sharing its file
+        # name would otherwise pick up a phantom recursion point.
+        $p = Join-Path $script:work 'toplevel-call.ps1'
+        Set-Content $p 'Get-Date' -Encoding utf8
+        $body = Measure-PSComplexity -Path $p | Where-Object Unit -eq '<script-body>'
+        $body.Cognitive | Should -Be 0
+    }
+
+    It 'still detects recursion inside a function in the same file' {
+        # The counterpart to the case above: proving the $null guard did not simply
+        # switch recursion detection off.
+        $p = Join-Path $script:work 'toplevel-plus-recursion.ps1'
+        Set-Content $p "Get-Date`nfunction Get-Loop { Get-Loop }" -Encoding utf8
+        $recs = Measure-PSComplexity -Path $p
+        ($recs | Where-Object Unit -like 'Get-Loop*').Cognitive | Should -Be 1
+        ($recs | Where-Object Unit -eq '<script-body>').Cognitive | Should -Be 0
+    }
+}
