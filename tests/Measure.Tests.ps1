@@ -171,3 +171,71 @@ Describe 'Measure-PSComplexity - reporting details that the suite never pinned' 
         ($wv -join ' ') | Should -Not -BeLike "*weird.ps1'*"
     }
 }
+
+Describe 'Measure-PSComplexity - class members as units' {
+    BeforeAll {
+        $script:clsFile = Join-Path $script:work 'cls.ps1'
+        Set-Content $script:clsFile @'
+class Order {
+    [int] $Threshold = $(if ($env:X) { 5 } else { 1 })
+    [string] $Plain
+    Order() { if ($env:Y) { $this.Plain = 'y' } }
+    [int] Process([object]$o) {
+        if ($o.A) { if ($o.B) { foreach ($x in $o.C) { if ($x) { return 1 } } } }
+        return 0
+    }
+    static [int] Helper() { return 1 }
+}
+class Invoice {
+    [int] Process([object]$o) { return 0 }
+}
+function Process { if (1) { } }
+'@ -Encoding utf8
+        $script:clsRecs = Measure-PSComplexity -Path $script:clsFile
+    }
+
+    It 'qualifies a method with its class name' {
+        # A method body is itself a FunctionDefinitionAst, so an unqualified 'Process'
+        # is what you get without treating the member as the unit -- and then three
+        # different units in this file all answer to that one name.
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Process').Cyclomatic | Should -Be 5
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Process').Cognitive  | Should -Be 10
+    }
+
+    It 'reports each method exactly once' {
+        @($script:clsRecs | Where-Object Unit -eq 'Order.Process') | Should -HaveCount 1
+    }
+
+    It 'keeps same-named methods on different classes apart, and apart from a function' {
+        $names = @($script:clsRecs | Where-Object { $_.Unit -like '*Process*' } | ForEach-Object Unit | Sort-Object)
+        $names | Should -Be @('Invoice.Process', 'Order.Process', 'Process')
+    }
+
+    It 'names a constructor after its class' {
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Order').Cyclomatic | Should -Be 2
+    }
+
+    It 'reports a static method' {
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Helper').Cyclomatic | Should -Be 1
+    }
+
+    It 'makes an initialised property its own unit and leaves the script body alone' {
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Threshold').Cyclomatic | Should -Be 2
+        ($script:clsRecs | Where-Object Unit -eq '<script-body>').Cyclomatic  | Should -Be 1
+    }
+
+    It 'does not create a unit for a property with no initialiser' {
+        # No initialiser means no code, so there is nothing to measure or gate.
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Plain') | Should -BeNullOrEmpty
+    }
+
+    It 'reports the line of the member, not of the class' {
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Process').Line | Should -Be 5
+    }
+
+    It 'lets the gate fail a single over-complex method' {
+        # The point of the whole change: a per-unit ceiling can now name the method.
+        Test-PSComplexity -Path $script:clsFile -MaxCognitive 9 -WarningAction SilentlyContinue | Should -BeFalse
+        Test-PSComplexity -Path $script:clsFile -MaxCognitive 10 -WarningAction SilentlyContinue | Should -BeTrue
+    }
+}

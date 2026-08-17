@@ -98,13 +98,47 @@ function Get-PSCxCogRecursionRow {
     }
 }
 
+function Test-PSCxSelfInvocation {
+    # True if a member call targets the enclosing class itself: $this.X() for an
+    # instance method, [ClassName]::X() for a static one. $other.X() from inside X
+    # is a call to a DIFFERENT object and is not recursion.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Node, [Parameter(Mandatory)] $Method)
+    $expr = $Node.Expression
+    if ($expr -is [System.Management.Automation.Language.VariableExpressionAst]) {
+        return $expr.VariablePath.UserPath -eq 'this'
+    }
+    if ($expr -is [System.Management.Automation.Language.TypeExpressionAst]) {
+        return $expr.TypeName.Name -eq $Method.Parent.Name
+    }
+    return $false
+}
+
+function Get-PSCxCogMethodRecursionRow {
+    # direct recursion inside a class method: +1, same as the function case. A method
+    # cannot recurse by bare command name, so Get-PSCxCogRecursionRow never sees it.
+    [OutputType([pscustomobject[]])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Ast)
+    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true)) {
+        $method = Get-PSCxEnclosingMethod -Node $n
+        if (-not $method) { continue }
+        if ($n.Member.Value -ne $method.Name) { continue }
+        if (Test-PSCxSelfInvocation -Node $n -Method $method) {
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 }
+        }
+    }
+}
+
 function Get-PSCxCognitiveMap {
     # unit key -> cognitive complexity (summed rows; decision-free unit = 0).
     [OutputType([hashtable])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     $rows = @(Get-PSCxCogIfRow -Ast $Ast) + @(Get-PSCxCogBlockRow -Ast $Ast) + @(Get-PSCxCogTernaryRow -Ast $Ast) +
-            @(Get-PSCxCogBooleanRow -Ast $Ast) + @(Get-PSCxCogJumpRow -Ast $Ast) + @(Get-PSCxCogRecursionRow -Ast $Ast)
+            @(Get-PSCxCogBooleanRow -Ast $Ast) + @(Get-PSCxCogJumpRow -Ast $Ast) + @(Get-PSCxCogRecursionRow -Ast $Ast) +
+            @(Get-PSCxCogMethodRecursionRow -Ast $Ast)
     $map = @{}
     foreach ($row in $rows) { $map[$row.Key] = [int]$map[$row.Key] + $row.Amount }
     $out = @{}
