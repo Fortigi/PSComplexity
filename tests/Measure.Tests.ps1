@@ -61,13 +61,13 @@ Describe 'Test-PSComplexity' {
     }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # Top-level script code: decisions and calls that sit OUTSIDE any function.
 # Every fixture above wraps its logic in one, so the "walked to the top without
 # finding a function" fallbacks in Ast.ps1 were never reached. That shape is not
-# exotic — a crawler entry point, a build script or a profile is exactly this,
+# exotic -- a crawler entry point, a build script or a profile is exactly this,
 # and it is the code most likely to be complex and least likely to be tested.
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 
 Describe 'Measure-PSComplexity - script-level code outside any function' {
 
@@ -101,7 +101,7 @@ Describe 'Measure-PSComplexity - script-level code outside any function' {
     It 'does not count a top-level call as recursion' {
         # Recursion detection compares a call name against its ENCLOSING function
         # name. At script level there is none, so the lookup returns $null and the
-        # call must not be scored — a script that calls a command sharing its file
+        # call must not be scored -- a script that calls a command sharing its file
         # name would otherwise pick up a phantom recursion point.
         $p = Join-Path $script:work 'toplevel-call.ps1'
         Set-Content $p 'Get-Date' -Encoding utf8
@@ -152,7 +152,7 @@ Describe 'Measure-PSComplexity - reporting details that the suite never pinned' 
 
     It 'ignores a DIRECTORY whose name ends in .ps1' {
         # File discovery filters to files. Drop that filter and a directory matching
-        # the include pattern is handed to ParseFile, which cannot read it — so one
+        # the include pattern is handed to ParseFile, which cannot read it -- so one
         # legal (if odd) directory name pollutes or breaks a whole scan.
         #
         # -Recurse matters: without it, Get-ChildItem -Include returns nothing at
