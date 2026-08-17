@@ -119,3 +119,55 @@ Describe 'Measure-PSComplexity - script-level code outside any function' {
         ($recs | Where-Object Unit -eq '<script-body>').Cognitive | Should -Be 0
     }
 }
+
+Describe 'Measure-PSComplexity - reporting details that the suite never pinned' {
+
+    It 'reports the script body as starting at line 1' {
+        # The unit table seeds '<script-body>' with its start line. Nothing asserted
+        # the Line column for it, so the seed could be any number and every score
+        # stayed correct while the record pointed at the wrong place.
+        $p = Join-Path $script:work 'body-line.ps1'
+        Set-Content $p "if (`$a) { 1 }" -Encoding utf8
+        (Measure-PSComplexity -Path $p | Where-Object Unit -eq '<script-body>').Line | Should -Be 1
+    }
+
+    It 'counts a ternary as exactly one cyclomatic decision' {
+        # Every branch contributes Amount = 1. A ternary scoring 2 would inflate
+        # every unit using one, and no cyclomatic test used a ternary at all.
+        $p = Join-Path $script:work 'ternary-cyc.ps1'
+        Set-Content $p 'function Get-T { param($x) $x ? 1 : 2 }' -Encoding utf8
+        (Measure-PSComplexity -Path $p | Where-Object Unit -like 'Get-T*').Cyclomatic | Should -Be 2
+    }
+
+    It 'names the FIRST parse error in the skip warning' {
+        # The warning reads $errors[0]. Read as $errors[1] it reports a different
+        # error, or nothing at all when there is only one -- leaving a warning that
+        # says a file was skipped without saying why, which is the only thing that
+        # warning is for.
+        $p = Join-Path $script:work 'one-error.ps1'
+        Set-Content $p 'if ($a) {' -Encoding utf8
+        Measure-PSComplexity -Path $p -WarningVariable w -WarningAction SilentlyContinue | Out-Null
+        ($w -join ' ') | Should -BeLike "*Missing closing '}'*"
+    }
+
+    It 'ignores a DIRECTORY whose name ends in .ps1' {
+        # File discovery filters to files. Drop that filter and a directory matching
+        # the include pattern is handed to ParseFile, which cannot read it — so one
+        # legal (if odd) directory name pollutes or breaks a whole scan.
+        #
+        # -Recurse matters: without it, Get-ChildItem -Include returns nothing at
+        # all for this shape, so the filtered and unfiltered forms agree and the
+        # case proves nothing. The recursive walk is where they diverge.
+        $d = Join-Path $script:work 'weird.ps1'
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+        Set-Content (Join-Path $d 'inner.ps1') 'function Get-Inner { 1 }' -Encoding utf8
+
+        $wv = $null
+        $recs = Measure-PSComplexity -Path $script:work -Recurse -WarningVariable wv -WarningAction SilentlyContinue
+        # The real file inside it is still measured...
+        ($recs | Where-Object Unit -like 'Get-Inner*') | Should -Not -BeNullOrEmpty
+        # ...and the directory itself is never treated as a source file.
+        @($recs | Where-Object File -eq $d).Count | Should -Be 0
+        ($wv -join ' ') | Should -Not -BeLike "*weird.ps1'*"
+    }
+}

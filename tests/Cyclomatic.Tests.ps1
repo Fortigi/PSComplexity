@@ -7,6 +7,11 @@ $script:CyclomaticCases = @(
     @{ name = 'while loop = 2'; expected = 2; code = 'function T { param($n) while ($n -gt 0) { $n-- } }' }
     @{ name = 'if with two -and = 4'; expected = 4; code = 'function T { param($a,$b,$c) if ($a -and $b -and $c) { 1 } }' }
     @{ name = 'foreach + if = 3'; expected = 3; code = 'function T { param($xs) foreach ($x in $xs) { if ($x) { 1 } } }' }
+    # A ternary is one decision, like the if it stands in for. No case here used
+    # one, so its increment could have been any number: a ternary scoring 2 would
+    # inflate every unit that uses one, and PowerShell 7 code uses them freely.
+    @{ name = 'ternary = 2'; expected = 2; code = 'function T { param($x) $x ? 1 : 2 }' }
+    @{ name = 'ternary inside an if = 3'; expected = 3; code = 'function T { param($a,$x) if ($a) { $x ? 1 : 2 } }' }
 )
 
 BeforeAll {
