@@ -5,8 +5,9 @@
 Cyclomatic complexity counts control-flow branches (how many paths to test). **Cognitive
 complexity** — the [SonarSource](https://www.sonarsource.com/docs/CognitiveComplexity.pdf)
 metric — measures how hard code is to *understand*: it rewards flat code and penalises
-nesting. PSComplexity computes both per unit (each function/filter, plus one
-`<script-body>` per file) straight from the PowerShell AST, and ships a CI gate.
+nesting. PSComplexity computes both per unit (each function/filter, each class method,
+constructor and initialised property, plus one `<script-body>` per file) straight from
+the PowerShell AST, and ships a CI gate.
 
 > To our knowledge PSComplexity is the first module on the PowerShell Gallery to offer a
 > faithful cognitive-complexity metric (cyclomatic exists only in the unmaintained
@@ -40,8 +41,15 @@ if (-not (Test-PSComplexity ./src -Recurse -MaxCyclomatic 15 -MaxCognitive 15)) 
 File        Unit                 Line Cyclomatic Cognitive
 ----        ----                 ---- ---------- ---------
 src\Foo.ps1 Get-Foo                12          8         9
+src\Foo.ps1 Order.Process          31          5        10
 src\Foo.ps1 <script-body>          1           1         0
 ```
+
+Class members are reported as `Class.Member`, so two classes with a method of the same
+name — or a class method and a function of that name — stay distinct, in the output and
+in any per-unit baseline built from it. A class property is a unit only when it has an
+initialiser: that is code which runs, and it belongs to the property rather than to the
+enclosing script body.
 
 ## The two metrics
 
