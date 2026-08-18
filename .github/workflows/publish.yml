@@ -51,7 +51,34 @@ jobs:
           $ver = (Import-PowerShellDataFile ./PSComplexity.psd1).ModuleVersion
           if ($tag -ne $ver) { throw "Tag $tag does not match ModuleVersion $ver" }
 
+      # A gallery version cannot be replaced or withdrawn, only unlisted, so a repeat
+      # publish is the one outcome here that can never be undone. It is reachable by an
+      # ordinary route too: publishing by hand (workflow_dispatch with dryRun off) and
+      # then tagging the same commit for traceability. That second step should be a
+      # no-op, not a red run.
+      #
+      # The skip is annotated as a WARNING on purpose. Skipping is right when the
+      # version was published deliberately, but the same path is hit by a mistake --
+      # forgetting to bump ModuleVersion -- where a silently green run would look like
+      # a release that shipped when nothing did. The annotation surfaces it in the run
+      # summary either way.
+      - name: Skip if this version is already published
+        id: exists
+        shell: pwsh
+        run: |
+          $ver = (Import-PowerShellDataFile ./PSComplexity.psd1).ModuleVersion
+          $found = Find-Module PSComplexity -RequiredVersion $ver -ErrorAction SilentlyContinue
+          if ($found) {
+              Write-Host "::warning::PSComplexity $ver is already on the PowerShell Gallery (published $($found.PublishedDate)) - skipping the publish step. If you meant to release new code, bump ModuleVersion."
+              "already=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+          else {
+              Write-Host "PSComplexity $ver is not on the gallery yet."
+              "already=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          }
+
       - name: Publish to PSGallery
+        if: steps.exists.outputs.already != 'true'
         shell: pwsh
         env:
           PSGALLERY_API_KEY: ${{ secrets.PSGALLERY_API_KEY }}
