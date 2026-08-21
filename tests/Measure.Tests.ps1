@@ -31,9 +31,41 @@ Describe 'Measure-PSComplexity' {
         $recs = Measure-PSComplexity -Path $script:work -Recurse
         ($recs | Where-Object Unit -eq 'Get-B') | Should -Not -BeNullOrEmpty
     }
-    It 'does not recurse without -Recurse' {
+    It 'measures a flat directory without -Recurse, and only that directory' {
+        # Two assertions, and the FIRST one is the test. Asserting only that the nested
+        # unit is absent passes just as well when discovery found nothing at all, which
+        # is what it used to do -- so the gate returned $true over breaching code.
         $recs = Measure-PSComplexity -Path $script:work
+        ($recs | Where-Object Unit -eq 'Get-A') | Should -Not -BeNullOrEmpty
         ($recs | Where-Object Unit -eq 'Get-B') | Should -BeNullOrEmpty
+    }
+    It 'gives a directory the same units with and without -Recurse when nothing is nested' {
+        # The flat and recursive forms must agree on a flat folder. They did not: one
+        # measured every file and the other measured none, and nothing compared them.
+        $flatDir = Join-Path $script:work 'flatonly'
+        New-Item -ItemType Directory -Path $flatDir -Force | Out-Null
+        Set-Content (Join-Path $flatDir 'c.ps1') 'function Get-C { if ($z) { 1 } }' -Encoding utf8
+
+        $shallow = @(Measure-PSComplexity -Path $flatDir)
+        $deep    = @(Measure-PSComplexity -Path $flatDir -Recurse)
+        $shallow.Count | Should -BeGreaterThan 0
+        $shallow.Count | Should -Be $deep.Count
+    }
+    It 'measures a directory whose name contains wildcard characters' {
+        # -Path glob-parses '[': a real directory called 'my[1]proj' matched nothing, so
+        # a monorepo folder with a bracket in its name scored a confident, empty zero.
+        $odd = Join-Path $script:work 'my[1]proj'
+        New-Item -ItemType Directory -Path $odd -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $odd 'd.ps1') 'function Get-D { if ($q) { 1 } }' -Encoding utf8
+
+        $recs = @(Measure-PSComplexity -Path $odd -Recurse)
+        ($recs | Where-Object Unit -eq 'Get-D') | Should -Not -BeNullOrEmpty
+    }
+    It 'still accepts a wildcard path that matches nothing literally' {
+        # Resolving an existing path literally must not cost wildcard support: a pattern
+        # names no file on disk, so it has to keep falling through to -Path.
+        $recs = @(Measure-PSComplexity -Path (Join-Path $script:work '*.ps1'))
+        ($recs | Where-Object Unit -eq 'Get-A') | Should -Not -BeNullOrEmpty
     }
     It 'skips an unparseable file with a warning' {
         $recs = Measure-PSComplexity -Path (Join-Path $script:work 'broken.ps1') -WarningAction SilentlyContinue
