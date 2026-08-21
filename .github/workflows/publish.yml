@@ -26,7 +26,7 @@ jobs:
       - name: Install pinned Pester + PSScriptAnalyzer
         shell: pwsh
         run: |
-          Install-Module Pester -RequiredVersion 5.8.0 -Force -Scope CurrentUser
+          Install-Module Pester -RequiredVersion 6.1.0 -Force -Scope CurrentUser
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
 
       - name: Full quality gate (lint + tests + self-complexity)
@@ -38,6 +38,7 @@ jobs:
           }
           if ($f) { $f | Format-Table -AutoSize; throw "$($f.Count) lint finding(s) -- not publishing" }
           Import-Module ./PSComplexity.psd1 -Force
+          Import-Module Pester -RequiredVersion 6.1.0 -Force
           $cfg = New-PesterConfiguration
           $cfg.Run.Path = './tests'; $cfg.Run.PassThru = $true; $cfg.Output.Verbosity = 'Normal'
           $r = Invoke-Pester -Configuration $cfg

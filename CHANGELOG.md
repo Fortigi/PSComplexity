@@ -41,6 +41,15 @@ All notable changes to PSComplexity are documented here. Format follows
   message shown when a file is skipped, and the file-vs-directory filter in source
   discovery are all pinned; each could previously be changed without a test noticing.
 
+### Internal
+- The test estate moves to **Pester 6.1.0**, pinned in `ci.yml` and `publish.yml`, and every
+  step now imports it with `-RequiredVersion` rather than letting the name resolve -- an
+  unimported pin documents an intention, it does not enforce one.
+- `tools/Test-PSCxPesterCompatibility.ps1` proves a **Pester 5** consumer can still gate on
+  this module. The module has no Pester dependency, so the promise is cheap to keep and was
+  previously not checked at all.
+- The mutation-gate step moves from PSMutant 0.1.0 to 0.3.1.
+
 ## [0.2.0] - 2026-08-19
 ### Added
 - PowerShell class members are measured as units, reported as `Class.Member`. See the

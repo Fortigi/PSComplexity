@@ -23,7 +23,7 @@ jobs:
       - name: Install pinned Pester + PSScriptAnalyzer
         shell: pwsh
         run: |
-          Install-Module Pester -RequiredVersion 5.8.0 -Force -Scope CurrentUser
+          Install-Module Pester -RequiredVersion 6.1.0 -Force -Scope CurrentUser
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
 
       - name: Module manifest is valid + imports
@@ -46,6 +46,7 @@ jobs:
       - name: Tests (reference scores + self-complexity gate)
         shell: pwsh
         run: |
+          Import-Module Pester -RequiredVersion 6.1.0 -Force
           Import-Module ./PSComplexity.psd1 -Force
           $cfg = New-PesterConfiguration
           $cfg.Run.Path = './tests'
@@ -60,8 +61,16 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: pwsh
         run: |
-          Install-Module PSMutant -RequiredVersion 0.1.0 -Force -Scope CurrentUser
-          Import-Module PSMutant -Force
+          Install-Module PSMutant -RequiredVersion 0.3.1 -Force -Scope CurrentUser
+          Import-Module Pester -RequiredVersion 6.1.0 -Force
+          Import-Module PSMutant -RequiredVersion 0.3.1 -Force
           $r = Invoke-PSMutation -ConfigFile ./psmutant.self.config.json -SourceRoot . -Quiet
           Write-Host "Self mutation score: $($r.Score)% ($($r.Killed)/$($r.Total))"
           if ($r.ExitCode -ne 0) { throw "Mutation score $($r.Score)% is below the break threshold" }
+
+      # Consumers gate on this module from inside THEIR Pester run, which is not the one
+      # tests/ uses. Proven by running, in a child process, with a control assertion that
+      # separates "this Pester cannot run here" from "this module is broken".
+      - name: Pester compatibility (a Pester 5 consumer)
+        shell: pwsh
+        run: ./tools/Test-PSCxPesterCompatibility.ps1
