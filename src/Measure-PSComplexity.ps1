@@ -114,8 +114,20 @@ function Test-PSComplexity {
         [int]$MaxCognitive = 15,
         [switch]$Recurse
     )
-    $violations = @(Measure-PSComplexity -Path $Path -Recurse:$Recurse |
-        Where-Object { $_.Cyclomatic -gt $MaxCyclomatic -or $_.Cognitive -gt $MaxCognitive })
+    $units = @(Measure-PSComplexity -Path $Path -Recurse:$Recurse)
+
+    # Refuse rather than pass. "No unit breached a ceiling" and "no unit was measured" are
+    # the same $true, so a gate pointed at the wrong place reports clean -- which is the
+    # failure this module exists to find in other people's code.
+    if ($units.Count -eq 0) {
+        $hint = if ($Recurse) { '' } else { ', or add -Recurse if they are in subdirectories' }
+        throw ("Measured no units under: " + ($Path -join ', ') + ". Nothing was checked, so " +
+            "a pass here would describe an empty set. Check the path exists and holds .ps1 " +
+            "or .psm1 files" + $hint + '.')
+    }
+
+    $violations = @($units |
+            Where-Object { $_.Cyclomatic -gt $MaxCyclomatic -or $_.Cognitive -gt $MaxCognitive })
     foreach ($v in $violations) {
         Write-Warning ("{0}:{1} {2} -- cyclomatic {3} (max {4}), cognitive {5} (max {6})" -f `
                 $v.File, $v.Line, $v.Unit, $v.Cyclomatic, $MaxCyclomatic, $v.Cognitive, $MaxCognitive)
