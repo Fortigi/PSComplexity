@@ -8,7 +8,7 @@ This file records **ordering rationale only**. Status lives in the issues. Do no
 progress here: a second status list drifts from the first, which is the exact failure this
 project exists to find in other people's code.
 
-Snapshot 2026-08-21. 33 issues open.
+Snapshot 2026-08-21. 41 issues open.
 
 Completed waves are **removed rather than ticked**. A plan that lists finished work is a worse
 plan, and this file holds no status by design. Removal is the one exception, because it is
@@ -50,6 +50,10 @@ to be decided before any feature is built on it.
 
 #20 metric version ---> #2. A baseline compares two runs; if the metric moved between them,
 #21 exceptions     ---> #2. it re-baselines everything at once, or mutes without an argument
+
+#42 record pinned  ---> #2, #3, #5, #7. Four features widen a five-field object that no test
+#43 stable order   ---> #2, #5.         describes, emitted in hashtable order. Both are free
+                                        now and are breaking changes after the first consumer
 ```
 
 Three things follow that are worth stating out loud:
@@ -77,7 +81,7 @@ recommendation.
 |---|---|---|
 | 1 | **#29**, **#34** | `-Include` without `-Recurse` matches nothing, and `-Path` wildcard-parses a `[` in a directory name. Together: a flat `./src` measures zero files and passes. #34 is the test that asserts only an absence and so certifies the bug -- fix it in the same PR, and run it against the current resolver first to watch it fail. |
 | 2 | **#15** | The verdict side of the same hole: `$true` after measuring zero units. One branch. Do it even if nothing else on this roadmap moves. |
-| 3 | **#13** | The self-mutation gate pins PSMutant 0.1.0, two releases behind the fix for a silent fake 100%. The pin bump is one line; adopting the opt-in operators is real work and belongs in Wave C. |
+| 3 | **#13**, **#46** | The self-mutation gate pins PSMutant 0.1.0, two releases behind the fix for a silent fake 100%. The pin bump is one line; adopting the opt-in operators is real work and belongs in Wave C. #46 is what that half-strength gate is missing: three guard *applications* delete clean with 62/62 green, including the Sonar labelled-jump rule. Covering a predicate is not covering its call. |
 
 ## Wave B -- decide the record shape
 
@@ -87,20 +91,23 @@ major version.
 
 | Order | Issue | Why here |
 |---|---|---|
-| 1 | **#14** | Unit identity is neither unique (two nested `Get-Inner`s collide) nor portable (`File` is absolute and platform-separated, and CI runs two OSes). #2 and #7 both assume otherwise **in their own text**. One function, because `Get-PSCxUnitName` centralises naming. |
-| 2 | **#17**, **#16** | The two missing levels. Take them together: they are the same decision about what a record is, and deciding one without the other produces a shape that has to move again. |
-| 3 | **#20**, **#21** | Metric version and the exception concept. Both are cheap now and expensive after #2 ships a bare snapshot -- a committed baseline with no version re-baselines silently on upgrade, and with no exception concept it is a mute button rather than an agreement. |
+| 1 | **#42**, **#43** | Pin the five-field record and give it a deterministic order, before anything reads it. Neither is work -- one test and one sort -- and both stop being free the moment #2 commits a file or #5 publishes one. Do them first in this wave precisely because they look too small to schedule. |
+| 2 | **#14** | Unit identity is neither unique (two nested `Get-Inner`s collide) nor portable (`File` is absolute and platform-separated, and CI runs two OSes). #2 and #7 both assume otherwise **in their own text**. One function, because `Get-PSCxUnitName` centralises naming. |
+| 3 | **#17**, **#16** | The two missing levels. Take them together: they are the same decision about what a record is, and deciding one without the other produces a shape that has to move again. |
+| 4 | **#20**, **#21** | Metric version and the exception concept. Both are cheap now and expensive after #2 ships a bare snapshot -- a committed baseline with no version re-baselines silently on upgrade, and with no exception concept it is a mute button rather than an agreement. |
 
-**#22 is not a position here.** It is a decision to record, not work: complexity exists per
+**#22 and #47 are not positions here.** Both are decisions to record, not work: complexity exists per
 unit, extraction lowers the score by design, and the README over-claims by calling the number
 a measure of how hard code is to understand. Settle it in whichever PR touches the README --
-before #5 publishes a report shape that implies an answer.
+before #5 publishes a report shape that implies an answer. #47 is the same argument in
+miniature -- a nested named function adds nothing to its parent where the same body as a script
+block adds 3/5 -- and it is the cheaper displacement route, so settle it alongside.
 
 ## Wave C -- make the metric honest
 
 | Order | Issue | Why here |
 |---|---|---|
-| 1 | **#30** | `&&`, `||` and `??` are invisible: a function branching only through them scores 1/0 where the `if` rewrite scores 10/16. A missing map entry, not missing machinery -- but every score for modern PowerShell rises, so it is a major version and wants deciding, not slipping in. |
+| 1 | **#30**, **#41** | `&&`, `||` and `??` are invisible: a function branching only through them scores 1/0 where the `if` rewrite scores 10/16. A missing map entry, not missing machinery -- but every score for modern PowerShell rises, so it is a major version and wants deciding, not slipping in. #41 is the same blindness from the other side -- syntax the walk *sees* and does not read as flow: `$c | Where-Object {...} | ForEach-Object {...}` scores 1/0 where the keyword form scores 3/3, so the gate rewards a style change nobody would call a decomposition. |
 | 2 | **#32**, **#18** | Nothing pins the vocabulary from either side: 5 of 7 cyclomatic and 4 of 8 cognitive types can be deleted with the suite green (#32), and nothing notices when PowerShell adds one (#18). Same test file, opposite directions. |
 | 3 | **#4** | Pin the metric against the SonarSource examples. All eleven reference cases currently pass, including both "classic implementation errors" -- so this is a pinning gap, not a correctness bug, and it is cheaper after #16 makes increments addressable. |
 
@@ -144,6 +151,14 @@ they are cheaper as one or two PRs than as nine.
 - **#28** -- five documentation claims the code does not support, including two proven false
   by running: load order is inert (all 24 permutations give one hash), and `.GetNewClosure()`
   on the per-type loops is not required. Do it as one pass, and test the two testable ones.
+- **#44** -- three of four `src/` files open with a `<# #>` block, which PowerShell serves as
+  the first function's `Get-Help` instead of the help written for users; and the shipped help
+  is stale for 0.2.0. Invisible from inside the repo -- README, CLAUDE.md and the help text are
+  all correct, and only the resolution is wrong. The sibling project asserts against this.
+- **#45**, **#48** -- overlapping input paths emit duplicate rows, enum members with
+  initialisers are reported as units, `OutputType` array forms are never satisfied, and
+  `Test-PSComplexity -Path` does not bind from the pipeline. The last one is the only one with
+  teeth, and only via #15: a pipeline that binds nothing measures nothing and currently passes.
 - **#10** -- move to Pester 6.1.0. Independent of everything above.
 
 ---
