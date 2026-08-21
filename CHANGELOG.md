@@ -16,6 +16,10 @@ All notable changes to PSComplexity are documented here. Format follows
   character class, so a real directory named `my[1]proj` scored a confident, empty zero. An
   existing path is now resolved literally; a path that names nothing on disk still falls
   through to wildcard matching, so patterns like `./src/*.ps1` keep working.
+- **`Test-PSComplexity` returned `$true` after measuring nothing.** A gate pointed at a path
+  with no PowerShell under it gave the same answer as a gate over code that was entirely
+  within its ceilings, and nothing distinguished the two. It now throws, naming the path,
+  and suggests `-Recurse` only when `-Recurse` was not given.
 - The test that pinned non-recursive scanning asserted only that the nested unit was
   absent, which is equally true when discovery finds nothing -- so it certified the bug
   instead of catching it. It now asserts the flat unit is present in the same call.

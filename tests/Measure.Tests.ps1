@@ -91,6 +91,45 @@ Describe 'Test-PSComplexity' {
         # Get-B has cognitive 3 (foreach + nested if); ceiling 2 should trip it.
         Test-PSComplexity -Path $script:work -Recurse -MaxCognitive 2 -WarningAction SilentlyContinue | Should -BeFalse
     }
+    It 'throws rather than passing when it measured nothing' {
+        # A directory with no PowerShell in it. Returning $true here is the same answer
+        # the gate gives for code that is entirely within its ceilings, so a gate aimed
+        # at the wrong path reported clean and nothing distinguished the two.
+        $empty = Join-Path $script:work 'nosource'
+        New-Item -ItemType Directory -Path $empty -Force | Out-Null
+        Set-Content (Join-Path $empty 'notes.txt') 'not powershell' -Encoding utf8
+
+        { Test-PSComplexity -Path $empty -Recurse } | Should -Throw -ExpectedMessage '*Measured no units*'
+    }
+    It 'names the path it measured nothing under' {
+        # The message has to say WHERE. A gate that fails without naming the path sends
+        # the reader to the ceilings, which are not the problem.
+        $empty = Join-Path $script:work 'nosource2'
+        New-Item -ItemType Directory -Path $empty -Force | Out-Null
+
+        { Test-PSComplexity -Path $empty -Recurse } |
+            Should -Throw -ExpectedMessage "*$([System.IO.Path]::GetFileName($empty))*"
+    }
+    It 'suggests -Recurse only when -Recurse was not given' {
+        # Two calls, because a hint that always appears is not a hint. Suggesting
+        # -Recurse to someone who passed it sends them to look at the wrong thing.
+        $empty = Join-Path $script:work 'nosource3'
+        New-Item -ItemType Directory -Path $empty -Force | Out-Null
+
+        # Inspect the message rather than using -Not -Throw: both calls throw, and the
+        # claim is about what the message says, not about whether one was raised.
+        $withRecurse = $null
+        try { Test-PSComplexity -Path $empty -Recurse } catch { $withRecurse = $_.Exception.Message }
+
+        { Test-PSComplexity -Path $empty } | Should -Throw -ExpectedMessage '*-Recurse*'
+        $withRecurse | Should -Not -BeNullOrEmpty
+        $withRecurse | Should -Not -BeLike '*-Recurse*'
+    }
+    It 'still passes over a real file that is within the ceilings' {
+        # Paired with the refusal above: the empty case must fail and a measured, clean
+        # case must still succeed, or "throws on empty" is satisfied by throwing always.
+        Test-PSComplexity -Path (Join-Path $script:work 'a.ps1') | Should -BeTrue
+    }
 }
 
 # -----------------------------------------------------------------------------
