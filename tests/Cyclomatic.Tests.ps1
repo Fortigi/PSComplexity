@@ -28,6 +28,6 @@ BeforeAll {
 
 Describe 'Cyclomatic complexity - reference scores' {
     It 'cyclomatic of <name>' -ForEach $script:CyclomaticCases {
-        Get-CyclomaticOf -Code $code | Should -Be $expected
+        Get-CyclomaticOf -Code $code | Should-Be $expected
     }
 }

@@ -54,6 +54,9 @@ jobs:
           $cfg = New-PesterConfiguration
           $cfg.Run.Path = './tests'
           $cfg.Run.PassThru = $true
+          # The classic `Should -Be` form is an ERROR, not a style note. Pester 6 keeps it
+          # working, so without this the suite drifts back into a mix one test at a time.
+          $cfg.Should.DisableV5 = $true
           $cfg.Output.Verbosity = 'Detailed'
           $r = Invoke-Pester -Configuration $cfg
           if ($r.FailedCount -gt 0) { throw "$($r.FailedCount) test(s) failed" }

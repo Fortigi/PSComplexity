@@ -49,6 +49,11 @@ All notable changes to PSComplexity are documented here. Format follows
   this module. The module has no Pester dependency, so the promise is cheap to keep and was
   previously not checked at all.
 - The mutation-gate step moves from PSMutant 0.1.0 to 0.3.1.
+- The suite is fully on the Pester 6 `Should-*` assertions, and `Should.DisableV5 = $true` is
+  set in both workflows so the classic `Should -Be` form is an **error** rather than a style
+  note. Verified that the setting actually fires, in both directions.
+- The fixture inside `tools/Test-PSCxPesterCompatibility.ps1` deliberately keeps the classic
+  syntax: it executes under Pester 5, where the `Should-*` commands do not exist.
 
 ## [0.2.0] - 2026-08-19
 ### Added
