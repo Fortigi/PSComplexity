@@ -77,6 +77,15 @@ function Invoke-PSCxCompatSuite {
 }
 
 if ($Child) {
+    # ABSENT is a third answer, distinct from "broken here" and "the module is wrong". The
+    # import failure alone says "no valid module file was found", and the caller then
+    # reported that PSComplexity does not work under this Pester -- blaming the module for
+    # a version nobody installed.
+    if (-not (Get-Module Pester -ListAvailable | Where-Object { $_.Version -eq [version]$PesterVersion })) {
+        Write-Output "MISSING: Pester $PesterVersion is not installed on this machine."
+        Write-Output 'The gate proves nothing without it. Install it, or pass -PesterVersion.'
+        exit 3
+    }
     Import-Module Pester -RequiredVersion $PesterVersion -Force
     Import-Module (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'PSComplexity.psd1') -Force
 
@@ -103,6 +112,7 @@ try {
         -PesterVersion $PesterVersion -FixtureRoot $root -Child
     $code = $LASTEXITCODE
 
+    if ($code -eq 3) { throw "Pester $PesterVersion is not installed; the gate could not run." }
     if ($code -eq 2) { throw "Pester $PesterVersion is unusable on this PowerShell; the gate could not run." }
     if ($code -ne 0) { throw "PSComplexity does not work correctly under Pester $PesterVersion." }
     Write-Output 'Pester compatibility gate passed.'

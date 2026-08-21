@@ -24,6 +24,9 @@ jobs:
         shell: pwsh
         run: |
           Install-Module Pester -RequiredVersion 6.1.0 -Force -Scope CurrentUser
+          # The OLD Pester the compatibility gate proves consumers against. It must match the
+          # -PesterVersion passed below; both belong in a shared pins file (#26).
+          Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
 
       - name: Module manifest is valid + imports
@@ -73,4 +76,4 @@ jobs:
       # separates "this Pester cannot run here" from "this module is broken".
       - name: Pester compatibility (a Pester 5 consumer)
         shell: pwsh
-        run: ./tools/Test-PSCxPesterCompatibility.ps1
+        run: ./tools/Test-PSCxPesterCompatibility.ps1 -PesterVersion 5.7.1
