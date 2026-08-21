@@ -9,8 +9,19 @@ function Get-PSCxSourceFile {
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string]$Path, [switch]$Recurse)
     if (Test-Path -LiteralPath $Path -PathType Leaf) { return [string[]]@((Resolve-Path -LiteralPath $Path).Path) }
-    $gci = @{ Path = $Path; Include = @('*.ps1', '*.psm1'); File = $true; Recurse = [bool]$Recurse }
-    return [string[]]@(Get-ChildItem @gci | ForEach-Object { $_.FullName })
+
+    # Take an existing path literally, and as a wildcard only when nothing is there. -Path
+    # glob-parses '[', so a real directory named 'my[1]proj' matches nothing and the scan
+    # reports a clean zero over code it never opened.
+    $gci = @{ File = $true; Recurse = [bool]$Recurse }
+    if (Test-Path -LiteralPath $Path) { $gci.LiteralPath = $Path } else { $gci.Path = $Path }
+
+    # Filter on the extension rather than with -Include, which a directory ignores unless
+    # -Recurse is also present: a flat folder would resolve to zero files and every number
+    # after it would describe the empty set.
+    return [string[]]@(Get-ChildItem @gci |
+            Where-Object { $_.Extension -in '.ps1', '.psm1' } |
+            ForEach-Object { $_.FullName })
 }
 
 function Measure-PSComplexity {
