@@ -98,3 +98,97 @@ Two subtleties worth knowing before touching `Ast.ps1`:
   examples (prime sieve = 7, plain switch = 1, recursive fibonacci = 3,
   `if (a -and b -or c)` = 3). If a change moves one of those, the change is wrong until
   proven otherwise.
+
+---
+
+## Practices to preserve
+
+Habits this repo already has. They are written down because they are cheap to lose in a hurry
+and expensive to rebuild, and because each one has already earned its keep.
+
+- **The reference scores are the contract, not examples.** `tests/Cognitive.Tests.ps1` pins the
+  SonarSource cases -- prime sieve 7, plain switch 1, recursive fibonacci 3,
+  `if (a -and b -or c)` 3. If a change moves one of those, the change is wrong until proven
+  otherwise. All eleven reference cases currently pass, including both of the ones the
+  specification calls the classic implementation error, so the metric is faithful today; what
+  is missing is only that nothing stops it drifting.
+
+- **A test has to live in the file the mutation config maps to.** `psmutant.self.config.json`
+  maps each source file to specific test files. A test in the wrong file covers the code and
+  **cannot kill its mutants** -- that has already happened here once, with a ternary case that
+  landed in `Measure.Tests.ps1` and left a mutant alive. Check the mapping before choosing
+  where a test goes.
+
+- **`Test-PSComplexity` is a thin predicate over `Measure-PSComplexity`, and should stay one.**
+  It duplicates no measurement and re-parses nothing. The temptation is to make it return
+  violation objects instead of a bool; resist it. Nothing in the backlog routes through it --
+  the queued features all build over `Measure-PSComplexity`'s records. What is missing is a
+  scan noun, not a richer verdict.
+
+- **`Ast.ps1` is a layer, not a shared-helpers bucket.** Every function in it answers one
+  question: what the parent chain looks like relative to a unit boundary. That is why
+  `Get-PSCxNesting` belongs there even though only `Cognitive.ps1` calls it -- placement
+  follows what a function consults, not who calls it.
+
+- **Nothing in `src/` swallows an error.** There is no `try`, and no
+  `-ErrorAction SilentlyContinue`. Keep it that way: the failure this project exists to catch
+  is a number that was never measured being reported as a number that was, and a swallowed
+  error is how that happens.
+
+- **`.GetNewClosure()` on a predicate that reads a `$script:` variable breaks it silently.**
+  A closure built inside a function loses module scope and the variable comes back empty --
+  verified: adding it to `$isBodyOwner` in `Get-PSCxUnitTable` makes every function and method
+  vanish, the gate returns `True`, and **no error is raised**. The suite does catch it.
+
+  *The other half of what this file used to say is not true.* The per-type loops in
+  `Cyclomatic.ps1` and `Cognitive.ps1` were documented as requiring their closure. Stripping it
+  from both gives byte-identical output over 164 units and a green suite under two Pester
+  versions. That negative was itself checked for vacuity -- renaming the loop variable so `$tn`
+  is genuinely unresolvable collapses the score and breaks ten tests -- so the fixture does
+  discriminate and the result means what it says.
+
+## Practices to adopt
+
+Gaps, stated as rules rather than as a backlog. Each points at its issue, and moves up to the
+list above in the PR that closes it.
+
+- **Discovery must be proven, not assumed** (#29, #34). `-Include` without `-Recurse` matches
+  nothing, and `-Path` wildcard-parses a `[` in a directory name -- so a flat `./src` can
+  measure zero files and report success. The test that should have caught it asserts only an
+  absence and passes vacuously. When a test pins "X is excluded", it must also assert that
+  something else was **included** in the same call, or it certifies whatever the code happens
+  to do.
+
+- **A gate must refuse to measure nothing** (#15). "No unit exceeded a ceiling" and "no unit
+  existed" must never produce the same answer. `tests/SelfComplexity.Tests.ps1` already guards
+  this before calling the gate, which is the tell: the check exists, in the test, rather than
+  in the command every consumer calls.
+
+- **A number that anyone persists needs a version** (#20). Scores already moved once under a
+  minor bump with nothing recording it. A committed baseline compares two runs, so an
+  unversioned metric re-baselines everything at once on upgrade -- silently.
+
+- **An identity has to survive a commit and a machine** (#14). `Unit` is stable and not unique;
+  `Unit` + `Line` is unique and moves whenever anything above it is edited; `File` is absolute
+  and platform-separated while CI runs two OSes. Any feature that persists or compares records
+  needs an identity with neither property.
+
+- **The construct vocabulary must be pinned from both directions** (#32, #18). Nothing notices
+  when PowerShell gains syntax the metric cannot see, and 5 of 7 cyclomatic types and 4 of 8
+  cognitive types can be **deleted** with the suite still green. An unrecognised construct can
+  only lower a score, so the gate passes most easily on the code it understands least.
+
+- **Every gate is a committed script, not a snippet in a document** (#27). Coverage is claimed
+  at 100% in this file and measured by nobody -- the recipe lives in prose, so measuring by
+  hand and measuring in CI cannot even be compared. Hand-maintained figures in this repo have
+  already drifted.
+
+- **One analyzer invocation, called by both gates** (#19). The failing lint gate filters to
+  Error and Warning over four paths; the required code-scanning check has no filter and scans
+  everything. A finding in the gap is invisible to the gate that fails and visible to the one
+  that blocks.
+
+- **Anything the module says about itself is a claim someone should be able to check** (#28).
+  Five statements in the docs are not true of the code, two of them provably: load order is
+  inert, and the closure requirement above. Prefer a test to a sentence wherever one is
+  possible.
