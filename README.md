@@ -10,9 +10,10 @@ constructor and initialised property, plus one `<script-body>` per file) straigh
 the PowerShell AST, and ships a CI gate.
 
 > To our knowledge PSComplexity is the first module on the PowerShell Gallery to offer a
-> faithful cognitive-complexity metric (cyclomatic exists only in the unmaintained
-> PSCodeHealth). The cognitive scores are validated against the SonarSource reference
-> examples — see `tests/Cognitive.Tests.ps1`.
+> cognitive-complexity metric at all (cyclomatic exists only in the unmaintained
+> PSCodeHealth). It **implements the SonarSource metric in full, and extends it for
+> PowerShell constructs the specification does not cover** — every reference example scores
+> exactly as published, see `tests/Cognitive.Tests.ps1`. The extensions are listed below.
 
 ## Install
 
@@ -56,7 +57,7 @@ enclosing script body.
 **Cyclomatic** = 1 + decision points (each `if`/`elseif`/`switch` clause, each
 `for`/`foreach`/`while`/`do` loop, each `catch`/`trap`, each ternary, each `-and`/`-or`).
 
-**Cognitive** (SonarSource, faithful):
+**Cognitive** (the SonarSource rules; the PowerShell extensions follow):
 
 | Rule | Effect |
 |---|---|
@@ -99,6 +100,26 @@ Linux** in the required CI job and block the merge.
 - Cognitive complexity is computed via ancestor-based nesting analysis; it reproduces the
   SonarSource reference scores. Mutual (indirect) recursion is not counted — only direct
   self-recursion, matching the common implementation.
+
+### PowerShell-specific increments
+
+The SonarSource specification predates these constructs or was written for languages that
+lack them, so it says nothing about how to score them. Each is scored by the rule it most
+resembles, and the choice is stated here rather than left to be discovered from a number:
+
+| Construct | Scored as | Why |
+|---|---|---|
+| `ForEach-Object`, `%` | a loop | It is PowerShell's second loop. A body written with it branches exactly as much as the `foreach` form, and scoring it lower rewarded a rewrite that changes nothing a reader would call a decomposition. |
+| `Where-Object`, `?` | a conditional | Same argument: it is a filter, and a filter is a branch. |
+| `&&`, `\|\|` | a boolean run | They are control flow between pipelines, not boolean operators — but a *run* of them costs 1, exactly as `-and`/`-or` does, so the shell idiom is never dearer than the expression it mirrors. |
+| `??`, `??=` | a ternary | A choice between two values on a null test, which is what the ternary rule already covers. |
+
+`foreach` and `where` are recognised as **aliases** of the two cmdlets. The keyword forms
+parse to different AST nodes entirely, so there is no ambiguity.
+
+If you need the specification's numbers exactly and nothing more, pin `0.2.0`; every score
+here is greater than or equal to the one it produced.
+
 
 ## License
 

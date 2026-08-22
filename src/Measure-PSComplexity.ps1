@@ -32,8 +32,11 @@ function Measure-PSComplexity {
 
     .DESCRIPTION
         Parses each .ps1/.psm1 file with the PowerShell AST and reports both metrics.
-        Cognitive complexity is a faithful port of the SonarSource metric (nesting-aware);
-        cyclomatic is the classic decision-point count. Files that fail to parse are
+        Cognitive complexity implements the SonarSource metric in full (nesting-aware) and
+        extends it for PowerShell constructs the specification does not cover:
+        ForEach-Object and Where-Object score as the loop and conditional they stand in for,
+        && and || as a boolean run, ?? and ??= as a ternary. Cyclomatic is the classic
+        decision-point count, over the same set of constructs. Files that fail to parse are
         skipped with a warning.
 
     .PARAMETER Path

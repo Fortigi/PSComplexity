@@ -36,7 +36,20 @@ function Get-Fib { param($n) if ($n -le 1) { return $n }; return (Get-Fib ($n - 
     @{ name = 'labelled break'; expected = 4; code = 'function T { param($n) :L for ($i = 0; $i -lt $n; $i++) { if ($i -eq 3) { break L } } }' }
     @{ name = 'do-until loop'; expected = 1; code = 'function T { param($n) $i = 0; do { $i++ } until ($i -ge $n) }' }
     @{ name = 'nested ternary'; expected = 3; code = 'function T { param($x, $y) $x ? ($y ? 1 : 2) : 3 }' }
-    @{ name = 'lambda raises nesting (if inside ForEach-Object)'; expected = 2; code = 'function T { param($items) $items | ForEach-Object { if ($_) { 1 } } }' }
+    # 3, not 2: ForEach-Object is itself an increment now, on top of the nesting its block
+    # already gave the if. The keyword form below must score the SAME, which is the whole
+    # claim -- and is why the two are listed together rather than apart.
+    @{ name = 'if inside ForEach-Object'; expected = 3; code = 'function T { param($items) $items | ForEach-Object { if ($_) { 1 } } }' }
+    @{ name = 'if inside foreach keyword scores identically'; expected = 3; code = 'function T { param($items) foreach ($i in $items) { if ($i) { 1 } } }' }
+    @{ name = 'Where-Object is a conditional'; expected = 1; code = 'function T { param($items) $items | Where-Object { $_ -gt 0 } }' }
+    @{ name = '&& is one run, like -and'; expected = 1; code = 'function T { a && b && c }' }
+    @{ name = '&& then || is two runs'; expected = 2; code = 'function T { a && b || c }' }
+    @{ name = 'null-coalescing is a conditional'; expected = 1; code = 'function T { param($a, $b) $x = $a ?? $b }' }
+    @{ name = 'null-coalescing ASSIGNMENT is a conditional too'; expected = 1; code = 'function T { param($a) $a ??= 1 }' }
+    # A command invoked through a variable has no name a static walk can read. The flow-command
+    # test must answer "no" rather than dereference it -- paired with the ForEach-Object cases
+    # above, which are the "yes" side of the same predicate.
+    @{ name = 'a command with no readable name is not flow'; expected = 0; code = 'function T { param($cmd) & $cmd arg }' }
     @{ name = 'flat function scores 0'; expected = 0; code = 'function T { param($x) $y = $x + 1; return $y }' }
 )
 

@@ -66,6 +66,53 @@ function Get-PSCxCogTernaryRow {
     }
 }
 
+function Get-PSCxCogFlowCommandRow {
+    # ForEach-Object / Where-Object: one increment + nesting, exactly as the keyword loop
+    # and conditional get. Their script block is a ScriptBlockExpressionAst, which already
+    # raises nesting for anything inside, so a body written this way now costs the same as
+    # the keyword form rather than less.
+    [OutputType([pscustomobject[]])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Ast)
+    foreach ($n in $Ast.FindAll({ param($x) Test-PSCxFlowCommand -Node $x }, $true)) {
+        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 + (Get-PSCxNesting -Node $n) }
+    }
+}
+
+function Get-PSCxCogNullCoalesceRow {
+    # ?? and ??= choose between two values on a null test, so they are scored as the
+    # conditional shorthand they are -- the same treatment the ternary already gets.
+    [OutputType([pscustomobject[]])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Ast)
+    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.BinaryExpressionAst] }, $true)) {
+        if ($n.Operator -eq 'QuestionQuestion') {
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 + (Get-PSCxNesting -Node $n) }
+        }
+    }
+    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+        if ($n.Operator -eq 'QuestionQuestionEquals') {
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 + (Get-PSCxNesting -Node $n) }
+        }
+    }
+}
+
+function Get-PSCxCogPipelineChainRow {
+    # && and || follow the BOOLEAN-RUN rule rather than the structural one: a run of like
+    # operators is one increment, so `a && b && c` costs the same as `$a -and $b -and $c`.
+    # Scoring each link separately would make the shell idiom dearer than the expression it
+    # mirrors, which is the inverse of the bug this exists to fix.
+    [OutputType([pscustomobject[]])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Ast)
+    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.PipelineChainAst] }, $true)) {
+        if ($n.Parent -isnot [System.Management.Automation.Language.PipelineChainAst] -or
+            $n.Parent.Operator -ne $n.Operator) {
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 }
+        }
+    }
+}
+
 function Get-PSCxCogBooleanRow {
     # +1 per maximal run of a logical operator; no nesting bonus.
     [OutputType([pscustomobject[]])]
@@ -135,6 +182,8 @@ function Get-PSCxCognitiveMap {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     $rows = @(Get-PSCxCogIfRow -Ast $Ast) + @(Get-PSCxCogBlockRow -Ast $Ast) + @(Get-PSCxCogTernaryRow -Ast $Ast) +
+        @(Get-PSCxCogFlowCommandRow -Ast $Ast) + @(Get-PSCxCogNullCoalesceRow -Ast $Ast) +
+        @(Get-PSCxCogPipelineChainRow -Ast $Ast) +
             @(Get-PSCxCogBooleanRow -Ast $Ast) + @(Get-PSCxCogJumpRow -Ast $Ast) + @(Get-PSCxCogRecursionRow -Ast $Ast) +
             @(Get-PSCxCogMethodRecursionRow -Ast $Ast)
     $map = @{}

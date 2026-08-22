@@ -1,8 +1,11 @@
 # PSComplexity — AI Assistant Development Guide
 
 Cyclomatic and cognitive complexity for PowerShell, computed from the AST. Cognitive
-complexity is a faithful port of the SonarSource metric, validated against its reference
-examples. Ships `Measure-PSComplexity` (data) and `Test-PSComplexity` (CI gate).
+complexity **implements the SonarSource metric in full, and extends it for PowerShell
+constructs the specification does not cover** -- `ForEach-Object`, `Where-Object`, `&&`,
+`||`, `??` -- each scored by the rule it most resembles. Every reference example still scores
+exactly as published. This used to say "a faithful port"; that was accurate before the
+extensions and is not now, and the README lists them. Ships `Measure-PSComplexity` (data) and `Test-PSComplexity` (CI gate).
 Published to the PowerShell Gallery.
 
 ---
@@ -111,8 +114,13 @@ and expensive to rebuild, and because each one has already earned its keep.
   SonarSource cases -- prime sieve 7, plain switch 1, recursive fibonacci 3,
   `if (a -and b -or c)` 3. If a change moves one of those, the change is wrong until proven
   otherwise. All eleven reference cases currently pass, including both of the ones the
-  specification calls the classic implementation error, so the metric is faithful today; what
-  is missing is only that nothing stops it drifting.
+  specification calls the classic implementation error.
+
+  That is a claim about the SPECIFICATION's cases only. The metric also increments for
+  constructs the specification does not cover -- `ForEach-Object`, `Where-Object`, `&&`,
+  `||`, `??` -- which are listed in the README with the rule each is scored by. Those cases
+  are pinned in the same file and are equally contractual; the difference is that moving one
+  of them is a decision about PowerShell, while moving a reference case is a bug.
 
 - **A test has to live in the file the mutation config maps to.** `psmutant.self.config.json`
   maps each source file to specific test files. A test in the wrong file covers the code and
