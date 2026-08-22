@@ -59,6 +59,7 @@ function Resolve-PSCxUnitBoundary {
     # FunctionMemberAst. Both are body owners, so without this the same method is
     # discovered twice -- once unqualified. The MEMBER is the unit: it is the node
     # that knows the class name.
+    [OutputType([System.Management.Automation.Language.Ast])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Boundary)
     if ($Boundary -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -70,6 +71,7 @@ function Resolve-PSCxUnitBoundary {
 
 function Get-PSCxUnitBoundary {
     # Nearest enclosing body-owner, or $null for top-level code.
+    [OutputType([System.Management.Automation.Language.Ast])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Node)
     $p = $Node.Parent
@@ -170,6 +172,7 @@ function Get-PSCxEnclosingMethod {
     # Nearest enclosing class method/constructor, else $null. Method recursion goes
     # through a member invocation ($this.X()), not a command, so it needs the AST
     # node -- the class name on it is what tells a static self-call apart.
+    [OutputType([System.Management.Automation.Language.Ast])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Node)
     $boundary = Get-PSCxUnitBoundary -Node $Node

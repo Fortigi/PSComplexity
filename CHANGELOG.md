@@ -37,6 +37,12 @@ A run that starts failing after this upgrade is the honest one.
   numbers and nothing more, pin `0.2.0`; every score here is greater than or equal to it.
 
 ### Fixed
+- **`Test-PSComplexity` accepts paths from the pipeline**, and judges all of them.
+  `Get-ChildItem ./modules | Test-PSComplexity` previously bound nothing at all; the command
+  now collects every piped path and gates them together.
+- **`OutputType` declares what a caller receives.** The streaming collectors claimed
+  `[pscustomobject[]]` -- a single return value that is a collection -- where they emit
+  records one at a time, and three `Ast.ps1` functions declared nothing.
 - **A file that does not parse no longer passes the gate silently.** `Test-PSComplexity`
   now refuses to give a verdict when any file failed to parse: "no unit exceeded a ceiling"
   is trivially true of a file that produced no units, so a genuinely broken file used to

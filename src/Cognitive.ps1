@@ -36,7 +36,7 @@ function Test-PSCxLogicalRunStart {
 
 function Get-PSCxCogIfRow {
     # if leading clause: 1 + nesting; each else-if and the else: +1 (no nesting bonus).
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.IfStatementAst] }, $true)) {
@@ -47,7 +47,7 @@ function Get-PSCxCogIfRow {
 
 function Get-PSCxCogBlockRow {
     # switch / loops / catch / trap: one increment + nesting (switch is not per-case).
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($tn in 'SwitchStatementAst', 'ForEachStatementAst', 'ForStatementAst', 'WhileStatementAst', 'DoWhileStatementAst', 'DoUntilStatementAst', 'CatchClauseAst', 'TrapStatementAst') {
@@ -58,7 +58,7 @@ function Get-PSCxCogBlockRow {
 }
 
 function Get-PSCxCogTernaryRow {
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.TernaryExpressionAst] }, $true)) {
@@ -71,7 +71,7 @@ function Get-PSCxCogFlowCommandRow {
     # and conditional get. Their script block is a ScriptBlockExpressionAst, which already
     # raises nesting for anything inside, so a body written this way now costs the same as
     # the keyword form rather than less.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) Test-PSCxFlowCommand -Node $x }, $true)) {
@@ -82,7 +82,7 @@ function Get-PSCxCogFlowCommandRow {
 function Get-PSCxCogNullCoalesceRow {
     # ?? and ??= choose between two values on a null test, so they are scored as the
     # conditional shorthand they are -- the same treatment the ternary already gets.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.BinaryExpressionAst] }, $true)) {
@@ -102,7 +102,7 @@ function Get-PSCxCogPipelineChainRow {
     # operators is one increment, so `a && b && c` costs the same as `$a -and $b -and $c`.
     # Scoring each link separately would make the shell idiom dearer than the expression it
     # mirrors, which is the inverse of the bug this exists to fix.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.PipelineChainAst] }, $true)) {
@@ -115,7 +115,7 @@ function Get-PSCxCogPipelineChainRow {
 
 function Get-PSCxCogBooleanRow {
     # +1 per maximal run of a logical operator; no nesting bonus.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.BinaryExpressionAst] }, $true)) {
@@ -125,7 +125,7 @@ function Get-PSCxCogBooleanRow {
 
 function Get-PSCxCogJumpRow {
     # labelled break / continue: +1.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     $isJump = { param($x) $x -is [System.Management.Automation.Language.BreakStatementAst] -or $x -is [System.Management.Automation.Language.ContinueStatementAst] }
@@ -136,7 +136,7 @@ function Get-PSCxCogJumpRow {
 
 function Get-PSCxCogRecursionRow {
     # direct recursion: +1 per call to the enclosing function.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.CommandAst] }, $true)) {
@@ -163,7 +163,7 @@ function Test-PSCxSelfInvocation {
 function Get-PSCxCogMethodRecursionRow {
     # direct recursion inside a class method: +1, same as the function case. A method
     # cannot recurse by bare command name, so Get-PSCxCogRecursionRow never sees it.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true)) {

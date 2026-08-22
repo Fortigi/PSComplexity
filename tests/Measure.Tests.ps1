@@ -23,6 +23,18 @@ AfterAll {
     Remove-Item $script:broken -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+Describe 'the declared output types' {
+    It 'declares what a caller actually receives, not an array of it' {
+        # These commands STREAM individual records. [pscustomobject[]] claimed a single
+        # return value that is a collection, which neither ever produces -- and OutputType
+        # is what Get-Help and IntelliSense show, so it is documentation that no test could
+        # previously contradict.
+        ((Get-Command Measure-PSComplexity).OutputType.Name -join ',') |
+            Should-Be 'System.Management.Automation.PSObject'
+        ((Get-Command Test-PSComplexity).OutputType.Name -join ',') | Should-Be 'System.Boolean'
+    }
+}
+
 Describe 'Measure-PSComplexity' {
     It 'reports a record per unit including the script body' {
         $recs = Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1')
@@ -179,6 +191,37 @@ enum Colour {
 }
 
 Describe 'Test-PSComplexity' {
+    It 'judges EVERY path piped to it, not just the last' {
+        # The discriminating case, and the reason this is not a one-word fix. Adding
+        # ValueFromPipeline to a function whose body is a bare block gives it an `end` block
+        # only: it runs once, with $Path holding the LAST item, and the gate then returns a
+        # confident verdict about one path while silently ignoring the rest.
+        #
+        # The breaching file is piped FIRST and the clean one second, so a gate that kept
+        # only the last item would answer $true.
+        $big = Join-Path $script:work 'piped-big.ps1'
+        $small = Join-Path $script:work 'piped-small.ps1'
+        Set-Content $big 'function PipedBig { if ($a) { if ($b) { if ($c) { 1 } } } }' -Encoding utf8
+        Set-Content $small 'function PipedSmall { 1 }' -Encoding utf8
+
+        (@($big, $small) | Test-PSComplexity -MaxCognitive 1 -WarningAction SilentlyContinue) |
+            Should-BeFalse
+    }
+
+    It 'accepts a single path from the pipeline' {
+        $small = Join-Path $script:work 'piped-only.ps1'
+        Set-Content $small 'function PipedOnly { 1 }' -Encoding utf8
+        ($small | Test-PSComplexity) | Should-BeTrue
+    }
+
+    It 'still accepts paths as an argument' {
+        # Paired with the pipeline cases: restructuring into begin/process/end must not cost
+        # the ordinary call, which is how every consumer uses it today.
+        $small = Join-Path $script:work 'piped-only.ps1'
+        Set-Content $small 'function PipedOnly { 1 }' -Encoding utf8
+        Test-PSComplexity -Path $small | Should-BeTrue
+    }
+
     It 'returns $true when everything is within the ceilings' {
         Test-PSComplexity -Path (Join-Path $script:work 'a.ps1') | Should-BeTrue
     }
