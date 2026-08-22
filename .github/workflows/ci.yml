@@ -36,6 +36,10 @@ jobs:
           Import-Module ./PSComplexity.psd1 -Force
           Get-Command Measure-PSComplexity, Test-PSComplexity -ErrorAction Stop | Out-Null
 
+      - name: Release consistency (ModuleVersion, CHANGELOG, ReleaseNotes)
+        shell: pwsh
+        run: ./tools/Test-PSCxRelease.ps1
+
       - name: Lint (PSScriptAnalyzer)
         shell: pwsh
         run: |
