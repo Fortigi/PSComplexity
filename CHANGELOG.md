@@ -93,6 +93,10 @@ A run that starts failing after this upgrade is the honest one.
   discovery are all pinned; each could previously be changed without a test noticing.
 
 ### Internal
+- **Every gate that judges a test run now checks that each test file actually ran.** A file
+  with a parse error contributes zero tests and zero failures, so a run reported
+  "passed / 0 failed" while an entire file never executed -- and each gate asked only about
+  the failure count.
 - The test estate moves to **Pester 6.1.0**, pinned in `ci.yml` and `publish.yml`, and every
   step now imports it with `-RequiredVersion` rather than letting the name resolve -- an
   unimported pin documents an intention, it does not enforce one.

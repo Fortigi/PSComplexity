@@ -36,9 +36,11 @@ $cfg.CodeCoverage.Path = (Get-ChildItem (Join-Path $root 'src') -Filter *.ps1).F
 $cfg.CodeCoverage.OutputPath = Join-Path ([System.IO.Path]::GetTempPath()) "pscx-coverage-$PID.xml"
 
 $result = Invoke-Pester -Configuration $cfg
-if ($result.FailedCount -gt 0) {
-    throw "$($result.FailedCount) test(s) failed; coverage over a red suite means nothing."
-}
+. (Join-Path $PSScriptRoot 'ReleaseDecisions.ps1')
+$fault = Get-PSCxTestRunFault -FailedCount $result.FailedCount `
+    -ContainerResult @($result.Containers | ForEach-Object { [string]$_.Result }) `
+    -ContainerName @($result.Containers | ForEach-Object { Split-Path $_.Item -Leaf })
+if ($fault) { throw "$fault Coverage over a suite that did not fully run means nothing." }
 
 $covered = $result.CodeCoverage.CommandsExecuted
 $missed = $result.CodeCoverage.CommandsMissed
