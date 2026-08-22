@@ -177,8 +177,14 @@ class C { static [int] Helper($o) { if ($o) { return [D]::Helper(1) } return 0 }
 Describe 'Test-PSCxFlowCommand' {
     BeforeAll {
         function Get-Node { param([string]$Code, [string]$Type)
+            # Two parameters that must each be USED where the analyzer can see it: $Type in
+            # the function body rather than inside a script block, which
+            # PSReviewUnusedParameter cannot see through; and the predicate's own $x, which
+            # a constant `$true` would declare and ignore.
             $ast = [System.Management.Automation.Language.Parser]::ParseInput($Code, [ref]$null, [ref]$null)
-            $ast.FindAll({ param($x) $x.GetType().Name -eq $Type }.GetNewClosure(), $true)[0]
+            foreach ($n in $ast.FindAll({ param($x) $null -ne $x }, $true)) {
+                if ($n.GetType().Name -eq $Type) { return $n }
+            }
         }
     }
 
