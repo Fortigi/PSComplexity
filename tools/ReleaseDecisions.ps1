@@ -180,3 +180,42 @@ function Get-PSCxPinValue {
     }
     return $null
 }
+
+function Get-PSCxTestRunFault {
+    # Why a Pester run must not be treated as green, or $null when it may be.
+    #
+    # FailedCount alone is not enough, and that is the whole reason this exists. A test file
+    # that fails to PARSE contributes zero tests and zero failures: the run reports
+    # "passed=87 failed=0" while an entire file never executed, and every gate that asks
+    # only about FailedCount says yes. Observed, not theorised -- one dropped brace in a
+    # merge resolution hid 42 tests behind a green result.
+    #
+    # Pure so it can be tested without running Pester, because a gate that quietly stops
+    # being able to fail looks exactly like a gate with nothing to report.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [int]$FailedCount,
+        # Container results, one string each: 'Passed', 'Failed', 'Skipped'...
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ContainerResult,
+        # Names for the message, aligned with $ContainerResult.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ContainerName
+    )
+    # Failures first: when a test genuinely fails its container is 'Failed' too, and
+    # "3 tests failed" is a better answer than "a file did not run".
+    if ($FailedCount -gt 0) { return "$FailedCount test(s) failed." }
+
+    $unrun = @()
+    for ($i = 0; $i -lt $ContainerResult.Count; $i++) {
+        # Skipped is legitimate -- a container can be filtered out deliberately. Anything
+        # else with no failures behind it means the file did not run at all.
+        if ($ContainerResult[$i] -ne 'Passed' -and $ContainerResult[$i] -ne 'Skipped') {
+            $unrun += $(if ($i -lt $ContainerName.Count) { $ContainerName[$i] } else { "container $i" })
+        }
+    }
+    if ($unrun.Count -gt 0) {
+        return ("$($unrun.Count) test file(s) reported no failures because they never ran: " +
+            ($unrun -join ', ') + '. A parse error in a test file looks exactly like a green suite.')
+    }
+    return $null
+}

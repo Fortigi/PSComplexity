@@ -217,3 +217,36 @@ Describe 'the pins file itself' {
     }
 }
 
+Describe 'Get-PSCxTestRunFault' {
+    It 'says nothing about a run where every container passed' {
+        Get-PSCxTestRunFault -FailedCount 0 -ContainerResult @('Passed', 'Passed') -ContainerName @('a', 'b') |
+            Should-BeNull
+    }
+
+    It 'reports failing tests, and reports them FIRST' {
+        # When a test genuinely fails its container is 'Failed' too. "3 tests failed" is the
+        # better answer; "a file did not run" would send the reader to the wrong place.
+        Get-PSCxTestRunFault -FailedCount 3 -ContainerResult @('Failed') -ContainerName @('a') |
+            Should-BeLikeString '*3 test(s) failed*'
+    }
+
+    It 'catches a file that never ran, which FailedCount cannot see' {
+        # The whole point. A test file with a parse error contributes zero tests and zero
+        # failures, so every gate asking only about FailedCount reports green.
+        Get-PSCxTestRunFault -FailedCount 0 -ContainerResult @('Passed', 'Failed') -ContainerName @('ok.Tests.ps1', 'broken.Tests.ps1') |
+            Should-BeLikeString '*broken.Tests.ps1*'
+    }
+
+    It 'allows a deliberately skipped container' {
+        # Paired with the case above: treating every non-Passed result as a fault would make
+        # a legitimate -Skip fail the build, and the fix would be to remove the check.
+        Get-PSCxTestRunFault -FailedCount 0 -ContainerResult @('Passed', 'Skipped') -ContainerName @('a', 'b') |
+            Should-BeNull
+    }
+
+    It 'names every unrun file, not just the first' {
+        (Get-PSCxTestRunFault -FailedCount 0 -ContainerResult @('Failed', 'Failed') -ContainerName @('x.Tests.ps1', 'y.Tests.ps1')) |
+            Should-BeLikeString '*x.Tests.ps1, y.Tests.ps1*'
+    }
+}
+

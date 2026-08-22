@@ -90,13 +90,22 @@ if ($Child) {
     Import-Module (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'PSComplexity.psd1') -Force
 
     $control = Invoke-PSCxCompatSuite -Path (Join-Path $FixtureRoot 'Control.Tests.ps1')
-    if ($control.FailedCount -gt 0) {
+    # PassedCount, not FailedCount. A control that failed to PARSE reports neither, so
+    # asking only about failures would read "this Pester works" from a file that never ran.
+    if ($control.PassedCount -eq 0) {
         Write-Output "ENVIRONMENT: Pester $PesterVersion cannot run a trivial test on PowerShell $($PSVersionTable.PSVersion)."
         Write-Output 'This is not a PSComplexity failure. The control assertion (1 + 1 = 2) failed.'
         exit 2
     }
 
     $consumer = Invoke-PSCxCompatSuite -Path (Join-Path $FixtureRoot 'Consumer.Tests.ps1')
+    # The fixture is written out by this script, so a typo in it would otherwise report a
+    # clean pass over a file that never parsed -- the gate certifying its own mistake.
+    if (@($consumer.Containers | Where-Object { $_.Result -ne 'Passed' -and $_.Result -ne 'Skipped' }).Count -gt 0 -and
+        $consumer.FailedCount -eq 0) {
+        Write-Output 'The consumer fixture reported no failures because it never ran.'
+        exit 4
+    }
     Write-Output "Pester ${PesterVersion}: control passed, consumer $($consumer.PassedCount) passed / $($consumer.FailedCount) failed."
     foreach ($f in $consumer.Failed) { Write-Output "  FAILED: $($f.Name)" }
     exit ([int]($consumer.FailedCount -gt 0))
