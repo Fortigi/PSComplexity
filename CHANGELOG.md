@@ -48,6 +48,10 @@ A run that starts failing after this upgrade is the honest one.
   fails to parse is now terminating where it previously warned. Pass
   `-ErrorAction SilentlyContinue` to keep the old behaviour, or `-ErrorVariable` to inspect
   what was skipped.
+- **Rows are emitted in source order.** They came back in .NET hashtable order, which follows
+  bucket layout rather than insertion or line position and is not required to be stable, so
+  two runs over one unchanged file could differ. Units within a file now sort by start line,
+  with the unit name breaking a same-line tie.
 - **A directory scanned without `-Recurse` measured nothing at all, and the gate passed.**
   `-Include` is ignored for a directory unless `-Recurse` is also given, so
   `Measure-PSComplexity ./src` returned zero units for a folder full of code and

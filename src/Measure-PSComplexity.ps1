@@ -78,7 +78,18 @@ function Measure-PSComplexity {
                 $cyc = Get-PSCxCyclomaticMap -Ast $ast
                 $cog = Get-PSCxCognitiveMap -Ast $ast
                 $lines = Get-PSCxUnitTable -Ast $ast
-                foreach ($k in $lines.Keys) {
+                # Source order, not hashtable order. .NET enumerates a hashtable by bucket
+                # layout, which is neither insertion nor line order and is not required to
+                # be stable -- so two runs over one unchanged file could emit the same rows
+                # in different sequences. Nothing here noticed, because the gate takes a
+                # max and a human reads a table; a committed baseline or a diffed report
+                # would have.
+                #
+                # Line first, then unit name: two units CAN start on the same line
+                # (`function A { } function B { }`), and a tie left unbroken puts the
+                # nondeterminism straight back.
+                $ordered = $lines.Keys | Sort-Object @{ Expression = { $lines[$_] } }, @{ Expression = { $_ } }
+                foreach ($k in $ordered) {
                     [pscustomobject]@{
                         File       = $file
                         Unit       = ($k -replace '@\d+$', '')

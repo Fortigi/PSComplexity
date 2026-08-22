@@ -29,6 +29,34 @@ Describe 'Measure-PSComplexity' {
         ($recs | Where-Object Unit -eq 'Get-A').Cyclomatic | Should-Be 2
         @($recs | Where-Object Unit -eq '<script-body>').Count | Should-Be 1
     }
+    It 'emits units in SOURCE order, not hashtable order' {
+        # The names are deliberately anti-alphabetical, and the hashtable happens to
+        # enumerate them Alpha, Mike, <script-body>, Zulu -- neither source order nor
+        # alphabetical, and not required to be stable at all.
+        #
+        # JOINED and compared as a string: Should-BeCollection ignores order and has no
+        # switch to make it strict, so it would pass against every permutation -- which is
+        # the entire claim being made here.
+        $f = Join-Path $script:work 'order.ps1'
+        Set-Content $f @'
+$top = 1
+function Zulu { if ($a) { 1 } }
+function Alpha { if ($b) { 1 } }
+function Mike { if ($c) { 1 } }
+'@ -Encoding utf8
+        ((Measure-PSComplexity -Path $f | ForEach-Object Unit) -join ',') |
+            Should-Be '<script-body>,Zulu,Alpha,Mike'
+    }
+
+    It 'breaks a same-line tie by unit name, so the order is total' {
+        # Two units CAN start on one line. A tie left unbroken puts the nondeterminism
+        # straight back, in the one case a line-number sort cannot separate.
+        $f = Join-Path $script:work 'sameline.ps1'
+        Set-Content $f 'function Beta { if ($a) { 1 } } function Alfa { if ($b) { 1 } }' -Encoding utf8
+        ((Measure-PSComplexity -Path $f | Where-Object Unit -ne '<script-body>' | ForEach-Object Unit) -join ',') |
+            Should-Be 'Alfa,Beta'
+    }
+
     It 'reports Cyclomatic 1 / Cognitive 0 for a decision-free unit' {
         $flat = Join-Path $script:work 'flat.ps1'
         Set-Content $flat 'function Get-Flat { param($x) $x }' -Encoding utf8
