@@ -10,6 +10,17 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A superseded run answers a question nobody is asking any more. Pushes to main are NOT
+# cancelled -- that history is the record of what main was green at.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Least privilege. The default token is write-scoped, and this job installs four modules
+# from the gallery and then executes them.
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -17,6 +28,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    # A wedged runner otherwise holds a REQUIRED check pending for the six-hour default,
+    # blocking every merge behind it. The full matrix runs in about two minutes.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -40,6 +54,16 @@ jobs:
           $pins.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" } |
             Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "pins: $(($required | ForEach-Object { "$_=$($pins[$_])" }) -join '  ')"
+
+      # Keyed on the pinned versions, so a bump invalidates it rather than serving the
+      # previous ones. Windows and Linux keep separate caches: the module path differs.
+      - name: Cache pinned PowerShell modules
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.local/share/powershell/Modules
+            ~/Documents/PowerShell/Modules
+          key: psmodules-${{ runner.os }}-pester${{ env.PESTER_VERSION }}-${{ env.PESTER_COMPAT_VERSION }}-pssa${{ env.PSSA_VERSION }}-psmut${{ env.PSMUTANT_VERSION }}
 
       - name: Install pinned modules
         shell: pwsh
