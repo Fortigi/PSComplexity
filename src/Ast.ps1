@@ -175,8 +175,9 @@ function Test-PSCxFlowCommand {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Node)
     if ($Node -isnot [System.Management.Automation.Language.CommandAst]) { return $false }
-    $name = $Node.GetCommandName()
-    if (-not $name) { return $false }
-    return $script:PSCxFlowCommands -contains $name
+    # No guard for a null name: a command invoked through a variable (`& $cmd`) has none,
+    # and -contains already answers False for it. A guard here would be unreachable by any
+    # observation, which is how it was found -- both of its mutants survived.
+    return $script:PSCxFlowCommands -contains $Node.GetCommandName()
 }
 

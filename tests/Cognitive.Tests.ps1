@@ -50,6 +50,11 @@ function Get-Fib { param($n) if ($n -le 1) { return $n }; return (Get-Fib ($n - 
     # test must answer "no" rather than dereference it -- paired with the ForEach-Object cases
     # above, which are the "yes" side of the same predicate.
     @{ name = 'a command with no readable name is not flow'; expected = 0; code = 'function T { param($cmd) & $cmd arg }' }
+    # NESTED, deliberately. At nesting 0 the increment is 1 + 0, which is indistinguishable
+    # from 1 - 0: the arithmetic itself is only pinned when the nesting term is non-zero.
+    @{ name = 'ForEach-Object nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $xs) if ($a) { $xs | ForEach-Object { $_ } } }' }
+    @{ name = 'null-coalescing nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $x, $y) if ($a) { $z = $x ?? $y } }' }
+    @{ name = 'null-coalescing assignment nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $x) if ($a) { $x ??= 1 } }' }
     @{ name = 'flat function scores 0'; expected = 0; code = 'function T { param($x) $y = $x + 1; return $y }' }
 )
 
@@ -166,6 +171,33 @@ class C { static [int] Helper($o) { if ($o) { return [D]::Helper(1) } return 0 }
         $code = 'class C { [int] $Threshold = $(if ($env:X) { 5 } else { 1 }) }'
         Get-UnitCognitive -Code $code -Unit 'C.Threshold'  | Should-Be 2
         Get-UnitCognitive -Code $code -Unit '<script-body>' | Should-Be 0
+    }
+}
+
+Describe 'Test-PSCxFlowCommand' {
+    BeforeAll {
+        function Get-Node { param([string]$Code, [string]$Type)
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput($Code, [ref]$null, [ref]$null)
+            $ast.FindAll({ param($x) $x.GetType().Name -eq $Type }.GetNewClosure(), $true)[0]
+        }
+    }
+
+    It 'is true for the cmdlet and for its alias' {
+        Test-PSCxFlowCommand -Node (Get-Node '$c | ForEach-Object { 1 }' 'CommandAst') | Should-BeTrue
+        Test-PSCxFlowCommand -Node (Get-Node '$c | % { 1 }' 'CommandAst') | Should-BeTrue
+    }
+
+    It 'is false for an ordinary command' {
+        # Paired with the case above: a predicate that always answered true would satisfy
+        # the first test on its own.
+        Test-PSCxFlowCommand -Node (Get-Node 'Get-Item .' 'CommandAst') | Should-BeFalse
+    }
+
+    It 'returns $false -- not $null -- for a node that is not a command at all' {
+        # Should-BeFalse is STRICT in Pester 6: $null is falsy but is not $false, so this
+        # pins the return VALUE and not merely its truthiness. FindAll's predicate contract
+        # is a boolean, and every caller here passes this straight to it.
+        Test-PSCxFlowCommand -Node (Get-Node '$x = 1' 'VariableExpressionAst') | Should-BeFalse
     }
 }
 
