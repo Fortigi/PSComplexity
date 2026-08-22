@@ -97,6 +97,13 @@ jobs:
           $r = Invoke-Pester -Configuration $cfg
           if ($r.FailedCount -gt 0) { throw "$($r.FailedCount) test(s) failed" }
 
+      # A committed script, not a snippet here, so measuring by hand and measuring in CI
+      # cannot drift. The figure in CLAUDE.md was a claim nothing checked, and the one in
+      # CHANGELOG.md had been wrong for two releases.
+      - name: Coverage gate (100%)
+        shell: pwsh
+        run: ./tools/Measure-PSCxCoverage.ps1
+
       # Self-assess: mutation-test our own metric logic with our sibling module PSMutant,
       # gating on the score. (Linux only -- test quality is platform-independent.)
       - name: Self-assess (PSMutant mutation testing)

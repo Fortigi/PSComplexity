@@ -47,7 +47,7 @@ A run that starts failing after this upgrade is the honest one.
   logic against its reference-score suite, gated on the mutation score (~90%). The two
   Fortigi modules dogfood each other -- PSComplexity gates PSMutant's complexity, and
   PSMutant gates PSComplexity's test quality.
-- The self-mutation gate is now set at **100%**: coverage is 100% (167/167 commands) and
+- The self-mutation gate is now set at **100%**: coverage is 100% and
   every one of the 41 mutants is killed, with no mutant declared equivalent. From here a
   new survivor fails the build.
 
@@ -73,6 +73,9 @@ A run that starts failing after this upgrade is the honest one.
   finding failed nothing and blocked everything.
 - Pinned versions move to `.github/pins.env`, loaded and asserted by each workflow.
   `ConvertToSARIF` had no version pin at all.
+- A coverage gate: `tools/Measure-PSCxCoverage.ps1`, enforced at 100% in CI. The figure was
+  claimed in two places and measured by nobody, and the command count quoted in this file
+  had been wrong for two releases.
 - The suite is fully on the Pester 6 `Should-*` assertions, and `Should.DisableV5 = $true` is
   set in both workflows so the classic `Should -Be` form is an **error** rather than a style
   note. Verified that the setting actually fires, in both directions.

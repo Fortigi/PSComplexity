@@ -34,20 +34,21 @@ CI (`.github/workflows/ci.yml`) runs:
 | Complexity | **its own** `Test-PSComplexity` against `src/`, 15 / 15 per unit |
 | Self-mutation | PSMutant against `psmutant.self.config.json`, break = 100 |
 
-Measuring coverage here is straightforward — whole-directory works, and both Pester
-versions agree at 100% (they disagree on the analysed-command *denominator*, 201 vs 204,
-which is worth remembering when quoting a figure):
+Coverage is measured by one committed script, and it is enforced:
 
 ```powershell
-$c = New-PesterConfiguration
-$c.Run.Path = 'tests'; $c.Run.PassThru = $true
-$c.CodeCoverage.Enabled = $true; $c.CodeCoverage.Path = 'src'
-(Invoke-Pester -Configuration $c).CodeCoverage.CoveragePercent
+./tools/Measure-PSCxCoverage.ps1        # fails below 100%
 ```
 
-That simplicity is not luck: nothing here starts a nested Pester run. The sibling repo
-PSMutant does, and its coverage is unmeasurable in places as a result. If you ever add
-something that runs Pester from inside a test, expect the same problem.
+It is a script rather than a recipe in this file because a recipe cannot be run by CI: the
+figures here were a claim nobody checked, and the count quoted in `CHANGELOG.md` had been
+wrong for two releases. Do not quote a command count in prose — the script prints it.
+
+`UseBreakpoints` is set as a **hedge, not a fix**. In PSMutant it is load-bearing, because a
+nested Pester run tears down Pester 6's Profiler tracer and every file discovered afterwards
+reports a plausible near-zero. Measured here both ways on the same suite, the two agree
+exactly, because nothing in `tests/` starts a nested run. The setting costs a little speed
+and means a future test that does start one cannot quietly halve the number.
 
 **Pester version split**: CI pins 5.8.0, development happens on 6.1.0. This suite passes
 under both. Tracked in **#10**.
