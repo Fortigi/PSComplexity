@@ -20,14 +20,46 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Install pinned Pester + PSScriptAnalyzer
+      - name: Load pinned versions
         shell: pwsh
         run: |
-          Install-Module Pester -RequiredVersion 6.1.0 -Force -Scope CurrentUser
-          # The OLD Pester the compatibility gate proves consumers against. It must match the
-          # -PesterVersion passed below; both belong in a shared pins file (#26).
-          Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser
-          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
+          $required = 'PESTER_VERSION', 'PESTER_COMPAT_VERSION', 'PSSA_VERSION',
+                      'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS'
+          $pins = @{}
+          foreach ($line in Get-Content .github/pins.env) {
+            $t = $line.Trim()
+            if (-not $t -or $t.StartsWith('#')) { continue }
+            $k, $v = $t -split '=', 2
+            $pins[$k.Trim()] = $v.Trim()
+          }
+          # Asserted, not assumed: a missing key would otherwise install "latest" or analyse
+          # nothing, and both look like a clean run.
+          foreach ($k in $required) {
+            if (-not $pins.ContainsKey($k) -or -not $pins[$k]) { throw ".github/pins.env is missing a value for $k" }
+          }
+          $pins.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" } |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "pins: $(($required | ForEach-Object { "$_=$($pins[$_])" }) -join '  ')"
+
+      - name: Install pinned modules
+        shell: pwsh
+        run: |
+          # Install only what is missing, then assert. An unconditional -Force collides with
+          # what the runner image already ships: the install warns "currently in use", carries
+          # on, and the tool then fails somewhere else entirely.
+          $wanted = @(
+            @{ Name = 'Pester';           Version = $env:PESTER_VERSION }
+            @{ Name = 'Pester';           Version = $env:PESTER_COMPAT_VERSION }
+            @{ Name = 'PSScriptAnalyzer'; Version = $env:PSSA_VERSION }
+          )
+          foreach ($w in $wanted) {
+            if (-not (Get-Module $w.Name -ListAvailable | Where-Object Version -eq $w.Version)) {
+              Install-Module $w.Name -RequiredVersion $w.Version -Force -Scope CurrentUser
+            }
+            if (-not (Get-Module $w.Name -ListAvailable | Where-Object Version -eq $w.Version)) {
+              throw "$($w.Name) $($w.Version) is not available after install"
+            }
+          }
 
       - name: Module manifest is valid + imports
         shell: pwsh
@@ -40,20 +72,20 @@ jobs:
         shell: pwsh
         run: ./tools/Test-PSCxRelease.ps1
 
+      # One committed script, called by this gate and by code-scanning.yml. Spelled out in
+      # both, they disagreed about severity and scope, so an Information finding failed
+      # nothing and blocked everything.
       - name: Lint (PSScriptAnalyzer)
         shell: pwsh
         run: |
-          $f = @()
-          foreach ($p in './src', './tests', './PSComplexity.psm1', './PSComplexity.psd1') {
-            $f += Invoke-ScriptAnalyzer -Path $p -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error, Warning
-          }
-          if ($f) { $f | Format-Table RuleName, ScriptName, Line, Message -AutoSize; throw "$($f.Count) lint finding(s)" }
+          $f = ./tools/Invoke-PSCxAnalyzer.ps1
+          if ($f) { $f | Format-Table Severity, RuleName, ScriptName, Line, Message -AutoSize; throw "$($f.Count) lint finding(s)" }
           Write-Host 'Lint clean.'
 
       - name: Tests (reference scores + self-complexity gate)
         shell: pwsh
         run: |
-          Import-Module Pester -RequiredVersion 6.1.0 -Force
+          Import-Module Pester -RequiredVersion $env:PESTER_VERSION -Force
           Import-Module ./PSComplexity.psd1 -Force
           $cfg = New-PesterConfiguration
           $cfg.Run.Path = './tests'
@@ -71,9 +103,11 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: pwsh
         run: |
-          Install-Module PSMutant -RequiredVersion 0.3.1 -Force -Scope CurrentUser
-          Import-Module Pester -RequiredVersion 6.1.0 -Force
-          Import-Module PSMutant -RequiredVersion 0.3.1 -Force
+          if (-not (Get-Module PSMutant -ListAvailable | Where-Object Version -eq $env:PSMUTANT_VERSION)) {
+            Install-Module PSMutant -RequiredVersion $env:PSMUTANT_VERSION -Force -Scope CurrentUser
+          }
+          Import-Module Pester -RequiredVersion $env:PESTER_VERSION -Force
+          Import-Module PSMutant -RequiredVersion $env:PSMUTANT_VERSION -Force
           $r = Invoke-PSMutation -ConfigFile ./psmutant.self.config.json -SourceRoot . -Quiet
           Write-Host "Self mutation score: $($r.Score)% ($($r.Killed)/$($r.Total))"
           if ($r.ExitCode -ne 0) { throw "Mutation score $($r.Score)% is below the break threshold" }
@@ -83,4 +117,4 @@ jobs:
       # separates "this Pester cannot run here" from "this module is broken".
       - name: Pester compatibility (a Pester 5 consumer)
         shell: pwsh
-        run: ./tools/Test-PSCxPesterCompatibility.ps1 -PesterVersion 5.7.1
+        run: ./tools/Test-PSCxPesterCompatibility.ps1 -PesterVersion $env:PESTER_COMPAT_VERSION

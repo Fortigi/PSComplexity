@@ -67,6 +67,12 @@ A run that starts failing after this upgrade is the honest one.
   this module. The module has no Pester dependency, so the promise is cheap to keep and was
   previously not checked at all.
 - The mutation-gate step moves from PSMutant 0.1.0 to 0.3.1.
+- One committed analyzer script, `tools/Invoke-PSCxAnalyzer.ps1`, is now what all three
+  gates run. They had three separate inline copies, and two of them filtered to Error and
+  Warning while the required code-scanning check did not -- so an Information-severity
+  finding failed nothing and blocked everything.
+- Pinned versions move to `.github/pins.env`, loaded and asserted by each workflow.
+  `ConvertToSARIF` had no version pin at all.
 - The suite is fully on the Pester 6 `Should-*` assertions, and `Should.DisableV5 = $true` is
   set in both workflows so the classic `Should -Be` form is an **error** rather than a style
   note. Verified that the setting actually fires, in both directions.

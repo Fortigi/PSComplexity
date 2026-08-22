@@ -23,22 +23,39 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Load pinned versions
+        shell: pwsh
+        run: |
+          $required = 'PESTER_VERSION', 'PSSA_VERSION'
+          $pins = @{}
+          foreach ($line in Get-Content .github/pins.env) {
+            $t = $line.Trim()
+            if (-not $t -or $t.StartsWith('#')) { continue }
+            $k, $v = $t -split '=', 2
+            $pins[$k.Trim()] = $v.Trim()
+          }
+          foreach ($k in $required) {
+            if (-not $pins.ContainsKey($k) -or -not $pins[$k]) { throw ".github/pins.env is missing a value for $k" }
+          }
+          $pins.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" } |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Install pinned Pester + PSScriptAnalyzer
         shell: pwsh
         run: |
-          Install-Module Pester -RequiredVersion 6.1.0 -Force -Scope CurrentUser
-          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
+          Install-Module Pester -RequiredVersion $env:PESTER_VERSION -Force -Scope CurrentUser
+          Install-Module PSScriptAnalyzer -RequiredVersion $env:PSSA_VERSION -Force -Scope CurrentUser
 
       - name: Full quality gate (lint + tests + self-complexity)
         shell: pwsh
         run: |
-          $f = @()
-          foreach ($p in './src', './tests', './PSComplexity.psm1', './PSComplexity.psd1') {
-            $f += Invoke-ScriptAnalyzer -Path $p -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Error, Warning
-          }
-          if ($f) { $f | Format-Table -AutoSize; throw "$($f.Count) lint finding(s) -- not publishing" }
+          # The same committed script ci.yml and code-scanning.yml run. This was a THIRD
+          # inline copy, and it carried the severity filter too -- so the release path could
+          # publish over a finding the required check was already blocking on.
+          $f = ./tools/Invoke-PSCxAnalyzer.ps1
+          if ($f) { $f | Format-Table Severity, RuleName, ScriptName, Line, Message -AutoSize; throw "$($f.Count) lint finding(s) -- not publishing" }
           Import-Module ./PSComplexity.psd1 -Force
-          Import-Module Pester -RequiredVersion 6.1.0 -Force
+          Import-Module Pester -RequiredVersion $env:PESTER_VERSION -Force
           $cfg = New-PesterConfiguration
           $cfg.Run.Path = './tests'; $cfg.Run.PassThru = $true; $cfg.Output.Verbosity = 'Normal'
           # Match ci.yml: the classic `Should -Be` form is an error, not a style note.
