@@ -54,6 +54,13 @@ function Get-PSCxConsumerNotes {
 
     # Collapse to one line: the manifest field is a single string, and a newline in it does
     # not survive being read back off the gallery page.
+    #
+    # It also keeps the release gate platform-independent, which is not obvious and is worth
+    # knowing before someone preserves the newlines here. Git rewrites line endings inside a
+    # stored string on checkout, so a multi-line value reads LF on a Linux runner and CRLF on
+    # a Windows one and an exact comparison then reports on the checkout rather than the
+    # release. That bit the sibling repo -- CI green, gate red on every maintainer machine.
+    # .gitattributes pins eol=lf so the cause is gone either way.
     $text = ($body -join ' ') -replace '\s+', ' '
     return $text.Trim()
 }

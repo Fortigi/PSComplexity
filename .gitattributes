@@ -1,0 +1,14 @@
+# Git rewrites line endings on checkout, and a release gate here compares stored text against
+# text extracted from CHANGELOG.md. Under the default core.autocrlf the same commit reads LF
+# on a Linux runner and CRLF on a Windows machine, so an exact comparison answers a question
+# about the working copy rather than about the release. That bit the sibling repo: CI green,
+# gate red on every maintainer machine.
+#
+# This repo is not exposed to that today only because Get-PSCxConsumerNotes collapses the
+# block to a single line. eol=lf removes the cause rather than relying on that.
+#
+# The repository blobs were already LF, so this changes working copies rather than history.
+* text=auto eol=lf
+
+# Nothing binary is tracked today. Add entries here rather than relying on detection if that
+# changes: a file mis-detected as text is silently corrupted by normalisation.
