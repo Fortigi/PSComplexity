@@ -45,7 +45,9 @@ if ($Apply) {
         throw "Cannot apply: CHANGELOG.md has no '### For consumers' block under [$changelogVersion]."
     }
     $expected = Get-PSCxExpectedReleaseNotes -Version $changelogVersion -Notes $notes -DetailUrl $detailUrl
-    Update-ModuleManifest -Path $ManifestPath -ReleaseNotes $expected
+    $text = Get-Content -LiteralPath $ManifestPath -Raw
+    Set-PSCxManifestReleaseNotes -ManifestText $text -Notes $expected |
+        Set-Content -LiteralPath $ManifestPath -NoNewline -Encoding utf8
     $check = [string](Import-PowerShellDataFile -LiteralPath $ManifestPath).PrivateData.PSData.ReleaseNotes
     if ($check -ne $expected) { throw 'ReleaseNotes did not survive the manifest update.' }
     Write-Output "Applied $($expected.Length) chars of release notes for $changelogVersion."

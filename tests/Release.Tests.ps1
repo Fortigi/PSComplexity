@@ -72,6 +72,54 @@ Describe 'Get-PSCxExpectedReleaseNotes' {
     }
 }
 
+Describe 'Set-PSCxManifestReleaseNotes' {
+    BeforeAll {
+        $script:Manifest = @'
+@{
+    # A comment that explains WHY, which is the kind a manifest most needs.
+    ModuleVersion = '1.2.3'
+    PrivateData = @{
+        PSData = @{
+            ProjectUri   = 'https://example/repo'
+            ReleaseNotes = 'old notes'
+        }
+    }
+}
+'@
+    }
+
+    It 'changes the notes and nothing else' {
+        # The whole reason this exists rather than Update-ModuleManifest, which regenerates
+        # the file: the comment, the layout and every other value have to survive.
+        $out = Set-PSCxManifestReleaseNotes -ManifestText $script:Manifest -Notes 'new notes'
+        $out | Should-BeLikeString "*ReleaseNotes = 'new notes'*"
+        $out | Should-BeLikeString '*A comment that explains WHY*'
+        $out | Should-BeLikeString "*ProjectUri   = 'https://example/repo'*"
+        $out | Should-NotBeLikeString '*old notes*'
+    }
+
+    It 'doubles a quote so the result still parses' {
+        # An apostrophe in the notes would otherwise close the string and leave a manifest
+        # that cannot be read at all -- discovered at publish, on the irreversible step.
+        $out = Set-PSCxManifestReleaseNotes -ManifestText $script:Manifest -Notes "it's fixed"
+        $out | Should-BeLikeString "*'it''s fixed'*"
+        $f = Join-Path ([System.IO.Path]::GetTempPath()) "psd-$([System.Guid]::NewGuid().ToString('N')).psd1"
+        try {
+            Set-Content -LiteralPath $f -Value $out -Encoding utf8
+            (Import-PowerShellDataFile -LiteralPath $f).PrivateData.PSData.ReleaseNotes |
+                Should-Be "it's fixed"
+        }
+        finally { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'refuses a manifest with no ReleaseNotes value rather than silently doing nothing' {
+        # Returning the text unchanged would make -Apply a no-op and the verify step would
+        # then fail forever with no way to fix it.
+        { Set-PSCxManifestReleaseNotes -ManifestText '@{ ModuleVersion = ''1.0.0'' }' -Notes 'x' } |
+            Should-Throw
+    }
+}
+
 Describe 'Get-PSCxReleaseFault' {
     BeforeAll {
         $script:Good = @{

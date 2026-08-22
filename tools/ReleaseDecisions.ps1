@@ -119,3 +119,27 @@ function Get-PSCxReleaseFault {
     }
     return $faults.ToArray()
 }
+
+function Set-PSCxManifestReleaseNotes {
+    # Replace ONLY the ReleaseNotes value in the manifest text.
+    #
+    # Not Update-ModuleManifest: that regenerates the whole file from the data it parsed, so
+    # the hand-written layout goes, a "Generated on <today>" stamp appears that churns on
+    # every run, and any comment explaining WHY a setting is what it is -- the kind a manifest
+    # most needs -- is gone. A release note is one string; changing it should touch one string.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$ManifestText,
+        [Parameter(Mandatory)] [string]$Notes
+    )
+    # PowerShell escapes a literal quote inside a single-quoted string by doubling it.
+    $literal = "'" + ($Notes -replace "'", "''") + "'"
+    $pattern = "(?s)(ReleaseNotes\s*=\s*)'.*?'(?=\s*(?
+|\}))"
+    if ($ManifestText -notmatch $pattern) {
+        throw 'Manifest has no single-quoted ReleaseNotes value to replace.'
+    }
+    return [regex]::Replace($ManifestText, $pattern, { param($m) $m.Groups[1].Value + $literal }, 1)
+}
+
