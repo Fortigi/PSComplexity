@@ -13,7 +13,7 @@
 function Get-PSCxCycClauseRow {
     # if / switch: one decision per CLAUSE. `else` is not a clause -- it is the absence of a
     # decision -- so Clauses.Count is the count, not Clauses.Count + 1.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.IfStatementAst] }, $true)) {
@@ -26,7 +26,7 @@ function Get-PSCxCycClauseRow {
 
 function Get-PSCxCycBlockRow {
     # Loops, catch and trap: one decision each.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($tn in 'ForEachStatementAst', 'ForStatementAst', 'WhileStatementAst', 'DoWhileStatementAst', 'DoUntilStatementAst', 'CatchClauseAst', 'TrapStatementAst') {
@@ -41,7 +41,7 @@ function Get-PSCxCycBlockRow {
 function Get-PSCxCycFlowCommandRow {
     # ForEach-Object / Where-Object and their aliases: one decision each, exactly as the
     # keyword loop and conditional they stand in for.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) Test-PSCxFlowCommand -Node $x }, $true)) {
@@ -55,7 +55,7 @@ function Get-PSCxCycOperatorRow {
     # && and || are control flow between pipelines, not boolean operators: `a && b` runs b
     # only if a succeeded, which is a decision exactly as `if ($?)` would be. ?? and ??= each
     # choose between two values on a null test.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.PipelineChainAst] }, $true)) {
@@ -76,7 +76,7 @@ function Get-PSCxCyclomaticRow {
     # Every decision-point row, attributed per unit. Composed from one collector per KIND of
     # decision, mirroring Cognitive.ps1 -- adding a construct then means a new collector or a
     # new entry in one, never another loop in a function that already has eight.
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     @(Get-PSCxCycClauseRow -Ast $Ast) + @(Get-PSCxCycBlockRow -Ast $Ast) +

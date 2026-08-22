@@ -5,6 +5,10 @@
 
 function Get-PSCxSourceFile {
     # Resolve a path (file or directory) to the PowerShell source files to measure.
+    #
+    # [string[]] and not [string], unlike the streaming collectors: this RETURNS the whole
+    # collection as one value rather than emitting items, so the array form is the accurate
+    # declaration. The analyzer says so, which is how the distinction was found.
     [OutputType([string[]])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string]$Path, [switch]$Recurse)
@@ -55,7 +59,7 @@ function Measure-PSComplexity {
         # Fail a build if anything is too complex:
         if (-not (Test-PSComplexity ./src -Recurse)) { exit 1 }
     #>
-    [OutputType([pscustomobject[]])]
+    [OutputType([pscustomobject])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline, Position = 0)] [ValidateNotNullOrEmpty()] [string[]]$Path,
@@ -141,36 +145,51 @@ function Test-PSComplexity {
     [OutputType([bool])]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory, Position = 0)] [ValidateNotNullOrEmpty()] [string[]]$Path,
+        [Parameter(Mandatory, ValueFromPipeline, Position = 0)] [ValidateNotNullOrEmpty()] [string[]]$Path,
         [int]$MaxCyclomatic = 15,
         [int]$MaxCognitive = 15,
         [switch]$Recurse
     )
-    # Parse failures are captured rather than allowed past. A file the gate could not read
-    # is a file it cannot vouch for, and "no unit exceeded a ceiling" is trivially true of a
-    # file that produced no units -- the same shape as passing over an empty selection.
-    $units = @(Measure-PSComplexity -Path $Path -Recurse:$Recurse -ErrorVariable parseErrors -ErrorAction SilentlyContinue)
-    if ($parseErrors.Count -gt 0) {
-        throw ("Refusing to vouch for $($parseErrors.Count) file(s) that did not parse: " +
-            (($parseErrors | ForEach-Object { $_.Exception.Message }) -join '; ') +
-            ". Fix the syntax, or exclude the file from the path you gate on.")
+    # ValueFromPipeline needs begin/process/end, not a bare body. A bare body IS the `end`
+    # block, so it would run once with $Path holding only the LAST item piped in -- and the
+    # gate would return a confident verdict about one path while silently ignoring the rest.
+    # Every path is collected first, then judged together, because the verdict is about the
+    # whole selection.
+    begin {
+        $collected = [System.Collections.Generic.List[string]]::new()
     }
+    process {
+        $collected.AddRange([string[]]$Path)
+    }
+    end {
+        # Parse failures are captured rather than allowed past. A file the gate could not
+        # read is a file it cannot vouch for, and "no unit exceeded a ceiling" is trivially
+        # true of a file that produced no units -- the same shape as passing over an empty
+        # selection.
+        $paths = $collected.ToArray()
+        $units = @(Measure-PSComplexity -Path $paths -Recurse:$Recurse -ErrorVariable parseErrors -ErrorAction SilentlyContinue)
+        if ($parseErrors.Count -gt 0) {
+            throw ("Refusing to vouch for $($parseErrors.Count) file(s) that did not parse: " +
+                (($parseErrors | ForEach-Object { $_.Exception.Message }) -join '; ') +
+                ". Fix the syntax, or exclude the file from the path you gate on.")
+        }
 
-    # Refuse rather than pass. "No unit breached a ceiling" and "no unit was measured" are
-    # the same $true, so a gate pointed at the wrong place reports clean -- which is the
-    # failure this module exists to find in other people's code.
-    if ($units.Count -eq 0) {
-        $hint = if ($Recurse) { '' } else { ', or add -Recurse if they are in subdirectories' }
-        throw ("Measured no units under: " + ($Path -join ', ') + ". Nothing was checked, so " +
-            "a pass here would describe an empty set. Check the path exists and holds .ps1 " +
-            "or .psm1 files" + $hint + '.')
-    }
+        # Refuse rather than pass. "No unit breached a ceiling" and "no unit was measured"
+        # are the same $true, so a gate pointed at the wrong place reports clean -- which is
+        # the failure this module exists to find in other people's code.
+        if ($units.Count -eq 0) {
+            $hint = if ($Recurse) { '' } else { ', or add -Recurse if they are in subdirectories' }
+            throw ("Measured no units under: " + ($paths -join ', ') + ". Nothing was checked, " +
+                "so a pass here would describe an empty set. Check the path exists and holds " +
+                ".ps1 or .psm1 files" + $hint + '.')
+        }
 
-    $violations = @($units |
-            Where-Object { $_.Cyclomatic -gt $MaxCyclomatic -or $_.Cognitive -gt $MaxCognitive })
-    foreach ($v in $violations) {
-        Write-Warning ("{0}:{1} {2} -- cyclomatic {3} (max {4}), cognitive {5} (max {6})" -f `
-                $v.File, $v.Line, $v.Unit, $v.Cyclomatic, $MaxCyclomatic, $v.Cognitive, $MaxCognitive)
+        $violations = @($units |
+                Where-Object { $_.Cyclomatic -gt $MaxCyclomatic -or $_.Cognitive -gt $MaxCognitive })
+        foreach ($v in $violations) {
+            Write-Warning ("{0}:{1} {2} -- cyclomatic {3} (max {4}), cognitive {5} (max {6})" -f `
+                    $v.File, $v.Line, $v.Unit, $v.Cyclomatic, $MaxCyclomatic, $v.Cognitive, $MaxCognitive)
+        }
+        return $violations.Count -eq 0
     }
-    return $violations.Count -eq 0
 }
