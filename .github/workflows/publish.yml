@@ -41,6 +41,8 @@ jobs:
           Import-Module Pester -RequiredVersion 6.1.0 -Force
           $cfg = New-PesterConfiguration
           $cfg.Run.Path = './tests'; $cfg.Run.PassThru = $true; $cfg.Output.Verbosity = 'Normal'
+          # Match ci.yml: the classic `Should -Be` form is an error, not a style note.
+          $cfg.Should.DisableV5 = $true
           $r = Invoke-Pester -Configuration $cfg
           if ($r.FailedCount -gt 0) { throw "$($r.FailedCount) test(s) failed -- not publishing" }
 

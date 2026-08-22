@@ -50,7 +50,7 @@ BeforeAll {
 
 Describe 'Cognitive complexity - reference scores' {
     It 'cognitive of <name> = <expected>' -ForEach $script:CognitiveCases {
-        Get-CognitiveOf -Code $code | Should -Be $expected
+        Get-CognitiveOf -Code $code | Should-Be $expected
     }
 }
 
@@ -70,43 +70,43 @@ Describe 'Cognitive complexity - class members' {
         # collector never sees this. Without the member-invocation rule the if is
         # the only increment and the score is 1.
         $code = 'class C { [int] Walk($o) { if ($o) { return $this.Walk($o.Next) } return 0 } }'
-        Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should -Be 2
+        Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should-Be 2
     }
 
     It 'counts a static method calling itself through the class name' {
         $code = 'class C { static [int] Helper($o) { if ($o) { return [C]::Helper($o.Next) } return 0 } }'
-        Get-UnitCognitive -Code $code -Unit 'C.Helper' | Should -Be 2
+        Get-UnitCognitive -Code $code -Unit 'C.Helper' | Should-Be 2
     }
 
     It 'does not count a call to the SAME method name on another object' {
         # $other.Walk() is a different object's method. Only the if counts.
         $code = 'class C { [int] Walk($o) { if ($o) { return $o.Walk(1) } return 0 } }'
-        Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should -Be 1
+        Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should-Be 1
     }
 
     It 'does not count a call to a DIFFERENT method on $this' {
         $code = 'class C { [int] Walk($o) { if ($o) { return $this.Other(1) } return 0 } [int] Other($x) { return 1 } }'
-        Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should -Be 1
+        Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should-Be 1
     }
 
     It 'does not count a same-named static method on a DIFFERENT class' {
         $code = 'class D { static [int] Helper($x) { return 1 } }
 class C { static [int] Helper($o) { if ($o) { return [D]::Helper(1) } return 0 } }'
-        Get-UnitCognitive -Code $code -Unit 'C.Helper' | Should -Be 1
+        Get-UnitCognitive -Code $code -Unit 'C.Helper' | Should-Be 1
     }
 
     It 'does not count a same-named call on the result of an expression' {
         # The target is neither $this nor a type name, so it cannot be known to be
         # this object -- (...).Walk() is a call on whatever that expression returned.
         $code = 'class C { [int] Walk($o) { if ($o) { return (Get-Item .).Walk(1) } return 0 } }'
-        Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should -Be 1
+        Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should-Be 1
     }
 
     It 'ignores a member invocation outside any class' {
         # Guards the "no enclosing method" path: without it the rule dereferences
         # $null looking for a method name.
         $code = '$o = Get-Item .; $o.Refresh()'
-        Get-UnitCognitive -Code $code -Unit '<script-body>' | Should -Be 0
+        Get-UnitCognitive -Code $code -Unit '<script-body>' | Should-Be 0
     }
 
     It 'does not treat a bare command matching the method name as recursion' {
@@ -114,25 +114,25 @@ class C { static [int] Helper($o) { if ($o) { return [D]::Helper(1) } return 0 }
         # The method body is itself a FunctionDefinitionAst named Walk, so reading
         # the enclosing FUNCTION name here would score a phantom recursive call.
         $code = 'class C { [int] Walk($o) { if ($o) { Walk } return 0 } }'
-        Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should -Be 1
+        Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should-Be 1
     }
 
     It 'still counts recursion for a plain function of the same shape' {
         $code = 'function Walk { param($o) if ($o) { return (Walk $o.Next) } return 0 }'
-        Get-UnitCognitive -Code $code -Unit 'Walk' | Should -Be 2
+        Get-UnitCognitive -Code $code -Unit 'Walk' | Should-Be 2
     }
 
     It 'measures nesting inside a method from the method boundary, not the class' {
         # if(+1) > if(+2) > foreach(+3) > if(+4) = 10, exactly as the same body
         # scores in a plain function.
         $code = 'class C { [int] Process($o) { if ($o.A) { if ($o.B) { foreach ($x in $o.C) { if ($x) { return 1 } } } } return 0 } }'
-        Get-UnitCognitive -Code $code -Unit 'C.Process' | Should -Be 10
+        Get-UnitCognitive -Code $code -Unit 'C.Process' | Should-Be 10
     }
 
     It 'attributes a property initialiser to the property, not the script body' {
         $code = 'class C { [int] $Threshold = $(if ($env:X) { 5 } else { 1 }) }'
-        Get-UnitCognitive -Code $code -Unit 'C.Threshold'  | Should -Be 2
-        Get-UnitCognitive -Code $code -Unit '<script-body>' | Should -Be 0
+        Get-UnitCognitive -Code $code -Unit 'C.Threshold'  | Should-Be 2
+        Get-UnitCognitive -Code $code -Unit '<script-body>' | Should-Be 0
     }
 }
 
@@ -140,11 +140,11 @@ Describe 'Test-PSCxLogicalRunStart' {
     It 'flags the outer node of a same-operator chain as the single run start' {
         $ast = [System.Management.Automation.Language.Parser]::ParseInput('$a -and $b -and $c', [ref]$null, [ref]$null)
         $bins = $ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.BinaryExpressionAst] }, $true)
-        @($bins | Where-Object { Test-PSCxLogicalRunStart -Node $_ }).Count | Should -Be 1
+        @($bins | Where-Object { Test-PSCxLogicalRunStart -Node $_ }).Count | Should-Be 1
     }
     It 'is false for a non-logical operator' {
         $ast = [System.Management.Automation.Language.Parser]::ParseInput('$a + $b', [ref]$null, [ref]$null)
         $bin = $ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.BinaryExpressionAst] }, $true)[0]
-        Test-PSCxLogicalRunStart -Node $bin | Should -BeFalse
+        Test-PSCxLogicalRunStart -Node $bin | Should-BeFalse
     }
 }

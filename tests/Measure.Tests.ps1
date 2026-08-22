@@ -17,27 +17,27 @@ AfterAll { Remove-Item $script:work -Recurse -Force -ErrorAction SilentlyContinu
 Describe 'Measure-PSComplexity' {
     It 'reports a record per unit including the script body' {
         $recs = Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1')
-        ($recs | Where-Object Unit -eq 'Get-A').Cyclomatic | Should -Be 2
-        ($recs | Where-Object Unit -eq '<script-body>') | Should -Not -BeNullOrEmpty
+        ($recs | Where-Object Unit -eq 'Get-A').Cyclomatic | Should-Be 2
+        @($recs | Where-Object Unit -eq '<script-body>').Count | Should-BeGreaterThan 0
     }
     It 'reports Cyclomatic 1 / Cognitive 0 for a decision-free unit' {
         $flat = Join-Path $script:work 'flat.ps1'
         Set-Content $flat 'function Get-Flat { param($x) $x }' -Encoding utf8
         $r = Measure-PSComplexity -Path $flat | Where-Object Unit -eq 'Get-Flat'
-        $r.Cyclomatic | Should -Be 1
-        $r.Cognitive  | Should -Be 0
+        $r.Cyclomatic | Should-Be 1
+        $r.Cognitive  | Should-Be 0
     }
     It 'recurses a directory and finds nested files' {
         $recs = Measure-PSComplexity -Path $script:work -Recurse
-        ($recs | Where-Object Unit -eq 'Get-B') | Should -Not -BeNullOrEmpty
+        @($recs | Where-Object Unit -eq 'Get-B').Count | Should-BeGreaterThan 0
     }
     It 'measures a flat directory without -Recurse, and only that directory' {
         # Two assertions, and the FIRST one is the test. Asserting only that the nested
         # unit is absent passes just as well when discovery found nothing at all, which
         # is what it used to do -- so the gate returned $true over breaching code.
         $recs = Measure-PSComplexity -Path $script:work
-        ($recs | Where-Object Unit -eq 'Get-A') | Should -Not -BeNullOrEmpty
-        ($recs | Where-Object Unit -eq 'Get-B') | Should -BeNullOrEmpty
+        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-BeGreaterThan 0
+        @($recs | Where-Object Unit -eq 'Get-B').Count | Should-Be 0
     }
     It 'gives a directory the same units with and without -Recurse when nothing is nested' {
         # The flat and recursive forms must agree on a flat folder. They did not: one
@@ -48,8 +48,8 @@ Describe 'Measure-PSComplexity' {
 
         $shallow = @(Measure-PSComplexity -Path $flatDir)
         $deep    = @(Measure-PSComplexity -Path $flatDir -Recurse)
-        $shallow.Count | Should -BeGreaterThan 0
-        $shallow.Count | Should -Be $deep.Count
+        $shallow.Count | Should-BeGreaterThan 0
+        $shallow.Count | Should-Be $deep.Count
     }
     It 'measures a directory whose name contains wildcard characters' {
         # -Path glob-parses '[': a real directory called 'my[1]proj' matched nothing, so
@@ -59,37 +59,37 @@ Describe 'Measure-PSComplexity' {
         Set-Content -LiteralPath (Join-Path $odd 'd.ps1') 'function Get-D { if ($q) { 1 } }' -Encoding utf8
 
         $recs = @(Measure-PSComplexity -Path $odd -Recurse)
-        ($recs | Where-Object Unit -eq 'Get-D') | Should -Not -BeNullOrEmpty
+        @($recs | Where-Object Unit -eq 'Get-D').Count | Should-BeGreaterThan 0
     }
     It 'still accepts a wildcard path that matches nothing literally' {
         # Resolving an existing path literally must not cost wildcard support: a pattern
         # names no file on disk, so it has to keep falling through to -Path.
         $recs = @(Measure-PSComplexity -Path (Join-Path $script:work '*.ps1'))
-        ($recs | Where-Object Unit -eq 'Get-A') | Should -Not -BeNullOrEmpty
+        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-BeGreaterThan 0
     }
     It 'skips an unparseable file with a warning' {
         $recs = Measure-PSComplexity -Path (Join-Path $script:work 'broken.ps1') -WarningAction SilentlyContinue
-        @($recs).Count | Should -Be 0
+        @($recs).Count | Should-Be 0
     }
     It 'accepts pipeline input' {
         $recs = (Join-Path $script:work 'a.ps1') | Measure-PSComplexity
-        ($recs | Where-Object Unit -eq 'Get-A') | Should -Not -BeNullOrEmpty
+        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-BeGreaterThan 0
     }
 }
 
 Describe 'Test-PSComplexity' {
     It 'returns $true when everything is within the ceilings' {
-        Test-PSComplexity -Path (Join-Path $script:work 'a.ps1') | Should -BeTrue
+        Test-PSComplexity -Path (Join-Path $script:work 'a.ps1') | Should-BeTrue
     }
     It 'returns $false and warns when a unit exceeds a ceiling' {
         $wv = $null
         $result = Test-PSComplexity -Path (Join-Path $script:work 'a.ps1') -MaxCyclomatic 1 -WarningVariable wv -WarningAction SilentlyContinue
-        $result | Should -BeFalse
-        @($wv).Count | Should -BeGreaterThan 0
+        $result | Should-BeFalse
+        @($wv).Count | Should-BeGreaterThan 0
     }
     It 'honours the cognitive ceiling independently' {
         # Get-B has cognitive 3 (foreach + nested if); ceiling 2 should trip it.
-        Test-PSComplexity -Path $script:work -Recurse -MaxCognitive 2 -WarningAction SilentlyContinue | Should -BeFalse
+        Test-PSComplexity -Path $script:work -Recurse -MaxCognitive 2 -WarningAction SilentlyContinue | Should-BeFalse
     }
     It 'throws rather than passing when it measured nothing' {
         # A directory with no PowerShell in it. Returning $true here is the same answer
@@ -99,7 +99,7 @@ Describe 'Test-PSComplexity' {
         New-Item -ItemType Directory -Path $empty -Force | Out-Null
         Set-Content (Join-Path $empty 'notes.txt') 'not powershell' -Encoding utf8
 
-        { Test-PSComplexity -Path $empty -Recurse } | Should -Throw -ExpectedMessage '*Measured no units*'
+        { Test-PSComplexity -Path $empty -Recurse } | Should-Throw -ExceptionMessage '*Measured no units*'
     }
     It 'names the path it measured nothing under' {
         # The message has to say WHERE. A gate that fails without naming the path sends
@@ -108,7 +108,7 @@ Describe 'Test-PSComplexity' {
         New-Item -ItemType Directory -Path $empty -Force | Out-Null
 
         { Test-PSComplexity -Path $empty -Recurse } |
-            Should -Throw -ExpectedMessage "*$([System.IO.Path]::GetFileName($empty))*"
+            Should-Throw -ExceptionMessage "*$([System.IO.Path]::GetFileName($empty))*"
     }
     It 'suggests -Recurse only when -Recurse was not given' {
         # Two calls, because a hint that always appears is not a hint. Suggesting
@@ -121,14 +121,14 @@ Describe 'Test-PSComplexity' {
         $withRecurse = $null
         try { Test-PSComplexity -Path $empty -Recurse } catch { $withRecurse = $_.Exception.Message }
 
-        { Test-PSComplexity -Path $empty } | Should -Throw -ExpectedMessage '*-Recurse*'
-        $withRecurse | Should -Not -BeNullOrEmpty
-        $withRecurse | Should -Not -BeLike '*-Recurse*'
+        { Test-PSComplexity -Path $empty } | Should-Throw -ExceptionMessage '*-Recurse*'
+        $withRecurse | Should-NotBeNull
+        $withRecurse | Should-NotBeLikeString '*-Recurse*'
     }
     It 'still passes over a real file that is within the ceilings' {
         # Paired with the refusal above: the empty case must fail and a measured, clean
         # case must still succeed, or "throws on empty" is satisfied by throwing always.
-        Test-PSComplexity -Path (Join-Path $script:work 'a.ps1') | Should -BeTrue
+        Test-PSComplexity -Path (Join-Path $script:work 'a.ps1') | Should-BeTrue
     }
 }
 
@@ -153,9 +153,9 @@ Describe 'Measure-PSComplexity - script-level code outside any function' {
         $p = Join-Path $script:work 'toplevel-if.ps1'
         Set-Content $p 'if ($env:CI) { "ci" } else { "local" }' -Encoding utf8
         $body = Measure-PSComplexity -Path $p | Where-Object Unit -eq '<script-body>'
-        $body            | Should -Not -BeNullOrEmpty
-        $body.Cyclomatic | Should -Be 2   # baseline 1 + the if
-        $body.Cognitive  | Should -Be 2   # +1 the if, +1 the else branch
+        @($body).Count   | Should-BeGreaterThan 0
+        $body.Cyclomatic | Should-Be 2   # baseline 1 + the if
+        $body.Cognitive  | Should-Be 2   # +1 the if, +1 the else branch
     }
 
     It 'nests top-level decisions the same way it nests them inside a function' {
@@ -165,8 +165,8 @@ Describe 'Measure-PSComplexity - script-level code outside any function' {
         $p = Join-Path $script:work 'toplevel-nested.ps1'
         Set-Content $p 'if ($a) { if ($b) { "x" } }' -Encoding utf8
         $body = Measure-PSComplexity -Path $p | Where-Object Unit -eq '<script-body>'
-        $body.Cyclomatic | Should -Be 3
-        $body.Cognitive  | Should -Be 3
+        $body.Cyclomatic | Should-Be 3
+        $body.Cognitive  | Should-Be 3
     }
 
     It 'does not count a top-level call as recursion' {
@@ -177,7 +177,7 @@ Describe 'Measure-PSComplexity - script-level code outside any function' {
         $p = Join-Path $script:work 'toplevel-call.ps1'
         Set-Content $p 'Get-Date' -Encoding utf8
         $body = Measure-PSComplexity -Path $p | Where-Object Unit -eq '<script-body>'
-        $body.Cognitive | Should -Be 0
+        $body.Cognitive | Should-Be 0
     }
 
     It 'still detects recursion inside a function in the same file' {
@@ -186,8 +186,8 @@ Describe 'Measure-PSComplexity - script-level code outside any function' {
         $p = Join-Path $script:work 'toplevel-plus-recursion.ps1'
         Set-Content $p "Get-Date`nfunction Get-Loop { Get-Loop }" -Encoding utf8
         $recs = Measure-PSComplexity -Path $p
-        ($recs | Where-Object Unit -like 'Get-Loop*').Cognitive | Should -Be 1
-        ($recs | Where-Object Unit -eq '<script-body>').Cognitive | Should -Be 0
+        ($recs | Where-Object Unit -like 'Get-Loop*').Cognitive | Should-Be 1
+        ($recs | Where-Object Unit -eq '<script-body>').Cognitive | Should-Be 0
     }
 }
 
@@ -199,7 +199,7 @@ Describe 'Measure-PSComplexity - reporting details that the suite never pinned' 
         # stayed correct while the record pointed at the wrong place.
         $p = Join-Path $script:work 'body-line.ps1'
         Set-Content $p "if (`$a) { 1 }" -Encoding utf8
-        (Measure-PSComplexity -Path $p | Where-Object Unit -eq '<script-body>').Line | Should -Be 1
+        (Measure-PSComplexity -Path $p | Where-Object Unit -eq '<script-body>').Line | Should-Be 1
     }
 
     It 'counts a ternary as exactly one cyclomatic decision' {
@@ -207,7 +207,7 @@ Describe 'Measure-PSComplexity - reporting details that the suite never pinned' 
         # every unit using one, and no cyclomatic test used a ternary at all.
         $p = Join-Path $script:work 'ternary-cyc.ps1'
         Set-Content $p 'function Get-T { param($x) $x ? 1 : 2 }' -Encoding utf8
-        (Measure-PSComplexity -Path $p | Where-Object Unit -like 'Get-T*').Cyclomatic | Should -Be 2
+        (Measure-PSComplexity -Path $p | Where-Object Unit -like 'Get-T*').Cyclomatic | Should-Be 2
     }
 
     It 'names the FIRST parse error in the skip warning' {
@@ -218,7 +218,7 @@ Describe 'Measure-PSComplexity - reporting details that the suite never pinned' 
         $p = Join-Path $script:work 'one-error.ps1'
         Set-Content $p 'if ($a) {' -Encoding utf8
         Measure-PSComplexity -Path $p -WarningVariable w -WarningAction SilentlyContinue | Out-Null
-        ($w -join ' ') | Should -BeLike "*Missing closing '}'*"
+        ($w -join ' ') | Should-BeLikeString "*Missing closing '}'*"
     }
 
     It 'ignores a DIRECTORY whose name ends in .ps1' {
@@ -236,10 +236,10 @@ Describe 'Measure-PSComplexity - reporting details that the suite never pinned' 
         $wv = $null
         $recs = Measure-PSComplexity -Path $script:work -Recurse -WarningVariable wv -WarningAction SilentlyContinue
         # The real file inside it is still measured...
-        ($recs | Where-Object Unit -like 'Get-Inner*') | Should -Not -BeNullOrEmpty
+        @($recs | Where-Object Unit -like 'Get-Inner*').Count | Should-BeGreaterThan 0
         # ...and the directory itself is never treated as a source file.
-        @($recs | Where-Object File -eq $d).Count | Should -Be 0
-        ($wv -join ' ') | Should -Not -BeLike "*weird.ps1'*"
+        @($recs | Where-Object File -eq $d).Count | Should-Be 0
+        ($wv -join ' ') | Should-NotBeLikeString "*weird.ps1'*"
     }
 }
 
@@ -269,44 +269,47 @@ function Process { if (1) { } }
         # A method body is itself a FunctionDefinitionAst, so an unqualified 'Process'
         # is what you get without treating the member as the unit -- and then three
         # different units in this file all answer to that one name.
-        ($script:clsRecs | Where-Object Unit -eq 'Order.Process').Cyclomatic | Should -Be 5
-        ($script:clsRecs | Where-Object Unit -eq 'Order.Process').Cognitive  | Should -Be 10
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Process').Cyclomatic | Should-Be 5
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Process').Cognitive  | Should-Be 10
     }
 
     It 'reports each method exactly once' {
-        @($script:clsRecs | Where-Object Unit -eq 'Order.Process') | Should -HaveCount 1
+        @($script:clsRecs | Where-Object Unit -eq 'Order.Process') | Should-BeCollection -Count 1
     }
 
     It 'keeps same-named methods on different classes apart, and apart from a function' {
         $names = @($script:clsRecs | Where-Object { $_.Unit -like '*Process*' } | ForEach-Object Unit | Sort-Object)
-        $names | Should -Be @('Invoice.Process', 'Order.Process', 'Process')
+        # Joined rather than Should-BeCollection: that one ignores order and has no switch to
+        # make it strict, so it passes against any permutation -- and the sort above exists
+        # precisely so this comparison is deterministic.
+        ($names -join ',') | Should-Be 'Invoice.Process,Order.Process,Process'
     }
 
     It 'names a constructor after its class' {
-        ($script:clsRecs | Where-Object Unit -eq 'Order.Order').Cyclomatic | Should -Be 2
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Order').Cyclomatic | Should-Be 2
     }
 
     It 'reports a static method' {
-        ($script:clsRecs | Where-Object Unit -eq 'Order.Helper').Cyclomatic | Should -Be 1
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Helper').Cyclomatic | Should-Be 1
     }
 
     It 'makes an initialised property its own unit and leaves the script body alone' {
-        ($script:clsRecs | Where-Object Unit -eq 'Order.Threshold').Cyclomatic | Should -Be 2
-        ($script:clsRecs | Where-Object Unit -eq '<script-body>').Cyclomatic  | Should -Be 1
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Threshold').Cyclomatic | Should-Be 2
+        ($script:clsRecs | Where-Object Unit -eq '<script-body>').Cyclomatic  | Should-Be 1
     }
 
     It 'does not create a unit for a property with no initialiser' {
         # No initialiser means no code, so there is nothing to measure or gate.
-        ($script:clsRecs | Where-Object Unit -eq 'Order.Plain') | Should -BeNullOrEmpty
+        @($script:clsRecs | Where-Object Unit -eq 'Order.Plain').Count | Should-Be 0
     }
 
     It 'reports the line of the member, not of the class' {
-        ($script:clsRecs | Where-Object Unit -eq 'Order.Process').Line | Should -Be 5
+        ($script:clsRecs | Where-Object Unit -eq 'Order.Process').Line | Should-Be 5
     }
 
     It 'lets the gate fail a single over-complex method' {
         # The point of the whole change: a per-unit ceiling can now name the method.
-        Test-PSComplexity -Path $script:clsFile -MaxCognitive 9 -WarningAction SilentlyContinue | Should -BeFalse
-        Test-PSComplexity -Path $script:clsFile -MaxCognitive 10 -WarningAction SilentlyContinue | Should -BeTrue
+        Test-PSComplexity -Path $script:clsFile -MaxCognitive 9 -WarningAction SilentlyContinue | Should-BeFalse
+        Test-PSComplexity -Path $script:clsFile -MaxCognitive 10 -WarningAction SilentlyContinue | Should-BeTrue
     }
 }
