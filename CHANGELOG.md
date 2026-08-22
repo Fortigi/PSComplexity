@@ -5,11 +5,11 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
-## [0.2.1] - 2026-08-21
+## [0.3.0] - 2026-08-22
 
 ### For consumers
 
-FIXED - this release fixes two separate ways the gate reported success without measuring
+BEHAVIOUR CHANGE - a gate that passed for you may now fail, and that is the point of the release. Read the next paragraph before upgrading a pipeline you cannot watch. FIXED - this release fixes two separate ways the gate reported success without measuring
 anything, and if either affected you, your builds have been passing on evidence that was
 never gathered. First: scanning a DIRECTORY without -Recurse resolved to zero files.
 -Include is ignored for a directory unless -Recurse is also given, so Measure-PSComplexity
@@ -23,6 +23,18 @@ neither can be silent again, Test-PSComplexity now THROWS when it measured no un
 of returning $true - nothing breached a ceiling and nothing was measured must never be the
 same answer. WHAT TO DO: if you gate a flat directory, re-run before upgrading and compare.
 A run that starts failing after this upgrade is the honest one.
+
+### Changed
+- **Scores rise for code that uses PowerShell's own flow constructs.** `ForEach-Object` and
+  `Where-Object` (and the `%`, `?`, `foreach`, `where` aliases) now score as the loop and
+  conditional they stand in for; `&&` and `||` as a boolean run, like `-and`/`-or`; `??` and
+  `??=` as a ternary. Previously all of them scored as straight-line code, so a function
+  branching only through them reported cyclomatic 1 / cognitive 0.
+
+  Every SonarSource reference example still scores exactly as published. The metric is now
+  described as implementing that specification **in full and extending it** for constructs
+  the specification does not cover -- see the README table. If you need the specification's
+  numbers and nothing more, pin `0.2.0`; every score here is greater than or equal to it.
 
 ### Fixed
 - **A directory scanned without `-Recurse` measured nothing at all, and the gate passed.**

@@ -37,6 +37,19 @@ $script:PSCxNestingTypes = @(
 
 # Ancestor types that OWN a body: the walk up stops here, both for attribution and
 # for nesting. A method body bounds its contents exactly as a function body does.
+# Cmdlets that ARE control flow in PowerShell, with their aliases. ForEach-Object is the
+# language's second loop and Where-Object its second conditional; a body written with them
+# branches exactly as much as the keyword form, so scoring it lower rewards a rewrite that
+# changes nothing a reader would call a decomposition.
+#
+# `foreach` and `where` appear here as ALIASES: the keyword forms parse to
+# ForEachStatementAst and a filter script block, never to a CommandAst, so a CommandAst
+# carrying those names can only be the alias.
+$script:PSCxFlowCommands = @(
+    'ForEach-Object', 'foreach', '%',
+    'Where-Object', 'where', '?'
+)
+
 $script:PSCxUnitBoundaryTypes = @(
     'FunctionDefinitionAst', 'FunctionMemberAst', 'PropertyMemberAst'
 )
@@ -151,3 +164,20 @@ function Get-PSCxEnclosingMethod {
     if ($boundary -is [System.Management.Automation.Language.FunctionMemberAst]) { return $boundary }
     return $null
 }
+
+function Test-PSCxFlowCommand {
+    # True when a node is a call to a cmdlet that acts as control flow.
+    #
+    # Matched on the name as WRITTEN, because that is all a static walk has: `%` and
+    # ForEach-Object are the same command at run time and different text here, so both
+    # spellings are listed rather than resolved.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Node)
+    if ($Node -isnot [System.Management.Automation.Language.CommandAst]) { return $false }
+    # No guard for a null name: a command invoked through a variable (`& $cmd`) has none,
+    # and -contains already answers False for it. A guard here would be unreachable by any
+    # observation, which is how it was found -- both of its mutants survived.
+    return $script:PSCxFlowCommands -contains $Node.GetCommandName()
+}
+

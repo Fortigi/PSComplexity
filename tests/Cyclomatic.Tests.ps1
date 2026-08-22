@@ -12,6 +12,18 @@ $script:CyclomaticCases = @(
     # inflate every unit that uses one, and PowerShell 7 code uses them freely.
     @{ name = 'ternary = 2'; expected = 2; code = 'function T { param($x) $x ? 1 : 2 }' }
     @{ name = 'ternary inside an if = 3'; expected = 3; code = 'function T { param($a,$x) if ($a) { $x ? 1 : 2 } }' }
+    # PowerShell-specific flow. Every one of these scored as straight-line code before, so a
+    # function branching only through them reported 1 -- the metric's own blind spot.
+    @{ name = 'ForEach-Object is a loop'; expected = 3; code = 'function T { param($xs) $xs | ForEach-Object { if ($_) { 1 } } }' }
+    @{ name = 'the foreach KEYWORD scores identically'; expected = 3; code = 'function T { param($xs) foreach ($x in $xs) { if ($x) { 1 } } }' }
+    @{ name = 'Where-Object is a conditional'; expected = 2; code = 'function T { param($xs) $xs | Where-Object { $_ -gt 0 } }' }
+    @{ name = 'the % alias counts too'; expected = 2; code = 'function T { param($xs) $xs | % { $_ } }' }
+    @{ name = 'each && link is a decision'; expected = 3; code = 'function T { a && b && c }' }
+    @{ name = 'null-coalescing = 2'; expected = 2; code = 'function T { param($a,$b) $x = $a ?? $b }' }
+    @{ name = 'null-coalescing ASSIGNMENT = 2'; expected = 2; code = 'function T { param($a) $a ??= 1 }' }
+    # Paired with the cases above: a command whose name a static walk cannot read must not
+    # be treated as flow, and must not make the predicate throw either.
+    @{ name = 'a command with no readable name is not flow'; expected = 1; code = 'function T { param($cmd) & $cmd arg }' }
 )
 
 BeforeAll {
