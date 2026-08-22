@@ -37,6 +37,17 @@ A run that starts failing after this upgrade is the honest one.
   numbers and nothing more, pin `0.2.0`; every score here is greater than or equal to it.
 
 ### Fixed
+- **A file that does not parse no longer passes the gate silently.** `Test-PSComplexity`
+  now refuses to give a verdict when any file failed to parse: "no unit exceeded a ceiling"
+  is trivially true of a file that produced no units, so a genuinely broken file used to
+  score a pass. `Measure-PSComplexity` stays lenient -- it still returns every file it could
+  read -- but reports the skip on the **error** stream rather than the warning stream, which
+  CI logs routinely swallow.
+
+  If you call `Measure-PSComplexity` with `$ErrorActionPreference = 'Stop'`, a file that
+  fails to parse is now terminating where it previously warned. Pass
+  `-ErrorAction SilentlyContinue` to keep the old behaviour, or `-ErrorVariable` to inspect
+  what was skipped.
 - **A directory scanned without `-Recurse` measured nothing at all, and the gate passed.**
   `-Include` is ignored for a directory unless `-Recurse` is also given, so
   `Measure-PSComplexity ./src` returned zero units for a folder full of code and

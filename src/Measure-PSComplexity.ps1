@@ -66,7 +66,14 @@ function Measure-PSComplexity {
             foreach ($file in (Get-PSCxSourceFile -Path $p -Recurse:$Recurse)) {
                 $errors = $null
                 $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$errors)
-                if ($errors) { Write-Warning "Skipped '$file' -- parse error: $($errors[0].Message)"; continue }
+                if ($errors) {
+                    # Write-Error, not Write-Warning: non-terminating, so measuring a tree
+                    # with one bad file still returns every other file's units -- but it
+                    # lands on a stream that -ErrorVariable can capture and CI does not
+                    # swallow. Test-PSComplexity captures exactly this and refuses.
+                    Write-Error "Skipped '$file' -- parse error: $($errors[0].Message)"
+                    continue
+                }
 
                 $cyc = Get-PSCxCyclomaticMap -Ast $ast
                 $cog = Get-PSCxCognitiveMap -Ast $ast
@@ -117,7 +124,15 @@ function Test-PSComplexity {
         [int]$MaxCognitive = 15,
         [switch]$Recurse
     )
-    $units = @(Measure-PSComplexity -Path $Path -Recurse:$Recurse)
+    # Parse failures are captured rather than allowed past. A file the gate could not read
+    # is a file it cannot vouch for, and "no unit exceeded a ceiling" is trivially true of a
+    # file that produced no units -- the same shape as passing over an empty selection.
+    $units = @(Measure-PSComplexity -Path $Path -Recurse:$Recurse -ErrorVariable parseErrors -ErrorAction SilentlyContinue)
+    if ($parseErrors.Count -gt 0) {
+        throw ("Refusing to vouch for $($parseErrors.Count) file(s) that did not parse: " +
+            (($parseErrors | ForEach-Object { $_.Exception.Message }) -join '; ') +
+            ". Fix the syntax, or exclude the file from the path you gate on.")
+    }
 
     # Refuse rather than pass. "No unit breached a ceiling" and "no unit was measured" are
     # the same $true, so a gate pointed at the wrong place reports clean -- which is the
