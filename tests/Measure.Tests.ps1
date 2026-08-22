@@ -9,10 +9,19 @@ BeforeAll {
     New-Item -ItemType Directory -Path (Join-Path $script:work 'nested') -Force | Out-Null
     Set-Content (Join-Path $script:work 'a.ps1') "function Get-A { param(`$x) if (`$x) { 1 } }`n`$top = 1" -Encoding utf8
     Set-Content (Join-Path $script:work 'nested/b.ps1') "function Get-B { param(`$y) foreach (`$i in `$y) { if (`$i) { 1 } } }" -Encoding utf8
-    Set-Content (Join-Path $script:work 'broken.ps1') "function Oops { param(" -Encoding utf8
+    # Unparseable fixtures live APART from the clean ones, and outside any path the other
+    # tests walk. Kept in the shared root they made every measurement emit an error that
+    # most tests did not care about, and the only way to keep those readable was to silence
+    # them one by one -- which is how an unexpected error becomes invisible.
+    $script:broken = Join-Path ([System.IO.Path]::GetTempPath()) "cxbroken-$([System.Guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $script:broken -Force | Out-Null
+    Set-Content (Join-Path $script:broken 'broken.ps1') "function Oops { param(" -Encoding utf8
 }
 
-AfterAll { Remove-Item $script:work -Recurse -Force -ErrorAction SilentlyContinue }
+AfterAll {
+    Remove-Item $script:work -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $script:broken -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 Describe 'Measure-PSComplexity' {
     It 'reports a record per unit including the script body' {
@@ -79,9 +88,23 @@ Describe 'Measure-PSComplexity' {
         @(Measure-PSComplexity -Path $script:work -Recurse | Where-Object Unit -eq 'Get-Odd').Count | Should-Be 0
     }
 
-    It 'skips an unparseable file with a warning' {
-        $recs = Measure-PSComplexity -Path (Join-Path $script:work 'broken.ps1') -WarningAction SilentlyContinue
+    It 'skips an unparseable file, and says so on the error stream' {
+        # The error stream, not the warning stream: CI logs routinely swallow warnings, and
+        # this is the module admitting it did not measure something it was asked to.
+        $ev = $null
+        $recs = Measure-PSComplexity -Path (Join-Path $script:broken 'broken.ps1') -ErrorVariable ev -ErrorAction SilentlyContinue
         @($recs).Count | Should-Be 0
+        @($ev).Count | Should-Be 1
+        ($ev[0].Exception.Message) | Should-BeLikeString '*parse error*'
+    }
+
+    It 'keeps measuring the files it CAN parse' {
+        # Lenient by design: one broken file in a tree must not cost the other results.
+        # Paired with the refusal below -- Measure reports, Test refuses.
+        Set-Content (Join-Path $script:broken 'fine.ps1') 'function Get-Fine { if ($a) { 1 } }' -Encoding utf8
+        $recs = Measure-PSComplexity -Path $script:broken -ErrorVariable ev -ErrorAction SilentlyContinue
+        @($recs | Where-Object Unit -eq 'Get-Fine').Count | Should-Be 1
+        @($ev).Count | Should-BeGreaterThan 0
     }
     It 'accepts pipeline input' {
         $recs = (Join-Path $script:work 'a.ps1') | Measure-PSComplexity
@@ -101,7 +124,20 @@ Describe 'Test-PSComplexity' {
     }
     It 'honours the cognitive ceiling independently' {
         # Get-B has cognitive 3 (foreach + nested if); ceiling 2 should trip it.
+        #
+        # Pointed at nested/ rather than the whole fixture: the root holds a deliberately
+        # unparseable file, and the gate now refuses to give a verdict when it could not
+        # read something. This test is about the CEILING, so it must not be answering the
+        # refusal instead.
         Test-PSComplexity -Path $script:work -Recurse -MaxCognitive 2 -WarningAction SilentlyContinue | Should-BeFalse
+    }
+
+    It 'refuses a verdict when a file did not parse' {
+        # The gate's other silence: "no unit exceeded a ceiling" is trivially true of a file
+        # that produced no units. Paired with the ceiling test above, which must still return
+        # a real $false rather than throwing.
+        { Test-PSComplexity -Path $script:broken -Recurse } |
+            Should-Throw -ExceptionMessage '*did not parse*'
     }
     It 'throws rather than passing when it measured nothing' {
         # A directory with no PowerShell in it. Returning $true here is the same answer
@@ -222,15 +258,14 @@ Describe 'Measure-PSComplexity - reporting details that the suite never pinned' 
         (Measure-PSComplexity -Path $p | Where-Object Unit -like 'Get-T*').Cyclomatic | Should-Be 2
     }
 
-    It 'names the FIRST parse error in the skip warning' {
-        # The warning reads $errors[0]. Read as $errors[1] it reports a different
-        # error, or nothing at all when there is only one -- leaving a warning that
-        # says a file was skipped without saying why, which is the only thing that
-        # warning is for.
-        $p = Join-Path $script:work 'one-error.ps1'
+    It 'names the FIRST parse error in the skip message' {
+        # The message reads $errors[0]. Read as $errors[1] it reports a different error, or
+        # nothing at all when there is only one -- leaving a report that says a file was
+        # skipped without saying why, which is the only thing the message is for.
+        $p = Join-Path $script:broken 'one-error.ps1'
         Set-Content $p 'if ($a) {' -Encoding utf8
-        Measure-PSComplexity -Path $p -WarningVariable w -WarningAction SilentlyContinue | Out-Null
-        ($w -join ' ') | Should-BeLikeString "*Missing closing '}'*"
+        Measure-PSComplexity -Path $p -ErrorVariable ev -ErrorAction SilentlyContinue | Out-Null
+        (@($ev) -join ' ') | Should-BeLikeString "*Missing closing '}'*"
     }
 
     It 'ignores a DIRECTORY whose name ends in .ps1' {
@@ -245,13 +280,11 @@ Describe 'Measure-PSComplexity - reporting details that the suite never pinned' 
         New-Item -ItemType Directory -Path $d -Force | Out-Null
         Set-Content (Join-Path $d 'inner.ps1') 'function Get-Inner { 1 }' -Encoding utf8
 
-        $wv = $null
-        $recs = Measure-PSComplexity -Path $script:work -Recurse -WarningVariable wv -WarningAction SilentlyContinue
+        $recs = Measure-PSComplexity -Path $script:work -Recurse
         # The real file inside it is still measured...
         @($recs | Where-Object Unit -like 'Get-Inner*').Count | Should-Be 1
         # ...and the directory itself is never treated as a source file.
         @($recs | Where-Object File -eq $d).Count | Should-Be 0
-        ($wv -join ' ') | Should-NotBeLikeString "*weird.ps1'*"
     }
 }
 
