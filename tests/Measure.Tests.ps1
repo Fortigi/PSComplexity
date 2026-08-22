@@ -35,6 +35,26 @@ Describe 'the declared output types' {
     }
 }
 
+Describe 'the shipped help' {
+    It 'describes every kind of unit the module actually reports' {
+        # The synopsis said "each function/filter, plus one <script-body>" for two releases
+        # after class members became units. Nothing contradicted it, because help text is
+        # prose and prose is checked by nobody. This asserts the claim against the vocabulary
+        # the code actually produces.
+        $h = (Get-Help Measure-PSComplexity).Synopsis -replace '\s+', ' '
+        foreach ($kind in 'function', 'class method', 'constructor', 'property', '<script-body>') {
+            $h | Should-BeLikeString "*$kind*" -Because "the synopsis omits $kind"
+        }
+    }
+
+    It 'resolves to the command help, not to a file header' {
+        # A <# #> block immediately before `function` becomes that function's help, so a file
+        # header written that way silently shadows the documentation meant for users. Paired
+        # with the case above: both would pass on an empty synopsis otherwise.
+        (Get-Help Test-PSComplexity).Synopsis | Should-BeLikeString '*Return $true if every unit*'
+    }
+}
+
 Describe 'Measure-PSComplexity' {
     It 'reports a record per unit including the script body' {
         $recs = Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1')

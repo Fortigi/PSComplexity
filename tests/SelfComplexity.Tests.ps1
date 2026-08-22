@@ -1,10 +1,10 @@
-# Dogfood: PSComplexity measures its own source and gates itself at <= 15 on both
-# metrics -- the same bar it exists to enforce for others.
+# Dogfood: PSComplexity gates its own source with the command it ships, at that command's
+# own default ceilings -- the same bar it exists to enforce for others.
 
 BeforeAll {
-    $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
-    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1') { . (Join-Path $src $f) }
-    $script:units = @(Measure-PSComplexity -Path $src -Recurse)
+    $script:src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
+    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1') { . (Join-Path $script:src $f) }
+    $script:units = @(Measure-PSComplexity -Path $script:src -Recurse)
 }
 
 Describe 'Self complexity gate' {
@@ -13,14 +13,15 @@ Describe 'Self complexity gate' {
         # and a literal here would fail on every unrelated edit to src/ while proving no more.
         $script:units.Count | Should-BeGreaterThan 0
     }
-    It 'has no unit over cyclomatic 15' {
-        $over = @($script:units | Where-Object Cyclomatic -gt 15)
-        $detail = ($over | ForEach-Object { "$($_.Unit)=$($_.Cyclomatic)" }) -join ', '
-        $over.Count | Should-Be 0 -Because "over cyclomatic 15: $detail"
-    }
-    It 'has no unit over cognitive 15' {
-        $over = @($script:units | Where-Object Cognitive -gt 15)
-        $detail = ($over | ForEach-Object { "$($_.Unit)=$($_.Cognitive)" }) -join ', '
-        $over.Count | Should-Be 0 -Because "over cognitive 15: $detail"
+    It 'passes the gate it ships, at the ceilings it ships' {
+        # Calls Test-PSComplexity rather than re-deriving the comparison. It used to do the
+        # latter, which meant the shipped command and the gate that proves this project
+        # meets its own bar could disagree without anything noticing -- and the ceilings had
+        # to be written out again here, so changing the default missed this file.
+        #
+        # The warnings carry the offending units, so a failure still names them.
+        $wv = $null
+        $ok = Test-PSComplexity -Path $script:src -Recurse -WarningVariable wv -WarningAction SilentlyContinue
+        $ok | Should-BeTrue -Because (($wv | ForEach-Object { $_.Message }) -join '; ')
     }
 }

@@ -31,8 +31,9 @@ function Get-PSCxSourceFile {
 function Measure-PSComplexity {
     <#
     .SYNOPSIS
-        Measure cyclomatic and cognitive complexity of PowerShell code, per unit
-        (each function/filter, plus one <script-body> per file for top-level code).
+        Measure cyclomatic and cognitive complexity of PowerShell code, per unit: each
+        function and filter, each class method, constructor and initialised property, plus
+        one <script-body> per file for top-level code.
 
     .DESCRIPTION
         Parses each .ps1/.psm1 file with the PowerShell AST and reports both metrics.

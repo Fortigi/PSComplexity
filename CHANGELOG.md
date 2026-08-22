@@ -86,9 +86,10 @@ A run that starts failing after this upgrade is the honest one.
   logic against its reference-score suite, gated on the mutation score (~90%). The two
   Fortigi modules dogfood each other -- PSComplexity gates PSMutant's complexity, and
   PSMutant gates PSComplexity's test quality.
-- The self-mutation gate is now set at **100%**: coverage is 100% and
-  every one of the 41 mutants is killed, with no mutant declared equivalent. From here a
-  new survivor fails the build.
+- The self-mutation gate is now set at **100%**: every mutant is killed, with none declared
+  equivalent. From here a new survivor fails the build. (The count is deliberately not
+  quoted: it moves with every operator change and a hand-maintained figure goes stale
+  silently -- the gate prints it.)
 
 ### Fixed
 - Top-level script code -- decisions and calls outside any function -- is now covered by
@@ -99,6 +100,10 @@ A run that starts failing after this upgrade is the honest one.
   discovery are all pinned; each could previously be changed without a test noticing.
 
 ### Internal
+- Documentation claims the code does not support are corrected, each verified by running it
+  rather than by reading: load order is inert, the emitted `File` is absolute, and the
+  shipped `Get-Help` synopsis omitted class members for two releases. The self-complexity
+  gate now calls the shipped `Test-PSComplexity` instead of re-deriving the comparison.
 - **Every gate that judges a test run now checks that each test file actually ran.** A file
   with a parse error contributes zero tests and zero failures, so a run reported
   "passed / 0 failed" while an entire file never executed -- and each gate asked only about
