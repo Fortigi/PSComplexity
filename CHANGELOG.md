@@ -54,6 +54,13 @@ All notable changes to PSComplexity are documented here. Format follows
   note. Verified that the setting actually fires, in both directions.
 - The fixture inside `tools/Test-PSCxPesterCompatibility.ps1` deliberately keeps the classic
   syntax: it executes under Pester 5, where the `Should-*` commands do not exist.
+- **The self-mutation gate now runs the three opt-in operators PSMutant runs on itself** --
+  `ConditionalBoundary`, `ConditionForcing` and `ReturnValue`. The mutant count goes from 54
+  to 122, and the previous 100% turns out to have covered less than half of what is
+  reachable. Six survivors appeared immediately, every one of them structural logic the
+  expression-only set could not see.
+- Assertions over collections are exact counts rather than "at least one". Verified against a
+  deliberately injected duplicate-row defect: six tests catch it that all passed before.
 
 ## [0.2.0] - 2026-08-19
 ### Added

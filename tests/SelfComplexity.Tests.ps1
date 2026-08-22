@@ -9,6 +9,8 @@ BeforeAll {
 
 Describe 'Self complexity gate' {
     It 'measured its own units' {
+        # Deliberately NOT an exact count: this asserts that the gate below judged something,
+        # and a literal here would fail on every unrelated edit to src/ while proving no more.
         $script:units.Count | Should-BeGreaterThan 0
     }
     It 'has no unit over cyclomatic 15' {
