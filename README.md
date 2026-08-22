@@ -39,11 +39,11 @@ if (-not (Test-PSComplexity ./src -Recurse -MaxCyclomatic 15 -MaxCognitive 15)) 
 `Measure-PSComplexity` accepts files or directories (pipeline-friendly) and emits objects:
 
 ```
-File        Unit                 Line Cyclomatic Cognitive
-----        ----                 ---- ---------- ---------
-src\Foo.ps1 Get-Foo                12          8         9
-src\Foo.ps1 Order.Process          31          5        10
-src\Foo.ps1 <script-body>          1           1         0
+File                    Unit                 Line Cyclomatic Cognitive
+----                    ----                 ---- ---------- ---------
+C:\proj\src\Foo.ps1     <script-body>           1          1         0
+C:\proj\src\Foo.ps1     Get-Foo                12          8         9
+C:\proj\src\Foo.ps1     Order.Process          31          5        10
 ```
 
 Class members are reported as `Class.Member`, so two classes with a method of the same
