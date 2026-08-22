@@ -17,9 +17,21 @@ on:
         type: boolean
         default: true
 
+# NEVER cancel-in-progress here, unlike the other two. A superseded CI run is waste; a
+# half-finished publish is a gallery version that cannot be withdrawn. The group serialises
+# releases instead, so a second tag waits rather than racing the first.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+# Least privilege on the one job that holds the gallery key.
+permissions:
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 

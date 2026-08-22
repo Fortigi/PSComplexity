@@ -73,6 +73,10 @@ A run that starts failing after this upgrade is the honest one.
   finding failed nothing and blocked everything.
 - Pinned versions move to `.github/pins.env`, loaded and asserted by each workflow.
   `ConvertToSARIF` had no version pin at all.
+- Every workflow now declares a `concurrency` group, a `timeout-minutes` and a
+  least-privilege `permissions` block, and pinned modules are cached. `publish.yml`
+  deliberately does **not** cancel in progress: a half-finished publish is a gallery
+  version that cannot be withdrawn.
 - A coverage gate: `tools/Measure-PSCxCoverage.ps1`, enforced at 100% in CI. The figure was
   claimed in two places and measured by nobody, and the command count quoted in this file
   had been wrong for two releases.
