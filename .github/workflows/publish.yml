@@ -58,7 +58,11 @@ jobs:
           Install-Module Pester -RequiredVersion $env:PESTER_VERSION -Force -Scope CurrentUser
           Install-Module PSScriptAnalyzer -RequiredVersion $env:PSSA_VERSION -Force -Scope CurrentUser
 
-      - name: Full quality gate (lint + tests + self-complexity)
+      # NOT the full quality set, and it used to say it was. This runs lint and the tests;
+      # the merge gate additionally runs coverage, self-mutation, the Pester 5 compatibility
+      # guard and the whole chain on Windows. That is why the CI-conclusion check below
+      # exists -- this step is a fast fail, not the gate.
+      - name: Quick gate (lint + tests)
         shell: pwsh
         run: |
           # The same committed script ci.yml and code-scanning.yml run. This was a THIRD
@@ -74,6 +78,40 @@ jobs:
           $cfg.Should.DisableV5 = $true
           $r = Invoke-Pester -Configuration $cfg
           if ($r.FailedCount -gt 0) { throw "$($r.FailedCount) test(s) failed -- not publishing" }
+
+      # The publish gate is a SUBSET of the merge gate -- it does not run self-mutation, the
+      # Pester 5 compatibility guard, or anything on Windows. Re-running a subset here is both
+      # slower and weaker than asking whether the run that did all of it passed for this exact
+      # commit. It also means every gate ci.yml gains later is inherited without editing this
+      # file, which is what stops the two drifting apart again.
+      - name: Require CI to have passed for this commit
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dryRun) }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $sha = '${{ github.sha }}'
+          $deadline = (Get-Date).AddMinutes(15)
+          # Tagging straight after a merge is the normal flow, so wait for the in-flight run
+          # rather than refusing it.
+          while ($true) {
+            $all = @(gh api "repos/${{ github.repository }}/commits/$sha/check-runs" --paginate --jq '.check_runs[] | "\(.name)=\(.status)/\(.conclusion)"')
+            # BOTH matrix legs must have passed. Selecting one would publish a tag that was
+            # never proven on the other platform, which is most of why the matrix exists.
+            $legs = @(gh api "repos/${{ github.repository }}/commits/$sha/check-runs" --paginate --jq '.check_runs[] | select(.name | startswith("test (")) | "\(.status)/\(.conclusion)"')
+            if ($legs.Count -ge 2 -and @($legs | Where-Object { $_ -ne 'completed/success' }).Count -eq 0) {
+              Write-Host "CI passed for $sha on all $($legs.Count) legs"; break
+            }
+            # Refuse at once on a definitive failure rather than waiting out the timeout.
+            if (@($legs | Where-Object { $_ -like 'completed/*' -and $_ -ne 'completed/success' }).Count -gt 0) {
+              throw "CI did not pass for $sha - $($legs -join ', '). Not publishing."
+            }
+            if ((Get-Date) -gt $deadline) {
+              throw "CI has not reported success for $sha within 15 minutes (saw: $($all -join ', ')). Not publishing."
+            }
+            Write-Host "waiting for CI on $sha ... (saw: $($all -join ', '))"
+            Start-Sleep -Seconds 30
+          }
 
       - name: Release consistency (ModuleVersion, CHANGELOG, ReleaseNotes)
         shell: pwsh
@@ -113,6 +151,29 @@ jobs:
               "already=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           }
 
+      # Staged as its OWN step so there is a seam to test. It used to be assembled inside the
+      # publish step and pushed in the same breath, which made the artifact that becomes
+      # permanent the one artifact nothing ever executed.
+      - name: Stage the module
+        if: steps.exists.outputs.already != 'true'
+        shell: pwsh
+        run: |
+          $stage = Join-Path ([System.IO.Path]::GetTempPath()) 'PSComplexity'
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          # Publish-Module requires the folder to be named exactly like the module.
+          Copy-Item ./PSComplexity.psd1, ./PSComplexity.psm1, ./src, ./LICENSE, ./README.md -Destination $stage -Recurse -Force
+          "STAGE_DIR=$stage" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Get-ChildItem $stage | ForEach-Object { Write-Host "  staged: $($_.Name)" }
+
+      # Load the artifact that is about to become permanent and make it do its job: measure a
+      # fixture, pass a generous ceiling, FAIL a strict one, and refuse a path it measured
+      # nothing under. A gallery version cannot be withdrawn.
+      - name: Smoke-test the staged package
+        if: steps.exists.outputs.already != 'true'
+        shell: pwsh
+        run: ./tools/Test-PSCxPackage.ps1 -Path $env:STAGE_DIR
+
       - name: Publish to PSGallery
         if: steps.exists.outputs.already != 'true'
         shell: pwsh
@@ -121,10 +182,7 @@ jobs:
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dryRun }}
         run: |
           if (-not $env:PSGALLERY_API_KEY) { throw 'PSGALLERY_API_KEY secret is not set' }
-          $stage = Join-Path ([System.IO.Path]::GetTempPath()) 'PSComplexity'
-          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-          New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item ./PSComplexity.psd1, ./PSComplexity.psm1, ./src, ./LICENSE, ./README.md -Destination $stage -Recurse -Force
+          $stage = $env:STAGE_DIR
 
           if ($env:DRY_RUN -eq 'true') {
               Write-Host '### DRY RUN -- Publish-Module -WhatIf ###' -ForegroundColor Yellow

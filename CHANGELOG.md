@@ -77,6 +77,11 @@ A run that starts failing after this upgrade is the honest one.
   least-privilege `permissions` block, and pinned modules are cached. `publish.yml`
   deliberately does **not** cancel in progress: a half-finished publish is a gallery
   version that cannot be withdrawn.
+- The publish path now requires the merge gate to have passed for the exact commit being
+  released, on **both** matrix legs, and loads the staged package before pushing it:
+  `tools/Test-PSCxPackage.ps1` imports it in a fresh process, measures a fixture, requires
+  the gate to fail a strict ceiling, and requires it to refuse a path it measured nothing
+  under.
 - A coverage gate: `tools/Measure-PSCxCoverage.ps1`, enforced at 100% in CI. The figure was
   claimed in two places and measured by nobody, and the command count quoted in this file
   had been wrong for two releases.
