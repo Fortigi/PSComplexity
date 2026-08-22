@@ -136,8 +136,14 @@ Describe 'Test-PSComplexity' {
         # The gate's other silence: "no unit exceeded a ceiling" is trivially true of a file
         # that produced no units. Paired with the ceiling test above, which must still return
         # a real $false rather than throwing.
+        # Asserted on the TAIL of the message, not the head. Break the concatenation that
+        # builds it and PowerShell raises a conversion error that QUOTES its left operand --
+        # so "Cannot convert value "Refusing to vouch for 1 file(s) that did not parse: "
+        # to type System.Int32" still matches a '*did not parse*' pattern. The assertion
+        # matched the very failure it existed to detect. Only text from after the break
+        # distinguishes them.
         { Test-PSComplexity -Path $script:broken -Recurse } |
-            Should-Throw -ExceptionMessage '*did not parse*'
+            Should-Throw -ExceptionMessage '*Fix the syntax*'
     }
     It 'throws rather than passing when it measured nothing' {
         # A directory with no PowerShell in it. Returning $true here is the same answer
@@ -280,11 +286,17 @@ Describe 'Measure-PSComplexity - reporting details that the suite never pinned' 
         New-Item -ItemType Directory -Path $d -Force | Out-Null
         Set-Content (Join-Path $d 'inner.ps1') 'function Get-Inner { 1 }' -Encoding utf8
 
-        $recs = Measure-PSComplexity -Path $script:work -Recurse
+        $ev = $null
+        $recs = Measure-PSComplexity -Path $script:work -Recurse -ErrorVariable ev -ErrorAction SilentlyContinue
         # The real file inside it is still measured...
         @($recs | Where-Object Unit -like 'Get-Inner*').Count | Should-Be 1
         # ...and the directory itself is never treated as a source file.
         @($recs | Where-Object File -eq $d).Count | Should-Be 0
+        # ...and it is never even HANDED to the parser. Drop the -File filter in discovery
+        # and a directory called weird.ps1 passes the extension test, reaches ParseFile and
+        # fails there -- producing no record, so the two assertions above still pass. This
+        # is the only one that can tell.
+        (@($ev) -join ' ') | Should-NotBeLikeString "*weird.ps1'*"
     }
 }
 
