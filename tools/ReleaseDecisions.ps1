@@ -120,8 +120,9 @@ function Get-PSCxReleaseFault {
     return $faults.ToArray()
 }
 
-function Set-PSCxManifestReleaseNotes {
-    # Replace ONLY the ReleaseNotes value in the manifest text.
+function Get-PSCxRewrittenManifest {
+    # The manifest TEXT with only its ReleaseNotes value replaced. Returns a string and writes
+    # nothing -- the caller decides whether to save it.
     #
     # Not Update-ModuleManifest: that regenerates the whole file from the data it parsed, so
     # the hand-written layout goes, a "Generated on <today>" stamp appears that churns on

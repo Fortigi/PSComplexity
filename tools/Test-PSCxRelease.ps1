@@ -46,7 +46,7 @@ if ($Apply) {
     }
     $expected = Get-PSCxExpectedReleaseNotes -Version $changelogVersion -Notes $notes -DetailUrl $detailUrl
     $text = Get-Content -LiteralPath $ManifestPath -Raw
-    Set-PSCxManifestReleaseNotes -ManifestText $text -Notes $expected |
+    Get-PSCxRewrittenManifest -ManifestText $text -Notes $expected |
         Set-Content -LiteralPath $ManifestPath -NoNewline -Encoding utf8
     $check = [string](Import-PowerShellDataFile -LiteralPath $ManifestPath).PrivateData.PSData.ReleaseNotes
     if ($check -ne $expected) { throw 'ReleaseNotes did not survive the manifest update.' }

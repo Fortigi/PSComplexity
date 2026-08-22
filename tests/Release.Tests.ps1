@@ -72,7 +72,7 @@ Describe 'Get-PSCxExpectedReleaseNotes' {
     }
 }
 
-Describe 'Set-PSCxManifestReleaseNotes' {
+Describe 'Get-PSCxRewrittenManifest' {
     BeforeAll {
         $script:Manifest = @'
 @{
@@ -91,7 +91,7 @@ Describe 'Set-PSCxManifestReleaseNotes' {
     It 'changes the notes and nothing else' {
         # The whole reason this exists rather than Update-ModuleManifest, which regenerates
         # the file: the comment, the layout and every other value have to survive.
-        $out = Set-PSCxManifestReleaseNotes -ManifestText $script:Manifest -Notes 'new notes'
+        $out = Get-PSCxRewrittenManifest -ManifestText $script:Manifest -Notes 'new notes'
         $out | Should-BeLikeString "*ReleaseNotes = 'new notes'*"
         $out | Should-BeLikeString '*A comment that explains WHY*'
         $out | Should-BeLikeString "*ProjectUri   = 'https://example/repo'*"
@@ -101,7 +101,7 @@ Describe 'Set-PSCxManifestReleaseNotes' {
     It 'doubles a quote so the result still parses' {
         # An apostrophe in the notes would otherwise close the string and leave a manifest
         # that cannot be read at all -- discovered at publish, on the irreversible step.
-        $out = Set-PSCxManifestReleaseNotes -ManifestText $script:Manifest -Notes "it's fixed"
+        $out = Get-PSCxRewrittenManifest -ManifestText $script:Manifest -Notes "it's fixed"
         $out | Should-BeLikeString "*'it''s fixed'*"
         $f = Join-Path ([System.IO.Path]::GetTempPath()) "psd-$([System.Guid]::NewGuid().ToString('N')).psd1"
         try {
@@ -115,7 +115,7 @@ Describe 'Set-PSCxManifestReleaseNotes' {
     It 'refuses a manifest with no ReleaseNotes value rather than silently doing nothing' {
         # Returning the text unchanged would make -Apply a no-op and the verify step would
         # then fail forever with no way to fix it.
-        { Set-PSCxManifestReleaseNotes -ManifestText '@{ ModuleVersion = ''1.0.0'' }' -Notes 'x' } |
+        { Get-PSCxRewrittenManifest -ManifestText '@{ ModuleVersion = ''1.0.0'' }' -Notes 'x' } |
             Should-Throw
     }
 }
