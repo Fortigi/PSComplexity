@@ -52,6 +52,12 @@ A run that starts failing after this upgrade is the honest one.
   bucket layout rather than insertion or line position and is not required to be stable, so
   two runs over one unchanged file could differ. Units within a file now sort by start line,
   with the unit name breaking a same-line tie.
+- **A file named by two inputs is measured once.** Passing a directory and a file inside it
+  emitted every unit of that file twice, doubling its contribution to anything that counts
+  rows. Deduplicated on the resolved path, case-insensitively.
+- **Enum members are no longer reported as units.** An initialised member (`Red = 1`) is a
+  `PropertyMemberAst` with a value, exactly like a class property, so it became a unit while
+  a bare `Green` did not -- an enum's complexity depended on whether anyone numbered it.
 - **A directory scanned without `-Recurse` measured nothing at all, and the gate passed.**
   `-Include` is ignored for a directory unless `-Recurse` is also given, so
   `Measure-PSComplexity ./src` returned zero units for a folder full of code and

@@ -61,9 +61,20 @@ function Measure-PSComplexity {
         [Parameter(Mandatory, ValueFromPipeline, Position = 0)] [ValidateNotNullOrEmpty()] [string[]]$Path,
         [switch]$Recurse
     )
+    begin {
+        # Resolved paths already emitted. Two inputs can name one file -- a directory and
+        # something inside it, or a wildcard and a literal -- and measuring it twice put
+        # duplicate rows in the output, doubling that file's contribution to anything that
+        # counts. In `begin` rather than `process` so it also spans pipeline input, where
+        # each item arrives as its own invocation of the block below.
+        $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    }
     process {
         foreach ($p in $Path) {
             foreach ($file in (Get-PSCxSourceFile -Path $p -Recurse:$Recurse)) {
+                # OrdinalIgnoreCase: Windows and macOS resolve the same file under different
+                # casing, and a case-sensitive check would let those through as two files.
+                if (-not $seen.Add($file)) { continue }
                 $errors = $null
                 $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$errors)
                 if ($errors) {
