@@ -154,3 +154,66 @@ Describe 'Get-PSCxReleaseFault' {
         @(Get-PSCxReleaseFault @a).Count | Should-Be 2
     }
 }
+
+Describe 'Get-PSCxPinValue' {
+    BeforeAll {
+        $script:Pins = @(
+            '# a comment'
+            ''
+            'PSSA_VERSION=1.25.0'
+            'PSSA_PATHS=./src ./tests ./tools'
+            '#PSSA_VERSION=9.9.9'
+            'ODD=a=b'
+        )
+    }
+
+    It 'reads a simple value' {
+        Get-PSCxPinValue -Line $script:Pins -Name 'PSSA_VERSION' | Should-Be '1.25.0'
+    }
+    It 'keeps a value containing spaces, because PSSA_PATHS is a list' {
+        Get-PSCxPinValue -Line $script:Pins -Name 'PSSA_PATHS' | Should-Be './src ./tests ./tools'
+    }
+    It 'splits on the FIRST equals only' {
+        # A value may legitimately contain one. Splitting on all of them silently truncates.
+        Get-PSCxPinValue -Line $script:Pins -Name 'ODD' | Should-Be 'a=b'
+    }
+    It 'ignores a commented-out key rather than reading it' {
+        # Paired with the first test: the same key appears commented below, and reading it
+        # would pin the analyzer to a version nobody chose.
+        Get-PSCxPinValue -Line $script:Pins -Name 'PSSA_VERSION' | Should-Be '1.25.0'
+    }
+    It 'matches the key in full' {
+        # PSSA_VERSION must not answer for PSSA, or a prefix silently wins.
+        Get-PSCxPinValue -Line $script:Pins -Name 'PSSA' | Should-BeNull
+    }
+    It 'returns null for a key that is not there' {
+        # The caller turns this into an error. If it returned an empty string instead, the
+        # analyzer gate would scan nothing and pass.
+        Get-PSCxPinValue -Line $script:Pins -Name 'NOPE' | Should-BeNull
+    }
+    It 'survives a file of only blank lines and comments' {
+        Get-PSCxPinValue -Line @('', '# x', '   ') -Name 'ANY' | Should-BeNull
+    }
+}
+
+Describe 'the pins file itself' {
+    It 'declares every key the workflows require' {
+        # The workflows assert this at run time; asserting it here means a missing pin fails
+        # in the suite rather than five minutes into a job.
+        $pins = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) '.github/pins.env')
+        foreach ($k in 'PESTER_VERSION', 'PESTER_COMPAT_VERSION', 'PSSA_VERSION',
+            'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS') {
+            Get-PSCxPinValue -Line $pins -Name $k | Should-NotBeNull -Because "pins.env must define $k"
+        }
+    }
+    It 'names only paths that exist' {
+        # An entry naming a moved directory makes the analyzer refuse rather than scan less,
+        # but only because it checks; this catches it a step earlier.
+        $root = Split-Path -Parent $PSScriptRoot
+        $pins = Get-Content (Join-Path $root '.github/pins.env')
+        foreach ($p in (Get-PSCxPinValue -Line $pins -Name 'PSSA_PATHS') -split ' ') {
+            Test-Path (Join-Path $root $p) | Should-BeTrue -Because "PSSA_PATHS names $p"
+        }
+    }
+}
+

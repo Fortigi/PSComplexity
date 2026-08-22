@@ -25,14 +25,51 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Load pinned versions
+        shell: pwsh
+        run: |
+          $required = 'PSSA_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS'
+          $pins = @{}
+          foreach ($line in Get-Content .github/pins.env) {
+            $t = $line.Trim()
+            if (-not $t -or $t.StartsWith('#')) { continue }
+            $k, $v = $t -split '=', 2
+            $pins[$k.Trim()] = $v.Trim()
+          }
+          # Asserted, not assumed: a missing key would install "latest" or analyse nothing,
+          # and both look exactly like a clean run.
+          foreach ($k in $required) {
+            if (-not $pins.ContainsKey($k) -or -not $pins[$k]) { throw ".github/pins.env is missing a value for $k" }
+          }
+          $pins.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" } |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install pinned modules
+        shell: pwsh
+        run: |
+          # ConvertToSARIF had no version at all: this required check could change behaviour
+          # on someone else's release, with no commit here to explain it.
+          $wanted = @(
+            @{ Name = 'PSScriptAnalyzer'; Version = $env:PSSA_VERSION }
+            @{ Name = 'ConvertToSARIF';   Version = $env:CONVERTTOSARIF_VERSION }
+          )
+          foreach ($w in $wanted) {
+            if (-not (Get-Module $w.Name -ListAvailable | Where-Object Version -eq $w.Version)) {
+              Install-Module $w.Name -RequiredVersion $w.Version -Force -Scope CurrentUser
+            }
+            if (-not (Get-Module $w.Name -ListAvailable | Where-Object Version -eq $w.Version)) {
+              throw "$($w.Name) $($w.Version) is not available after install"
+            }
+          }
+
+      # The SAME script the failing lint gate runs. Spelled out separately, the two
+      # disagreed about severity and scope, so a finding could block a merge here while
+      # passing there -- and code scanning is a required check, so it blocked silently.
       - name: Run PSScriptAnalyzer -> SARIF
         shell: pwsh
         run: |
-          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
-          Install-Module ConvertToSARIF -Force -Scope CurrentUser
-          Import-Module ConvertToSARIF
-          Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 |
-            ConvertTo-SARIF -FilePath results.sarif
+          Import-Module ConvertToSARIF -RequiredVersion $env:CONVERTTOSARIF_VERSION
+          ./tools/Invoke-PSCxAnalyzer.ps1 | ConvertTo-SARIF -FilePath results.sarif
 
       - name: Upload SARIF to code scanning
         uses: github/codeql-action/upload-sarif@54f647b7e1bb85c95cddabcd46b0c578ec92bc1a # v4
