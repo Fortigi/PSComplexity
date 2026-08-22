@@ -6,6 +6,24 @@ All notable changes to PSComplexity are documented here. Format follows
 ## [Unreleased]
 
 ## [0.2.1] - 2026-08-21
+
+### For consumers
+
+FIXED - this release fixes two separate ways the gate reported success without measuring
+anything, and if either affected you, your builds have been passing on evidence that was
+never gathered. First: scanning a DIRECTORY without -Recurse resolved to zero files.
+-Include is ignored for a directory unless -Recurse is also given, so Measure-PSComplexity
+./src returned nothing for a folder full of code, and Test-PSComplexity ./src
+-MaxCyclomatic 1 returned $true against units that all breached. Second: a path containing
+[ or ] matched nothing, because -Path reads brackets as a wildcard character class, so a
+real directory named my[1]proj scored a confident, empty zero. Discovery now filters on the
+file extension and resolves an existing path literally; a pattern that names nothing on
+disk still falls through to wildcard matching, so ./src/*.ps1 keeps working. AND, so that
+neither can be silent again, Test-PSComplexity now THROWS when it measured no units instead
+of returning $true - nothing breached a ceiling and nothing was measured must never be the
+same answer. WHAT TO DO: if you gate a flat directory, re-run before upgrading and compare.
+A run that starts failing after this upgrade is the honest one.
+
 ### Fixed
 - **A directory scanned without `-Recurse` measured nothing at all, and the gate passed.**
   `-Include` is ignored for a directory unless `-Recurse` is also given, so
