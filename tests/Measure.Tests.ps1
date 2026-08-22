@@ -57,6 +57,44 @@ function Mike { if ($c) { 1 } }
             Should-Be 'Alfa,Beta'
     }
 
+    It 'measures a file once when two inputs name it' {
+        # A directory and a file inside it. Measuring it twice doubled that file's
+        # contribution to anything that counts rows rather than taking a max.
+        $recs = @(Measure-PSComplexity -Path $script:work, (Join-Path $script:work 'a.ps1'))
+        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-Be 1
+    }
+
+    It 'still measures two DIFFERENT files given as two inputs' {
+        # Paired with the test above: deduplicating on something too coarse -- the input
+        # string, or the directory -- would satisfy it by measuring less.
+        $recs = @(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1'), (Join-Path $script:work 'nested/b.ps1'))
+        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-Be 1
+        @($recs | Where-Object Unit -eq 'Get-B').Count | Should-Be 1
+    }
+
+    It 'does not report enum members as units' {
+        # An initialised member is a PropertyMemberAst with a value, exactly like a class
+        # property, so `Red = 1` became a unit while a bare `Green` did not -- an enum's
+        # complexity depended on whether anyone numbered it. A label is not code.
+        $f = Join-Path $script:work 'enum.ps1'
+        Set-Content $f @'
+enum Colour {
+    Red = 1
+    Green
+    Blue = 3
+}
+'@ -Encoding utf8
+        ((Measure-PSComplexity -Path $f | ForEach-Object Unit) -join ',') | Should-Be '<script-body>'
+    }
+
+    It 'still reports an initialised CLASS property as a unit' {
+        # The other half of the same predicate. Excluding enum members by testing for an
+        # initialiser alone would take class properties with it, and those do hold code.
+        $f = Join-Path $script:work 'class-prop.ps1'
+        Set-Content $f 'class Box { [int]$Size = $(if ($env:BIG) { 9 } else { 1 }) }' -Encoding utf8
+        @(Measure-PSComplexity -Path $f | Where-Object Unit -eq 'Box.Size').Count | Should-Be 1
+    }
+
     It 'reports Cyclomatic 1 / Cognitive 0 for a decision-free unit' {
         $flat = Join-Path $script:work 'flat.ps1'
         Set-Content $flat 'function Get-Flat { param($x) $x }' -Encoding utf8

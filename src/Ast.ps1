@@ -131,7 +131,19 @@ function Get-PSCxUnitTable {
     # $script:PSCxUnitBoundaryTypes would come back empty and match nothing.
     $isBodyOwner = {
         param($x)
-        if ($x -is [System.Management.Automation.Language.PropertyMemberAst]) { return [bool]$x.InitialValue }
+        if ($x -is [System.Management.Automation.Language.PropertyMemberAst]) {
+            # An ENUM member is a PropertyMemberAst too, and an initialised one -- `Red = 1`
+            # -- would otherwise become a unit while a bare `Green` would not, making an
+            # enum's complexity depend on whether anyone numbered its members. A label is
+            # not code; there is nothing in it to measure.
+            #
+            # Folded into ONE returned expression rather than an early `return $false`: this
+            # is a FindAll predicate, so $false and $null behave identically and a separate
+            # return is unobservable -- it survived every mutant. The `-and` is observable,
+            # because flipping it turns enum members back into units.
+            $isEnumMember = $x.Parent -is [System.Management.Automation.Language.TypeDefinitionAst] -and $x.Parent.IsEnum
+            return (-not $isEnumMember) -and [bool]$x.InitialValue
+        }
         return $x.GetType().Name -in $script:PSCxUnitBoundaryTypes
     }
     foreach ($node in $Ast.FindAll($isBodyOwner, $true)) {
