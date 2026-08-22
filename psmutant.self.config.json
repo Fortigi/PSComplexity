@@ -14,7 +14,8 @@
     "src/Measure-PSComplexity.ps1": ["tests/Measure.Tests.ps1"]
   },
   "coveredLinesOnly": true,
-  "operators": ["BinaryOperator", "BooleanLiteral", "NumberLiteral", "NegationRemoval"],
+  "_operators_comment": "The three opt-in operators PSMutant itself runs. Without them the gate sees only expressions, so structural logic -- a guard, an early return, a fencepost -- scores a vacuous 100%. StringLiteral stays off: high volume, low signal.",
+  "operators": ["BinaryOperator", "BooleanLiteral", "NumberLiteral", "NegationRemoval", "ConditionalBoundary", "ConditionForcing", "ReturnValue"],
   "thresholds": { "high": 90, "low": 75, "break": 100 },
   "reportPath": "reports/ps-mutation-self.json"
 }

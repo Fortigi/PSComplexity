@@ -18,7 +18,7 @@ Describe 'Measure-PSComplexity' {
     It 'reports a record per unit including the script body' {
         $recs = Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1')
         ($recs | Where-Object Unit -eq 'Get-A').Cyclomatic | Should-Be 2
-        @($recs | Where-Object Unit -eq '<script-body>').Count | Should-BeGreaterThan 0
+        @($recs | Where-Object Unit -eq '<script-body>').Count | Should-Be 1
     }
     It 'reports Cyclomatic 1 / Cognitive 0 for a decision-free unit' {
         $flat = Join-Path $script:work 'flat.ps1'
@@ -29,14 +29,14 @@ Describe 'Measure-PSComplexity' {
     }
     It 'recurses a directory and finds nested files' {
         $recs = Measure-PSComplexity -Path $script:work -Recurse
-        @($recs | Where-Object Unit -eq 'Get-B').Count | Should-BeGreaterThan 0
+        @($recs | Where-Object Unit -eq 'Get-B').Count | Should-Be 1
     }
     It 'measures a flat directory without -Recurse, and only that directory' {
         # Two assertions, and the FIRST one is the test. Asserting only that the nested
         # unit is absent passes just as well when discovery found nothing at all, which
         # is what it used to do -- so the gate returned $true over breaching code.
         $recs = Measure-PSComplexity -Path $script:work
-        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-BeGreaterThan 0
+        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-Be 1
         @($recs | Where-Object Unit -eq 'Get-B').Count | Should-Be 0
     }
     It 'gives a directory the same units with and without -Recurse when nothing is nested' {
@@ -48,7 +48,7 @@ Describe 'Measure-PSComplexity' {
 
         $shallow = @(Measure-PSComplexity -Path $flatDir)
         $deep    = @(Measure-PSComplexity -Path $flatDir -Recurse)
-        $shallow.Count | Should-BeGreaterThan 0
+        $shallow.Count | Should-Be 2   # Get-C and the script body
         $shallow.Count | Should-Be $deep.Count
     }
     It 'measures a directory whose name contains wildcard characters' {
@@ -59,21 +59,33 @@ Describe 'Measure-PSComplexity' {
         Set-Content -LiteralPath (Join-Path $odd 'd.ps1') 'function Get-D { if ($q) { 1 } }' -Encoding utf8
 
         $recs = @(Measure-PSComplexity -Path $odd -Recurse)
-        @($recs | Where-Object Unit -eq 'Get-D').Count | Should-BeGreaterThan 0
+        @($recs | Where-Object Unit -eq 'Get-D').Count | Should-Be 1
     }
     It 'still accepts a wildcard path that matches nothing literally' {
         # Resolving an existing path literally must not cost wildcard support: a pattern
         # names no file on disk, so it has to keep falling through to -Path.
         $recs = @(Measure-PSComplexity -Path (Join-Path $script:work '*.ps1'))
-        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-BeGreaterThan 0
+        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-Be 1
     }
+    It 'measures a file named explicitly whatever its extension, but not one it discovered' {
+        # Two halves of one contract, and both are needed. The extension filter belongs to
+        # DISCOVERY: name a file and you get it measured; hand over a directory and only
+        # PowerShell files come back. Drop the leaf check and the explicit half returns
+        # nothing, silently, for the file the caller pointed straight at.
+        $odd = Join-Path $script:work 'named.psx'
+        Set-Content -LiteralPath $odd 'function Get-Odd { if ($a) { 1 } }' -Encoding utf8
+
+        @(Measure-PSComplexity -Path $odd | Where-Object Unit -eq 'Get-Odd').Count | Should-Be 1
+        @(Measure-PSComplexity -Path $script:work -Recurse | Where-Object Unit -eq 'Get-Odd').Count | Should-Be 0
+    }
+
     It 'skips an unparseable file with a warning' {
         $recs = Measure-PSComplexity -Path (Join-Path $script:work 'broken.ps1') -WarningAction SilentlyContinue
         @($recs).Count | Should-Be 0
     }
     It 'accepts pipeline input' {
         $recs = (Join-Path $script:work 'a.ps1') | Measure-PSComplexity
-        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-BeGreaterThan 0
+        @($recs | Where-Object Unit -eq 'Get-A').Count | Should-Be 1
     }
 }
 
@@ -85,7 +97,7 @@ Describe 'Test-PSComplexity' {
         $wv = $null
         $result = Test-PSComplexity -Path (Join-Path $script:work 'a.ps1') -MaxCyclomatic 1 -WarningVariable wv -WarningAction SilentlyContinue
         $result | Should-BeFalse
-        @($wv).Count | Should-BeGreaterThan 0
+        @($wv).Count | Should-Be 1   # Get-A breaches; the script body does not
     }
     It 'honours the cognitive ceiling independently' {
         # Get-B has cognitive 3 (foreach + nested if); ceiling 2 should trip it.
@@ -122,7 +134,7 @@ Describe 'Test-PSComplexity' {
         try { Test-PSComplexity -Path $empty -Recurse } catch { $withRecurse = $_.Exception.Message }
 
         { Test-PSComplexity -Path $empty } | Should-Throw -ExceptionMessage '*-Recurse*'
-        $withRecurse | Should-NotBeNull
+        $withRecurse | Should-BeLikeString '*Measured no units*'
         $withRecurse | Should-NotBeLikeString '*-Recurse*'
     }
     It 'still passes over a real file that is within the ceilings' {
@@ -153,7 +165,7 @@ Describe 'Measure-PSComplexity - script-level code outside any function' {
         $p = Join-Path $script:work 'toplevel-if.ps1'
         Set-Content $p 'if ($env:CI) { "ci" } else { "local" }' -Encoding utf8
         $body = Measure-PSComplexity -Path $p | Where-Object Unit -eq '<script-body>'
-        @($body).Count   | Should-BeGreaterThan 0
+        @($body).Count   | Should-Be 1
         $body.Cyclomatic | Should-Be 2   # baseline 1 + the if
         $body.Cognitive  | Should-Be 2   # +1 the if, +1 the else branch
     }
@@ -236,7 +248,7 @@ Describe 'Measure-PSComplexity - reporting details that the suite never pinned' 
         $wv = $null
         $recs = Measure-PSComplexity -Path $script:work -Recurse -WarningVariable wv -WarningAction SilentlyContinue
         # The real file inside it is still measured...
-        @($recs | Where-Object Unit -like 'Get-Inner*').Count | Should-BeGreaterThan 0
+        @($recs | Where-Object Unit -like 'Get-Inner*').Count | Should-Be 1
         # ...and the directory itself is never treated as a source file.
         @($recs | Where-Object File -eq $d).Count | Should-Be 0
         ($wv -join ' ') | Should-NotBeLikeString "*weird.ps1'*"

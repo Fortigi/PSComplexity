@@ -28,6 +28,10 @@ function Get-Fib { param($n) if ($n -le 1) { return $n }; return (Get-Fib ($n - 
     @{ name = 'a -and b -and c is one run'; expected = 2; code = 'function T { param($a,$b,$c) if ($a -and $b -and $c) { 1 } }' }
     @{ name = 'a -and b -or c is two runs'; expected = 3; code = 'function T { param($a,$b,$c) if ($a -and $b -or $c) { 1 } }' }
     @{ name = 'nested if (structural + nesting)'; expected = 3; code = 'function T { param($a,$b) if ($a) { if ($b) { 1 } } }' }
+    # Paired deliberately: only the LABELLED jump adds a point. A fixture with just the
+    # labelled case passes equally well against a rule that counts every break.
+    @{ name = 'bare break adds nothing beyond its loop'; expected = 1; code = 'function T { foreach ($i in 1..3) { break } }' }
+    @{ name = 'labelled break adds one'; expected = 2; code = 'function T { :outer foreach ($i in 1..3) { break outer } }' }
     @{ name = 'else and elseif each add 1, no nesting bonus'; expected = 3; code = 'function T { param($a) if ($a -eq 1) { 1 } elseif ($a -eq 2) { 2 } else { 3 } }' }
     @{ name = 'labelled break'; expected = 4; code = 'function T { param($n) :L for ($i = 0; $i -lt $n; $i++) { if ($i -eq 3) { break L } } }' }
     @{ name = 'do-until loop'; expected = 1; code = 'function T { param($n) $i = 0; do { $i++ } until ($i -ge $n) }' }
@@ -100,6 +104,22 @@ class C { static [int] Helper($o) { if ($o) { return [D]::Helper(1) } return 0 }
         # this object -- (...).Walk() is a call on whatever that expression returned.
         $code = 'class C { [int] Walk($o) { if ($o) { return (Get-Item .).Walk(1) } return 0 } }'
         Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should-Be 1
+    }
+
+    It 'does not treat a plain function as the enclosing method' {
+        # The enclosing-method lookup must return $null for a FUNCTION boundary. If it
+        # returns the function instead, `$this.Walk()` inside a function named Walk is
+        # read as method recursion and scores 1 where it should score 0.
+        $code = 'function Walk { $this.Walk() }'
+        Get-UnitCognitive -Code $code -Unit 'Walk' | Should-Be 0
+    }
+
+    It 'ignores a DYNAMIC member name outside any class' {
+        # $this.$m() has no literal member name, so the name comparison below the guard
+        # cannot reject it -- only the "no enclosing method" guard can. Without that
+        # guard this scores 1.
+        $code = 'function Outer { $this.$m() }'
+        Get-UnitCognitive -Code $code -Unit 'Outer' | Should-Be 0
     }
 
     It 'ignores a member invocation outside any class' {

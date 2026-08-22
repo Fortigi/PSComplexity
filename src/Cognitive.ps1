@@ -109,10 +109,8 @@ function Test-PSCxSelfInvocation {
     if ($expr -is [System.Management.Automation.Language.VariableExpressionAst]) {
         return $expr.VariablePath.UserPath -eq 'this'
     }
-    if ($expr -is [System.Management.Automation.Language.TypeExpressionAst]) {
-        return $expr.TypeName.Name -eq $Method.Parent.Name
-    }
-    return $false
+    return ($expr -is [System.Management.Automation.Language.TypeExpressionAst]) -and
+        ($expr.TypeName.Name -eq $Method.Parent.Name)
 }
 
 function Get-PSCxCogMethodRecursionRow {
