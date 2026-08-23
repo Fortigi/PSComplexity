@@ -74,6 +74,17 @@ keys it holds could not distinguish units the tool could.
 
 ### Added
 
+- **A scan says what it is reading.** `Measure-PSComplexity -Verbose` now names each file
+  **before** parsing it, so a slow scan and a stuck one stop looking identical. The ordering is
+  the feature: a line written afterwards names a file that is already finished, and a scan stuck
+  on the next one would read exactly like a scan that completed. It matters because analysis is
+  O(nodes x depth), so one deeply nested file can dominate a run -- and because
+  `Test-PSComplexity` is the entry point people automate, so it runs against whole repositories
+  where nobody is watching a terminal. The gate inherits it through the nested call; silent
+  unless asked, because a gate that chatters by default gets its output filtered, and the filter
+  takes the parse errors with it.
+
+
 - **The construct vocabulary is closed against the parser.** The metrics recognise a
   hand-maintained allowlist spread over three places, and nothing compared it against what the
   parser can actually produce -- so a construct the module has never heard of contributed

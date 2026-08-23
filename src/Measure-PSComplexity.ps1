@@ -152,6 +152,15 @@ function Measure-PSComplexity {
                 # OrdinalIgnoreCase: Windows and macOS resolve the same file under different
                 # casing, and a case-sensitive check would let those through as two files.
                 if (-not $seen.Add($file)) { continue }
+                # BEFORE the parse, not after. A line written afterwards names files that are
+                # already done, so a scan stuck on one file looks exactly like a scan that has
+                # finished -- which is the whole complaint. Named here, the last line printed
+                # IS the file being read.
+                #
+                # Verbose rather than a progress bar or a default-on line: this is the command
+                # a CI gate calls, and a gate that chatters gets its output filtered, which
+                # takes the parse errors with it.
+                Write-Verbose "Measuring $file"
                 $errors = $null
                 $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$errors)
                 if ($errors) {
