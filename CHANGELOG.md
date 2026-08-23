@@ -74,6 +74,16 @@ keys it holds could not distinguish units the tool could.
 
 ### Added
 
+- **Every reference score is attributed to something outside this project.** The README claims
+  the cognitive metric reproduces the SonarSource scores; the suite checked numbers the project
+  had chosen itself, so a wrong interpretation would have had the suite agreeing with the bug --
+  and the mutation gate agreeing too, because both only ever compare the code against itself.
+  Each case now names its source: 11 taken from the specification, the PowerShell extensions the
+  spec does not cover, and the vocabulary pins. A case added without attribution fails **by
+  name**, so a number this project chose cannot sit among the reference scores looking like one
+  of them -- including the two the specification calls the classic implementation errors, which
+  are asserted by count as well as present.
+
 - **Pinned dependencies are watched instead of only written down.** A weekly job checks each
   pinned module against the gallery and opens one tracking issue when any has moved on;
   Dependabot watches the action SHAs, which `pins.env` structurally cannot hold because `uses:`
