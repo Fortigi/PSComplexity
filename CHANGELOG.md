@@ -74,6 +74,17 @@ keys it holds could not distinguish units the tool could.
 
 ### Added
 
+- **The construct vocabulary is closed against the parser.** The metrics recognise a
+  hand-maintained allowlist spread over three places, and nothing compared it against what the
+  parser can actually produce -- so a construct the module has never heard of contributed
+  nothing and the unit containing it scored as straight-line code. The direction is what made
+  it dangerous: an unrecognised construct can only lower a score, so the gate passed most
+  easily on the code it understood least. Every one of the 66 concrete `Ast` types is now
+  either handled by a metric or carries a written reason for not being; 42 exclusions, each
+  with its argument. The next PowerShell release turns the suite red instead of quietly
+  lowering everyone's numbers.
+
+
 - **A score now says which metric produced it.** Records carry `MetricVersion`, an int that
   increments whenever a score can change for source that did not -- a narrower rule than the
   module version, so a fix that only affects messages, or a new field on the record, leaves it
