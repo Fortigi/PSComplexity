@@ -40,6 +40,11 @@ function Get-PSCxRelativePath {
     # Separators are normalised to '/' because that is the half that does not vary: a Windows
     # reader understands src/A.ps1, and a key containing a backslash cannot be matched by a
     # Linux run at all.
+    #
+    # The PLATFORM separator, not a literal backslash. On Linux a backslash is an ordinary
+    # filename character, so replacing it there corrupts a legal path -- and the replacement
+    # is a no-op on the one platform where the self-mutation gate runs, which is how a
+    # hard-coded one survived every mutant while looking tested.
     [OutputType([string])]
     [CmdletBinding()]
     param(
@@ -54,9 +59,9 @@ function Get-PSCxRelativePath {
     # Outside the root, keep the full path. A ../../ chain says less than the absolute path
     # does and is no more portable, so pretending would only hide where the file came from.
     if (-not $full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
-        return $full.Replace([char]92, '/')
+        return $full.Replace([System.IO.Path]::DirectorySeparatorChar, '/')
     }
-    return $full.Substring($rootFull.Length).Replace([char]92, '/')
+    return $full.Substring($rootFull.Length).Replace([System.IO.Path]::DirectorySeparatorChar, '/')
 }
 
 function Measure-PSComplexity {

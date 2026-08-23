@@ -143,8 +143,43 @@ function Get-OuterB { function Get-Inner { if ($y) { 1 } if ($z) { 2 } } }
             try { $rows = @(Measure-PSComplexity -Path $outside) } finally { Pop-Location }
             $rows[0].File | Should-NotBeLikeString '*..*'
             $rows[0].File | Should-BeLikeString '*cxout-*'
+            # Separators too. Without this the assertion passes whatever character the
+            # normaliser replaces, so a full path could keep its backslashes and read as
+            # portable while being unmatchable by a Linux run.
+            $rows[0].File | Should-NotBeLikeString '*\*'
         }
         finally { Remove-Item $outside -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'Get-PSCxRelativePath' {
+    It 'strips a root that already ends with a separator' {
+        # A root ending in a separator is not exotic -- a drive root and the temp directory
+        # both do. Appending a second one unconditionally makes the prefix match fail, and the
+        # path silently comes back absolute rather than relative.
+        $root = [System.IO.Path]::GetTempPath()   # ends with a separator on both platforms
+        $file = Join-Path $root 'rooted.ps1'
+        Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'rooted.ps1'
+    }
+
+    It 'strips a root that does not end with a separator' {
+        # The kept half: both shapes must give the same answer, or the test above passes
+        # against code that only ever handles one of them.
+        $root = ([System.IO.Path]::GetTempPath()).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+        $file = Join-Path $root 'rooted.ps1'
+        Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'rooted.ps1'
+    }
+}
+
+Describe 'a function nested inside a class method' {
+    It 'is qualified by the method, and the method is named once' {
+        # The walk resolves a method body back to its member, so without the identity check
+        # the same method is appended twice and the unit reads C.M/C.M/Inner.
+        $f = Join-Path $script:work 'inclass.ps1'
+        Set-Content $f 'class C { [void] M() { function Get-Inner { if ($x) { 1 } } } }' -Encoding utf8
+        $rows = @(Measure-PSComplexity -Path $f | Where-Object Unit -like '*Get-Inner')
+        $rows.Count | Should-Be 1
+        $rows[0].Unit | Should-Be 'C.M/Get-Inner'
     }
 }
 
