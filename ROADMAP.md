@@ -8,7 +8,7 @@ This file records **ordering rationale only**. Status lives in the issues. Do no
 progress here: a second status list drifts from the first, which is the exact failure this
 project exists to find in other people's code.
 
-Snapshot 2026-08-23, with **0.4.0 prepared and unreleased**. 19 issues open.
+Snapshot 2026-08-23, with **0.4.0 prepared and unreleased**. 17 issues open.
 
 Everything that release contained is gone from this file rather than ticked, per the rule
 below: discovery, the empty verdict, the vacuous test, the metric's blindness to PowerShell's
@@ -72,20 +72,20 @@ Three things follow that are worth stating out loud:
   a change to the intermediate representation: increments are summed at emission, twelve
   producers deep, so the information it asks for is destroyed two layers below where the
   question is asked. Size it as structural work or it will be scheduled as an afternoon.
-- **#20 is now overdue rather than queued.** The metric MOVED in 0.3.0: scores rose for every
-  codebase that uses `ForEach-Object`, `&&` or `??`. Nothing in a score records which metric
-  produced it, so a consumer comparing a figure from before against one from after cannot tell
-  which half of the difference is their own code. Survivable while nothing persisted a score;
-  #2 turns it into a silent re-baseline of everything at once.
+- **#20 is done, and it went in before the thing that needed it.** The metric had already MOVED
+  twice for unchanged source -- 0.3.0 scored `ForEach-Object`, `&&` and `??`, and 0.4.0 stopped
+  merging two units written on one line -- with nothing recording that it had. Every record now
+  carries a MetricVersion, so #2 can refuse to compare across two values instead of silently
+  re-baselining everything at once. That ordering was the point of this section.
 
 ---
 
 ## Wave A -- gone
 
 Shipped in 0.3.0 and removed rather than ticked. One item did not ship with it and moves down
-to the fillers: **#46**, three guard *applications* that delete clean with the suite green,
-including the Sonar labelled-jump rule. Covering a predicate is not covering its call, and
-neither gate can see the difference.
+to the fillers: **#46**, three guard *applications* that deleted clean with the suite green,
+including the Sonar labelled-jump rule. That one is closed now too -- see the fillers for how,
+and for why the thing that closed it was not aimed at it.
 
 ## Wave B -- decide the record shape
 
@@ -102,11 +102,15 @@ CI legs. That was this wave's whole purpose, and it lands **before** #2 or #5 pe
 One thing the sweep could not settle travels with it: **#83**, a boundary-list entry that
 changes no observable answer when removed. Recorded rather than removed on a guess.
 
+**#20 shipped in 0.4.0 too.** Every record carries a MetricVersion, which increments only
+when a score can change for source that did not -- so a committed baseline can refuse to
+compare across two values rather than mix them. Wave B has now delivered everything that
+had to land before a key is persisted, which was its whole reason for going first.
+
 | Order | Issue | Why here |
 |---|---|---|
-| 1 | **#20** | Promoted. The metric already moved once, in 0.3.0, with nothing recording that it did -- so two scores from either side of that release are not comparable and nothing says so. Every further metric change has the same cost, and #2 makes it a silent re-baseline of a committed file. |
-| 2 | **#17**, **#16** | The two missing levels. Take them together: they are the same decision about what a record is, and deciding one without the other produces a shape that has to move again. |
-| 3 | **#21** | The exception concept: today nobody can disagree with a number. Cheap now, and after #2 ships a bare snapshot a declaration is a mute button rather than an agreement. |
+| 1 | **#17**, **#16** | The two missing levels. Take them together: they are the same decision about what a record is, and deciding one without the other produces a shape that has to move again. |
+| 2 | **#21** | The exception concept: today nobody can disagree with a number. Cheap now, and after #2 ships a bare snapshot a declaration is a mute button rather than an agreement. |
 
 **#22 and #47 are not positions here.** Both are decisions to record, not work: complexity exists per
 unit, extraction lowers the score by design, and the README over-claims by calling the number
@@ -127,10 +131,14 @@ left in this wave is what stops that vocabulary drifting again.
 leave-one-out sweep against a green control leaves 28 of 29 failing when deleted -- against 5 of
 7 cyclomatic and 4 of 8 cognitive deletable before. What is left is the other direction.
 
+**#18 shipped in 0.4.0.** All 66 concrete Ast types are now classified: handled by a metric,
+or carrying a written reason for not being. The next PowerShell release turns the suite red
+instead of quietly lowering everyone's numbers, which is the direction that never announced
+itself. What is left in this wave is the outward-facing half.
+
 | Order | Issue | Why here |
 |---|---|---|
-| 1 | **#18** | The half #32 cannot cover: nothing notices when PowerShell gains syntax the metric cannot see. An unrecognised construct can only lower a score, so the gate passes most easily on the code it understands least. |
-| 2 | **#4** | Pin the metric against the SonarSource examples. All eleven reference cases currently pass, including both "classic implementation errors" -- so this is a pinning gap, not a correctness bug, and it is cheaper after #16 makes increments addressable. |
+| 1 | **#4** | Pin the metric against the SonarSource examples. All eleven reference cases currently pass, including both "classic implementation errors" -- so this is a pinning gap, not a correctness bug, and it is cheaper after #16 makes increments addressable. |
 
 ## Wave D -- the features everyone actually wants
 
@@ -187,9 +195,13 @@ are the same empty answer from `Find-Module`.
   units in 1.65s, and PSScriptAnalyzer over a comparable corpus is several times slower. Do
   them when #7 makes per-file cost matter, or when a deeply nested file makes someone notice.
   #37 is also the reason #73 matters: uneven cost is what makes a silent scan look stuck.
-- **#46** -- three guard applications delete clean with the suite green. The mutation gate now
-  runs the full operator set, so it would catch a new one; these predate that and are still
-  unproven at their call sites.
+*#46 is gone.* Measured rather than assumed, and in both directions: each guard application was
+  forced always-true and then never-fires, against a control run asserted green first. Ten
+  neuterings, zero unpinned -- including the Sonar labelled-jump rule, where "the application is
+  gone" means the increment silently stops and `break outer` scores as an ordinary `break`. What
+  closed it was not aimed at it: the reference cases added for #32 and the flow-construct work in
+  #30/#41 exercise every one of these guards through the real entry point, with a case on each
+  side.
 - **#47** -- a decision to record, not work: a nested named function adds nothing to its
   parent where the same body as a script block adds 3/5. The cheaper displacement route, so
   settle it beside #22.
