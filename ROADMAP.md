@@ -8,7 +8,7 @@ This file records **ordering rationale only**. Status lives in the issues. Do no
 progress here: a second status list drifts from the first, which is the exact failure this
 project exists to find in other people's code.
 
-Snapshot 2026-08-23, after **0.3.0 shipped**. 25 issues open.
+Snapshot 2026-08-23, after **0.3.0 shipped**. 23 issues open.
 
 Everything that release contained is gone from this file rather than ticked, per the rule
 below: discovery, the empty verdict, the vacuous test, the metric's blindness to PowerShell's
@@ -144,11 +144,17 @@ loads the artifact before it becomes permanent. All of it ran for real on the 0.
 
 What is left:
 
-- **#33**, **#38** -- the publish path's two remaining holes, and they compound:
-  `github.ref_name` is interpolated into a pwsh string, so a crafted tag runs code in the job
-  holding the Gallery key, and nothing requires a second person for the one irreversible
-  action here. Push access is the publish credential. #38 is a repository setting rather than
-  code, and for a single-maintainer project it is a decision to record either way.
+  *#33 and #38 are gone from this list, for two different reasons.* #33 is **fixed**: the tag
+  name now reaches PowerShell through an environment variable, so it is data rather than script
+  text, and the fix was checked in both directions -- the payload executes against the old form
+  and stays inert against the new one. #38 is **closed as decided**: tag creation, update and
+  deletion are restricted to a one-person team, so who may publish is enforced rather than
+  assumed, but the four-eyes rule it asked for needs a smaller admin set than an organisation
+  spanning thirteen repositories has. A separate org would buy it and was declined.
+
+  One negative worth keeping, because it looks like protection and is not: a `tag_name_pattern`
+  ruleset is accepted by the API and **never evaluated**. Verified by pushing a violating tag
+  with that rule as the only active one. Do not reach for it to constrain tag names.
 - **#35** -- `ConvertToSARIF` is pinned now; what is left is watching whether any pin has gone
   stale, which is #54's job.
 - **#50**, **#54** -- nothing fails when `main` claims a version already on the gallery, and
