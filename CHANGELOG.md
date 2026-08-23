@@ -5,6 +5,74 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-23
+
+### For consumers
+
+BEHAVIOUR CHANGE -- two published values change shape, and anything that stored them will
+not match. Read this before upgrading a pipeline that keeps records.
+
+`Unit` and `File` were neither unique within a file nor stable across machines, and both are
+fixed together because a half-fixed identity is still not one.
+
+**`Unit` is now qualified and disambiguated.** A function nested in another reads
+`Get-OuterA/Get-Inner` rather than `Get-Inner` -- two such units in one file used to be
+indistinguishable, and they score differently. Two units sharing a name in the same scope --
+overloads, or a function defined twice -- get an ordinal on **every** member of the group:
+`Repo.Add#1`, `Repo.Add#2`. Both, not just the second, because suffixing only the later one
+would silently rename the first the day an overload is added. Class members were already
+qualified; this extends the same rule to the half that lacked it.
+
+**`File` is now relative to the working directory, with forward slashes.** It was absolute
+and platform-separated, so identical source measured on two CI legs produced disjoint key
+sets -- `C:\...\src\A.ps1` against `/home/.../src/A.ps1` -- and anything comparing runs
+across them matched nothing while appearing to work. A file outside the root keeps its full
+path, because a `../../` chain is no more portable and says less. The README had rendered
+this relative all along.
+
+If you have a stored baseline, it will not match after upgrading. That is the point: the
+keys it holds could not distinguish units the tool could.
+
+### Fixed
+
+- **CI now fails when `main` claims a version that has already shipped.** It once did: `main`
+  stood at 0.2.0, 0.2.0 was on the gallery, and merged work sat under `[Unreleased]` with every
+  gate green. Two people installing "0.2.0" -- one from the gallery, one from a clone -- got
+  different code, and nothing in the repo could tell them apart. The release gate now asks the
+  gallery, and faults only on the pair: a published version **and** unreleased entries above
+  it. Either alone is a normal state. It checks the gallery is reachable **first** and refuses
+  when it is not, because "never published" and "could not look" are the same empty answer and
+  treating them alike is how a gate silently stops being able to fail.
+
+- **The construct vocabulary is pinned, so a half-finished addition cannot ship green.** Three
+  hardcoded type lists drive every number this module produces, and a leave-one-out sweep found
+  most entries deletable with the whole suite green at 100% coverage: 5 of 7 cyclomatic types,
+  4 of 8 cognitive types, and the entire `switch` decision-point block -- which made a 12-case
+  switch score cyclomatic **1** instead of 13. The cause was blunt: `tests/` contained no
+  `catch` and no `trap` at all, one `switch` fixture asserting cognitive only, and a `do-until`
+  but no `do-while`. The mutation gate cannot reach this -- its operators are arithmetic and
+  boolean, and none deletes a statement or touches a type name -- so "100% self-mutation" was
+  true and said nothing about the vocabulary. Twenty reference cases now pin every entry;
+  re-running the sweep against a green control leaves **28 of 29** entries failing when deleted.
+
+- **Two units written on one line are two units again.** A unit was keyed by its name and its
+  *line*, and a line is not unique: two overloads on one physical line shared a key, so their
+  scores were **added** and the file reported a single unit that exists nowhere in the source.
+  The pair reported one `Repo.Add` at cyclomatic 3 where there are two, each 2. Units are now
+  keyed by the extent's start offset, unique per node however the source is laid out. The
+  reported `Line` is unchanged and remains display data, not identity -- it moves whenever
+  anything above a unit is edited.
+
+### Added
+
+- **The output record is now stated as the public contract and pinned by tests.** The five
+  fields `Measure-PSComplexity` emits -- `File`, `Unit`, `Line`, `Cyclomatic`, `Cognitive` --
+  are the module's API besides the two command names, and nothing asserted them, so adding,
+  renaming or reordering one was a silent breaking change. Their names, order and types are
+  now asserted exactly, for every record rather than the first; a sixth field fails the suite.
+  Documented in the README and in `Get-Help`, including that `Line` is deliberately **not**
+  an identity: it moves whenever anything above a unit is edited.
+
 ### Security
 
 - `publish.yml` no longer interpolates the tag name into a PowerShell script. An Actions

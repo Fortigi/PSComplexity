@@ -41,12 +41,16 @@ if (-not (Test-PSComplexity ./src -Recurse -MaxCyclomatic 15 -MaxCognitive 15)) 
 ```
 File                    Unit                 Line Cyclomatic Cognitive
 ----                    ----                 ---- ---------- ---------
-C:\proj\src\Foo.ps1     <script-body>           1          1         0
-C:\proj\src\Foo.ps1     Get-Foo                12          8         9
-C:\proj\src\Foo.ps1     Order.Process          31          5        10
+src/Foo.ps1             <script-body>           1          1         0
+src/Foo.ps1             Get-Foo                12          8         9
+src/Foo.ps1             Order.Process          31          5        10
 ```
 
-Class members are reported as `Class.Member`, so two classes with a method of the same
+A unit name identifies one unit. Class members are reported as `Class.Member`, a function
+nested inside another as `Outer/Inner`, and units sharing a name in the same scope — two
+overloads, or a function defined twice — carry an ordinal on **every** member of the group
+(`Repo.Add#1`, `Repo.Add#2`). Suffixing only the second would silently rename the first the
+day an overload is added. So two classes with a method of the same
 name — or a class method and a function of that name — stay distinct, in the output and
 in any per-unit baseline built from it. A class property is a unit only when it has an
 initialiser: that is code which runs, and it belongs to the property rather than to the
@@ -74,6 +78,23 @@ nested loop-in-loop-in-`if` grows fast — mirroring how hard it is to follow.
 |---|---|---|
 | `Measure-PSComplexity -Path <files/dirs> [-Recurse]` | per-unit records | inspect / report |
 | `Test-PSComplexity -Path <files/dirs> [-Recurse] [-MaxCyclomatic 15] [-MaxCognitive 15]` | `[bool]` | CI gate (warns per offender) |
+
+### The record is the API
+
+`Measure-PSComplexity` emits one object per unit with exactly these fields, in this order:
+
+| Field | Type | |
+|---|---|---|
+| `File` | `[string]` | path relative to the working directory, forward slashes; full path if outside it |
+| `Unit` | `[string]` | function, method, or `<script-body>` |
+| `Line` | `[int]` | where the unit starts |
+| `Cyclomatic` | `[int]` | |
+| `Cognitive` | `[int]` | |
+
+Those names, their order and their types are the public contract, and a test asserts them
+exactly -- a sixth field fails the suite, so widening this is a decision rather than a side
+effect. `Line` is deliberately **not** an identity: it moves whenever anything above a unit
+is edited, so it says where a unit currently starts, not which unit it is.
 
 ## Use it in CI
 

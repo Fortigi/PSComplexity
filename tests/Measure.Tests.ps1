@@ -23,6 +23,166 @@ AfterAll {
     Remove-Item $script:broken -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+Describe 'the record shape a consumer depends on' {
+    # This object IS the public API, besides the two command names. Unpinned, it was still a
+    # contract -- just one discoverable only by running the command, and unchangeable once
+    # anyone had. Four queued features want to widen it (#2 baseline, #3 attribution,
+    # #5 report, #7 changed-files), so widening has to fail here first and be a decision.
+
+    It 'emits exactly these five fields, in this order' {
+        $row = @(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1'))[0]
+        # Joined rather than Should-BeCollection, which ignores order: property order is
+        # what Format-Table shows a consumer, so a reordering is a visible change.
+        ($row.PSObject.Properties.Name -join ',') | Should-Be 'File,Unit,Line,Cyclomatic,Cognitive'
+    }
+
+    It 'emits those fields with the types a consumer sorts and compares on' {
+        # Line being a string rather than an int is as breaking as a rename: it silently
+        # turns a numeric sort into a lexical one, where 10 precedes 2.
+        $row = @(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1'))[0]
+        $row.File       | Should-HaveType ([string])
+        $row.Unit       | Should-HaveType ([string])
+        $row.Line       | Should-HaveType ([int])
+        $row.Cyclomatic | Should-HaveType ([int])
+        $row.Cognitive  | Should-HaveType ([int])
+    }
+
+    It 'pins the shape for every record, not only the first' {
+        # The kept half of the pair. Asserting the first record alone passes against a
+        # command that emits a different shape for the <script-body> unit, or for the second
+        # file in a directory walk -- which is exactly where a widening would land.
+        $rows = @(Measure-PSComplexity -Path $script:work -Recurse)
+        $rows.Count | Should-BeGreaterThan 2
+        $shapes = @($rows | ForEach-Object { $_.PSObject.Properties.Name -join ',' } | Sort-Object -Unique)
+        ($shapes -join ' | ') | Should-Be 'File,Unit,Line,Cyclomatic,Cognitive'
+    }
+}
+
+Describe 'two units on one line are two units' {
+    # A unit was keyed by name-and-LINE, and a line is not unique. Two overloads written on
+    # one physical line produced ONE key, so their scores were ADDED and the file reported a
+    # single unit that exists nowhere in the source -- a wrong number, not just a wrong name.
+
+    BeforeAll {
+        $script:oneline = Join-Path $script:work 'overloads.ps1'
+        Set-Content $script:oneline `
+            'class Repo { [void] Add([int]$a) { if ($a) { } } [void] Add([string]$b) { if ($b) { } } }' -Encoding utf8
+    }
+
+    It 'emits one row per overload, each separately named' {
+        $rows = @(Measure-PSComplexity -Path $script:oneline | Where-Object Unit -like 'Repo.Add*')
+        $rows.Count | Should-Be 2
+        # An ordinal on BOTH, not just the second: suffixing only the later one would
+        # silently rename the first the day an overload is added.
+        ($rows | ForEach-Object Unit | Sort-Object) -join ',' | Should-Be 'Repo.Add#1,Repo.Add#2'
+    }
+
+    It 'scores each overload on its own rather than summing them' {
+        # The number is the point. Merged, this file reported cyclomatic 3 for a unit that
+        # does not exist; each overload is 2. Asserting only the row COUNT would pass against
+        # code that split the rows and still divided one total between them.
+        $rows = @(Measure-PSComplexity -Path $script:oneline | Where-Object Unit -like 'Repo.Add*')
+        ($rows | ForEach-Object Cyclomatic | Sort-Object) -join ',' | Should-Be '2,2'
+        ($rows | ForEach-Object Cognitive  | Sort-Object) -join ',' | Should-Be '1,1'
+    }
+
+    It 'still merges nothing that was never separate' {
+        # The kept half: a file whose units are on distinct lines must be unaffected, or the
+        # test above passes against code that splits every unit into duplicates.
+        $rows = @(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1'))
+        ($rows | ForEach-Object Unit | Sort-Object) -join ',' | Should-Be '<script-body>,Get-A'
+    }
+}
+
+Describe 'a unit name a second machine can match' {
+    # Neither published field used to be both unique-within-file and stable-across-machines.
+    # Anything comparing two runs -- a committed baseline, a per-file report, a changed-files
+    # scan -- needs one that is.
+
+    BeforeAll {
+        $script:nested = Join-Path $script:work 'nestednames.ps1'
+        Set-Content $script:nested @'
+function Get-OuterA { function Get-Inner { if ($x) { 1 } } }
+function Get-OuterB { function Get-Inner { if ($y) { 1 } if ($z) { 2 } } }
+'@ -Encoding utf8
+    }
+
+    It 'qualifies a nested function by the unit that encloses it' {
+        # Both used to read `Get-Inner`, and they score differently, so a baseline keyed on
+        # the name merged two units and reported whichever it saw last.
+        $rows = @(Measure-PSComplexity -Path $script:nested | Where-Object Unit -like '*Get-Inner')
+        ($rows | ForEach-Object Unit | Sort-Object) -join ',' |
+            Should-Be 'Get-OuterA/Get-Inner,Get-OuterB/Get-Inner'
+    }
+
+    It 'leaves an unnested function unqualified' {
+        # The kept half: qualification must apply where there is something to qualify BY, or
+        # every top-level function would grow a prefix nobody asked for.
+        $rows = @(Measure-PSComplexity -Path $script:nested | Where-Object Unit -notlike '*/*' | Where-Object Unit -like 'Get-Outer*')
+        ($rows | ForEach-Object Unit | Sort-Object) -join ',' | Should-Be 'Get-OuterA,Get-OuterB'
+    }
+
+    It 'reports a path relative to where the caller stands, with forward slashes' {
+        # File was absolute and platform-separated, so the two CI legs produced disjoint key
+        # sets for identical source. A backslash key cannot be matched by a Linux run at all.
+        Push-Location $script:work
+        try {
+            $rows = @(Measure-PSComplexity -Path 'nested/b.ps1')
+            $rows[0].File | Should-Be 'nested/b.ps1'
+        }
+        finally { Pop-Location }
+    }
+
+    It 'keeps a full path for a file outside the root' {
+        # A ../../ chain is no more portable than the absolute path and says less about where
+        # the file came from, so outside the root the full path is the honest answer.
+        $outside = Join-Path ([System.IO.Path]::GetTempPath()) "cxout-$([System.Guid]::NewGuid().ToString('N')).ps1"
+        Set-Content $outside 'function Get-X { 1 }' -Encoding utf8
+        try {
+            Push-Location $script:work
+            try { $rows = @(Measure-PSComplexity -Path $outside) } finally { Pop-Location }
+            $rows[0].File | Should-NotBeLikeString '*..*'
+            $rows[0].File | Should-BeLikeString '*cxout-*'
+            # Separators too. Without this the assertion passes whatever character the
+            # normaliser replaces, so a full path could keep its backslashes and read as
+            # portable while being unmatchable by a Linux run.
+            $rows[0].File | Should-NotBeLikeString '*\*'
+        }
+        finally { Remove-Item $outside -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'Get-PSCxRelativePath' {
+    It 'strips a root that already ends with a separator' {
+        # A root ending in a separator is not exotic -- a drive root and the temp directory
+        # both do. Appending a second one unconditionally makes the prefix match fail, and the
+        # path silently comes back absolute rather than relative.
+        $root = [System.IO.Path]::GetTempPath()   # ends with a separator on both platforms
+        $file = Join-Path $root 'rooted.ps1'
+        Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'rooted.ps1'
+    }
+
+    It 'strips a root that does not end with a separator' {
+        # The kept half: both shapes must give the same answer, or the test above passes
+        # against code that only ever handles one of them.
+        $root = ([System.IO.Path]::GetTempPath()).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
+        $file = Join-Path $root 'rooted.ps1'
+        Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'rooted.ps1'
+    }
+}
+
+Describe 'a function nested inside a class method' {
+    It 'is qualified by the method, and the method is named once' {
+        # The walk resolves a method body back to its member, so without the identity check
+        # the same method is appended twice and the unit reads C.M/C.M/Inner.
+        $f = Join-Path $script:work 'inclass.ps1'
+        Set-Content $f 'class C { [void] M() { function Get-Inner { if ($x) { 1 } } } }' -Encoding utf8
+        $rows = @(Measure-PSComplexity -Path $f | Where-Object Unit -like '*Get-Inner')
+        $rows.Count | Should-Be 1
+        $rows[0].Unit | Should-Be 'C.M/Get-Inner'
+    }
+}
+
 Describe 'the declared output types' {
     It 'declares what a caller actually receives, not an array of it' {
         # These commands STREAM individual records. [pscustomobject[]] claimed a single

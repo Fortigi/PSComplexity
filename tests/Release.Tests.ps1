@@ -250,3 +250,50 @@ Describe 'Get-PSCxTestRunFault' {
     }
 }
 
+Describe 'main must not claim a version that already shipped' {
+    # It once did: main stood at 0.2.0, 0.2.0 was on the gallery, and merged work sat under
+    # [Unreleased] with every gate passing. Two people installing "0.2.0" -- one from the
+    # gallery, one from a clone -- got different code, and nothing in the repo could tell
+    # them apart.
+
+    It 'faults when a published version has unreleased entries above it' {
+        Get-PSCxStaleVersionFault -ModuleVersion '0.2.0' -IsPublished $true -HasUnreleasedContent $true |
+            Should-MatchString ([regex]::Escape('already on the gallery'))
+    }
+
+    It 'is silent when a published version has nothing unreleased' {
+        # The resting state between releases, and the first of two kept cases. Without it a
+        # gate that faults on IsPublished alone would fail every green main.
+        Should-BeNull -Actual (Get-PSCxStaleVersionFault -ModuleVersion '0.2.0' -IsPublished $true -HasUnreleasedContent $false)
+    }
+
+    It 'is silent when unreleased entries sit above a version not yet shipped' {
+        # The second kept case: a release being prepared. Faulting here would refuse exactly
+        # the state this repo is in while writing a release.
+        Should-BeNull -Actual (Get-PSCxStaleVersionFault -ModuleVersion '0.5.0' -IsPublished $false -HasUnreleasedContent $true)
+    }
+
+    It 'reads content under [Unreleased] and stops at the next heading' {
+        $lines = @('# CL', '', '## [Unreleased]', '', '### Fixed', '- a thing', '', '## [0.4.0] - 2026-08-23', '- x')
+        Should-BeTrue -Actual (Test-PSCxHasUnreleasedContent -Lines $lines)
+    }
+
+    It 'treats a whitespace-only [Unreleased] as empty' {
+        # Blank lines are how the section looks between releases; counting them as content
+        # would fault every repo that keeps the heading in place.
+        $lines = @('# CL', '', '## [Unreleased]', '', '   ', '', '## [0.4.0] - 2026-08-23', '- x')
+        Should-BeFalse -Actual (Test-PSCxHasUnreleasedContent -Lines $lines)
+    }
+
+    It 'does not mistake a later version body for unreleased content' {
+        # The discriminating case: entries exist in the file, but below the next heading. A
+        # scan that forgets to stop would report every changelog as having unreleased work.
+        $lines = @('# CL', '', '## [Unreleased]', '', '## [0.4.0] - 2026-08-23', '', '### Fixed', '- a released thing')
+        Should-BeFalse -Actual (Test-PSCxHasUnreleasedContent -Lines $lines)
+    }
+
+    It 'is false when there is no [Unreleased] heading at all' {
+        $lines = @('# CL', '', '## [0.4.0] - 2026-08-23', '- x')
+        Should-BeFalse -Actual (Test-PSCxHasUnreleasedContent -Lines $lines)
+    }
+}

@@ -24,6 +24,21 @@ $script:CyclomaticCases = @(
     # Paired with the cases above: a command whose name a static walk cannot read must not
     # be treated as flow, and must not make the predicate throw either.
     @{ name = 'a command with no readable name is not flow'; expected = 1; code = 'function T { param($cmd) & $cmd arg }' }
+    # Every remaining entry in the decision-point lists, pinned. Before these, five of the
+    # seven type names in Cyclomatic.ps1 could be DELETED with the whole suite green at 100%
+    # coverage -- and so could the entire switch block, which made a 12-case switch score 1
+    # instead of 13. The mutation gate cannot see this: its operators are arithmetic and
+    # boolean, and none deletes a statement or touches a type name.
+    @{ name = 'switch scores one per clause'; expected = 13; code = 'function T { param($a) switch ($a) { 1 { "1" } 2 { "2" } 3 { "3" } 4 { "4" } 5 { "5" } 6 { "6" } 7 { "7" } 8 { "8" } 9 { "9" } 10 { "10" } 11 { "11" } 12 { "12" } } }' }
+    # The pair that pins `default` NOT being a clause: same clause count, same score. Either
+    # fixture alone passes against code that counts the default arm.
+    @{ name = 'switch with a default'; expected = 3; code = 'function T { param($a) switch ($a) { 1 { "a" } 2 { "b" } default { "c" } } }' }
+    @{ name = 'switch without a default scores the same'; expected = 3; code = 'function T { param($a) switch ($a) { 1 { "a" } 2 { "b" } } }' }
+    @{ name = 'for loop = 2'; expected = 2; code = 'function T { for ($i = 0; $i -lt 3; $i++) { $i } }' }
+    @{ name = 'do-while = 2'; expected = 2; code = 'function T { param($n) do { $n-- } while ($n -gt 0) }' }
+    @{ name = 'do-until = 2'; expected = 2; code = 'function T { param($n) do { $n-- } until ($n -le 0) }' }
+    @{ name = 'catch = 2'; expected = 2; code = 'function T { try { 1 } catch { 2 } }' }
+    @{ name = 'trap = 2'; expected = 2; code = 'function T { trap { continue } 1 }' }
 )
 
 BeforeAll {
