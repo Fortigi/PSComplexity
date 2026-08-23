@@ -83,16 +83,23 @@ function Get-PSCxUnitBoundary {
 }
 
 function Get-PSCxUnitName {
-    # 'name@line' for a function; 'Class.Member@line' for a class member (whose
+    # 'name@offset' for a function; 'Class.Member@offset' for a class member (whose
     # Parent is the TypeDefinitionAst carrying the class name). A constructor is
-    # named after its class, so it reads 'Order.Order@line'.
+    # named after its class, so it reads 'Order.Order@offset'.
+    #
+    # The suffix is the extent's START OFFSET, not its line. A line is not unique: two
+    # overloads written on one physical line -- `[void] Add([int]$a) {} [void] Add([string]$b) {}`
+    # -- produced ONE key, so their scores were ADDED and the file reported a single unit
+    # that exists nowhere in the source. An offset is unique per node by construction, so
+    # two units can no longer collide however they are laid out. The line is still what the
+    # caller sees; Get-PSCxUnitTable records it separately.
     [OutputType([string])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Boundary)
     if ($Boundary -is [System.Management.Automation.Language.FunctionDefinitionAst]) {
-        return '{0}@{1}' -f $Boundary.Name, $Boundary.Extent.StartLineNumber
+        return '{0}@{1}' -f $Boundary.Name, $Boundary.Extent.StartOffset
     }
-    return '{0}.{1}@{2}' -f $Boundary.Parent.Name, $Boundary.Name, $Boundary.Extent.StartLineNumber
+    return '{0}.{1}@{2}' -f $Boundary.Parent.Name, $Boundary.Name, $Boundary.Extent.StartOffset
 }
 
 function Get-PSCxUnitKey {

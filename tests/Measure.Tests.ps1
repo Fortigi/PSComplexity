@@ -58,6 +58,39 @@ Describe 'the record shape a consumer depends on' {
     }
 }
 
+Describe 'two units on one line are two units' {
+    # A unit was keyed by name-and-LINE, and a line is not unique. Two overloads written on
+    # one physical line produced ONE key, so their scores were ADDED and the file reported a
+    # single unit that exists nowhere in the source -- a wrong number, not just a wrong name.
+
+    BeforeAll {
+        $script:oneline = Join-Path $script:work 'overloads.ps1'
+        Set-Content $script:oneline `
+            'class Repo { [void] Add([int]$a) { if ($a) { } } [void] Add([string]$b) { if ($b) { } } }' -Encoding utf8
+    }
+
+    It 'emits one row per overload rather than merging them' {
+        $rows = @(Measure-PSComplexity -Path $script:oneline | Where-Object Unit -eq 'Repo.Add')
+        $rows.Count | Should-Be 2
+    }
+
+    It 'scores each overload on its own rather than summing them' {
+        # The number is the point. Merged, this file reported cyclomatic 3 for a unit that
+        # does not exist; each overload is 2. Asserting only the row COUNT would pass against
+        # code that split the rows and still divided one total between them.
+        $rows = @(Measure-PSComplexity -Path $script:oneline | Where-Object Unit -eq 'Repo.Add')
+        ($rows | ForEach-Object Cyclomatic | Sort-Object) -join ',' | Should-Be '2,2'
+        ($rows | ForEach-Object Cognitive  | Sort-Object) -join ',' | Should-Be '1,1'
+    }
+
+    It 'still merges nothing that was never separate' {
+        # The kept half: a file whose units are on distinct lines must be unaffected, or the
+        # test above passes against code that splits every unit into duplicates.
+        $rows = @(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1'))
+        ($rows | ForEach-Object Unit | Sort-Object) -join ',' | Should-Be '<script-body>,Get-A'
+    }
+}
+
 Describe 'the declared output types' {
     It 'declares what a caller actually receives, not an array of it' {
         # These commands STREAM individual records. [pscustomobject[]] claimed a single
