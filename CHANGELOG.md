@@ -35,6 +35,15 @@ keys it holds could not distinguish units the tool could.
 
 ### Fixed
 
+- **A relative path now resolves against the root it was given, not against the working
+  directory.** `Get-PSCxRelativePath` called `GetFullPath` on its `Path` argument directly, so
+  a relative one silently resolved against wherever the shell happened to be standing. It gave
+  the right answer only while its single caller passed an absolute path **and** a root equal to
+  the current directory -- two conditions that both had to hold and neither of which was
+  stated. Not reachable today; the sibling project shipped the same shape and it was a live
+  hole there, because a config may name a file by full path.
+
+
 - **CI now fails when `main` claims a version that has already shipped.** It once did: `main`
   stood at 0.2.0, 0.2.0 was on the gallery, and merged work sat under `[Unreleased]` with every
   gate green. Two people installing "0.2.0" -- one from the gallery, one from a clone -- got
