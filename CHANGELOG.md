@@ -5,6 +5,16 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two units written on one line are two units again.** A unit was keyed by its name and its
+  *line*, and a line is not unique: two overloads on one physical line -- `[void] Add([int]$a)
+  { } [void] Add([string]$b) { }` -- shared a key, so their scores were **added** and the file
+  reported a single unit that exists nowhere in the source. That is a wrong number, not merely
+  a wrong name: the pair above reported one `Repo.Add` at cyclomatic 3 where there are two,
+  each 2. Units are now keyed by the extent's start offset, which is unique per node however
+  the source is laid out. The reported `Line` is unchanged.
+
 ### Added
 
 - **The output record is now stated as the public contract and pinned by tests.** The five
