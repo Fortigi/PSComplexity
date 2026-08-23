@@ -5,6 +5,16 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The output record is now stated as the public contract and pinned by tests.** The five
+  fields `Measure-PSComplexity` emits -- `File`, `Unit`, `Line`, `Cyclomatic`, `Cognitive` --
+  are the module's API besides the two command names, and nothing asserted them, so adding,
+  renaming or reordering one was a silent breaking change. Their names, order and types are
+  now asserted exactly, for every record rather than the first; a sixth field fails the suite.
+  Documented in the README and in `Get-Help`, including that `Line` is deliberately **not**
+  an identity: it moves whenever anything above a unit is edited.
+
 ### Security
 
 - `publish.yml` no longer interpolates the tag name into a PowerShell script. An Actions

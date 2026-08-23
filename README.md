@@ -75,6 +75,23 @@ nested loop-in-loop-in-`if` grows fast — mirroring how hard it is to follow.
 | `Measure-PSComplexity -Path <files/dirs> [-Recurse]` | per-unit records | inspect / report |
 | `Test-PSComplexity -Path <files/dirs> [-Recurse] [-MaxCyclomatic 15] [-MaxCognitive 15]` | `[bool]` | CI gate (warns per offender) |
 
+### The record is the API
+
+`Measure-PSComplexity` emits one object per unit with exactly these fields, in this order:
+
+| Field | Type | |
+|---|---|---|
+| `File` | `[string]` | absolute path |
+| `Unit` | `[string]` | function, method, or `<script-body>` |
+| `Line` | `[int]` | where the unit starts |
+| `Cyclomatic` | `[int]` | |
+| `Cognitive` | `[int]` | |
+
+Those names, their order and their types are the public contract, and a test asserts them
+exactly -- a sixth field fails the suite, so widening this is a decision rather than a side
+effect. `Line` is deliberately **not** an identity: it moves whenever anything above a unit
+is edited, so it says where a unit currently starts, not which unit it is.
+
 ## Use it in CI
 
 ```yaml

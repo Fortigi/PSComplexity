@@ -23,6 +23,41 @@ AfterAll {
     Remove-Item $script:broken -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+Describe 'the record shape a consumer depends on' {
+    # This object IS the public API, besides the two command names. Unpinned, it was still a
+    # contract -- just one discoverable only by running the command, and unchangeable once
+    # anyone had. Four queued features want to widen it (#2 baseline, #3 attribution,
+    # #5 report, #7 changed-files), so widening has to fail here first and be a decision.
+
+    It 'emits exactly these five fields, in this order' {
+        $row = @(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1'))[0]
+        # Joined rather than Should-BeCollection, which ignores order: property order is
+        # what Format-Table shows a consumer, so a reordering is a visible change.
+        ($row.PSObject.Properties.Name -join ',') | Should-Be 'File,Unit,Line,Cyclomatic,Cognitive'
+    }
+
+    It 'emits those fields with the types a consumer sorts and compares on' {
+        # Line being a string rather than an int is as breaking as a rename: it silently
+        # turns a numeric sort into a lexical one, where 10 precedes 2.
+        $row = @(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1'))[0]
+        $row.File       | Should-HaveType ([string])
+        $row.Unit       | Should-HaveType ([string])
+        $row.Line       | Should-HaveType ([int])
+        $row.Cyclomatic | Should-HaveType ([int])
+        $row.Cognitive  | Should-HaveType ([int])
+    }
+
+    It 'pins the shape for every record, not only the first' {
+        # The kept half of the pair. Asserting the first record alone passes against a
+        # command that emits a different shape for the <script-body> unit, or for the second
+        # file in a directory walk -- which is exactly where a widening would land.
+        $rows = @(Measure-PSComplexity -Path $script:work -Recurse)
+        $rows.Count | Should-BeGreaterThan 2
+        $shapes = @($rows | ForEach-Object { $_.PSObject.Properties.Name -join ',' } | Sort-Object -Unique)
+        ($shapes -join ' | ') | Should-Be 'File,Unit,Line,Cyclomatic,Cognitive'
+    }
+}
+
 Describe 'the declared output types' {
     It 'declares what a caller actually receives, not an array of it' {
         # These commands STREAM individual records. [pscustomobject[]] claimed a single
