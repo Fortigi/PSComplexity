@@ -223,6 +223,48 @@ Describe 'a score says which metric produced it' {
     }
 }
 
+Describe 'a scan says what it is reading' {
+    # A slow scan and a stuck one looked identical: no output at all until everything was
+    # measured. That matters because analysis is O(nodes x depth), so one deeply nested file
+    # can dominate a run -- and because Test-PSComplexity is the entry point people automate,
+    # so it runs against whole repositories where nobody is watching a terminal.
+
+    It 'names each file as it is read' {
+        $lines = @(Measure-PSComplexity -Path $script:work -Recurse -Verbose 4>&1 |
+                Where-Object { $_ -is [System.Management.Automation.VerboseRecord] })
+        ($lines -join "`n") | Should-MatchString 'a\.ps1'
+        ($lines -join "`n") | Should-MatchString 'b\.ps1'
+    }
+
+    It 'names the file BEFORE measuring it, so a stuck scan points at the culprit' {
+        # The ordering is the whole feature. Written afterwards, the last line names a file
+        # that is already finished, and a scan stuck on the next one looks exactly like a scan
+        # that completed. Asserted by counting: the first verbose line must arrive before the
+        # first record does.
+        $stream = @(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1') -Verbose 4>&1)
+        $firstVerbose = [array]::FindIndex($stream, [Predicate[object]] { param($x) $x -is [System.Management.Automation.VerboseRecord] })
+        $firstRecord = [array]::FindIndex($stream, [Predicate[object]] { param($x) $x -isnot [System.Management.Automation.VerboseRecord] })
+        $firstVerbose | Should-BeLessThan $firstRecord
+    }
+
+    It 'says nothing when the caller did not ask' {
+        # The kept half. A gate that chatters by default gets its output filtered, and the
+        # filter takes the parse errors with it -- which are the one thing this command must
+        # never lose.
+        $lines = @(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1') 4>&1 |
+                Where-Object { $_ -is [System.Management.Automation.VerboseRecord] })
+        $lines.Count | Should-Be 0
+    }
+
+    It 'reaches the gate, which is the command people automate' {
+        # Test-PSComplexity calls Measure-PSComplexity, so -Verbose has to survive the nested
+        # call for this to be worth anything to CI.
+        $lines = @(Test-PSComplexity -Path $script:work -Recurse -Verbose 4>&1 |
+                Where-Object { $_ -is [System.Management.Automation.VerboseRecord] })
+        $lines.Count | Should-BeGreaterThan 0
+    }
+}
+
 Describe 'the declared output types' {
     It 'declares what a caller actually receives, not an array of it' {
         # These commands STREAM individual records. [pscustomobject[]] claimed a single
