@@ -35,6 +35,15 @@ keys it holds could not distinguish units the tool could.
 
 ### Fixed
 
+- **CI now fails when `main` claims a version that has already shipped.** It once did: `main`
+  stood at 0.2.0, 0.2.0 was on the gallery, and merged work sat under `[Unreleased]` with every
+  gate green. Two people installing "0.2.0" -- one from the gallery, one from a clone -- got
+  different code, and nothing in the repo could tell them apart. The release gate now asks the
+  gallery, and faults only on the pair: a published version **and** unreleased entries above
+  it. Either alone is a normal state. It checks the gallery is reachable **first** and refuses
+  when it is not, because "never published" and "could not look" are the same empty answer and
+  treating them alike is how a gate silently stops being able to fail.
+
 - **The construct vocabulary is pinned, so a half-finished addition cannot ship green.** Three
   hardcoded type lists drive every number this module produces, and a leave-one-out sweep found
   most entries deletable with the whole suite green at 100% coverage: 5 of 7 cyclomatic types,
@@ -45,7 +54,6 @@ keys it holds could not distinguish units the tool could.
   boolean, and none deletes a statement or touches a type name -- so "100% self-mutation" was
   true and said nothing about the vocabulary. Twenty reference cases now pin every entry;
   re-running the sweep against a green control leaves **28 of 29** entries failing when deleted.
-
 
 - **Two units written on one line are two units again.** A unit was keyed by its name and its
   *line*, and a line is not unique: two overloads on one physical line shared a key, so their

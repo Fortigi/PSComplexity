@@ -11,6 +11,9 @@
 [CmdletBinding()]
 param(
     [switch]$Apply,
+    # Off by default so the gate runs offline. CI passes it: the question it answers -- has
+    # this version already shipped? -- cannot be answered from the working tree.
+    [switch]$CheckGallery,
     [string]$ManifestPath,
     [string]$ChangelogPath
 )
@@ -54,8 +57,24 @@ if ($Apply) {
     return
 }
 
-$faults = @(Get-PSCxReleaseFault -ModuleVersion $moduleVersion -ChangelogVersion $changelogVersion `
-        -ConsumerNotes $notes -ActualNotes $actual -DetailUrl $detailUrl)
+$faults = [System.Collections.Generic.List[string]]::new()
+$faults.AddRange([string[]]@(Get-PSCxReleaseFault -ModuleVersion $moduleVersion -ChangelogVersion $changelogVersion `
+        -ConsumerNotes $notes -ActualNotes $actual -DetailUrl $detailUrl))
+
+if ($CheckGallery) {
+    # Reachability FIRST, and separately. Find-Module returns nothing both when a version was
+    # never published and when the gallery cannot be reached, and treating those alike is how
+    # a gate stops being able to fail: every run would report "not published" and pass.
+    $any = @(Find-Module PSComplexity -ErrorAction SilentlyContinue)
+    if ($any.Count -eq 0) {
+        throw ('Release gate cannot reach the PowerShell Gallery, so it cannot tell whether ' +
+            "$moduleVersion has already shipped. Refusing rather than assuming it has not.")
+    }
+    $published = @(Find-Module PSComplexity -RequiredVersion $moduleVersion -ErrorAction SilentlyContinue).Count -gt 0
+    $stale = Get-PSCxStaleVersionFault -ModuleVersion $moduleVersion -IsPublished $published `
+        -HasUnreleasedContent (Test-PSCxHasUnreleasedContent -Lines $lines)
+    if ($stale) { $faults.Add($stale) }
+}
 if ($faults.Count -gt 0) {
     foreach ($f in $faults) { Write-Output "RELEASE FAULT: $f" }
     throw "$($faults.Count) release consistency fault(s)."

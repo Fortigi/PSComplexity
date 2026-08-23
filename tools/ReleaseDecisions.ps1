@@ -127,6 +127,56 @@ function Get-PSCxReleaseFault {
     return $faults.ToArray()
 }
 
+function Get-PSCxStaleVersionFault {
+    <#
+    .SYNOPSIS
+        The fault, if any, when main claims a version that has already shipped.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$ModuleVersion,
+        [Parameter(Mandatory)] [bool]$IsPublished,
+        [Parameter(Mandatory)] [bool]$HasUnreleasedContent
+    )
+    # The question that stays open after ModuleVersion, the newest heading and ReleaseNotes
+    # all agree: HAS the version they agree on already shipped? It once had -- main stood at
+    # 0.2.0 with 0.2.0 on the gallery and merged work sitting under [Unreleased], and every
+    # gate passed. Two people installing "0.2.0", one from the gallery and one from a clone,
+    # got different code with nothing in the repo able to tell them apart.
+    #
+    # BOTH conditions, because either alone is a normal state. Sitting on a published version
+    # with nothing unreleased is exactly where a repo rests between releases; unreleased work
+    # under a version not yet shipped is a release being prepared. Only the pair is wrong.
+    if (-not $IsPublished) { return $null }
+    if (-not $HasUnreleasedContent) { return $null }
+    return ("ModuleVersion $ModuleVersion is already on the gallery, and CHANGELOG.md has " +
+        "unreleased entries above it. Anyone installing $ModuleVersion gets different code " +
+        "depending on whether they took it from the gallery or from this repository. Bump " +
+        "ModuleVersion and give the entries their own heading.")
+}
+
+function Test-PSCxHasUnreleasedContent {
+    <#
+    .SYNOPSIS
+        Whether the [Unreleased] heading has anything under it.
+    #>
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$Lines)
+    # Scanned in one pass, in the same style as Get-PSCxConsumerNotes: enter at the
+    # [Unreleased] heading, leave at the next `## [` heading of any kind.
+    $inside = $false
+    foreach ($line in $Lines) {
+        if ($line -match '^##\s*\[Unreleased\]') { $inside = $true; continue }
+        if ($inside -and $line -match '^##\s*\[') { return $false }
+        # Any non-blank line counts. A section holding only whitespace is the resting state
+        # between releases and must not read as pending work.
+        if ($inside -and -not [string]::IsNullOrWhiteSpace($line)) { return $true }
+    }
+    return $false
+}
+
 function Get-PSCxRewrittenManifest {
     # The manifest TEXT with only its ReleaseNotes value replaced. Returns a string and writes
     # nothing -- the caller decides whether to save it.
