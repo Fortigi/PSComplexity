@@ -8,7 +8,7 @@ This file records **ordering rationale only**. Status lives in the issues. Do no
 progress here: a second status list drifts from the first, which is the exact failure this
 project exists to find in other people's code.
 
-Snapshot 2026-08-23, after **0.3.0 shipped**. 23 issues open.
+Snapshot 2026-08-23, with **0.4.0 prepared and unreleased**. 19 issues open.
 
 Everything that release contained is gone from this file rather than ticked, per the rule
 below: discovery, the empty verdict, the vacuous test, the metric's blindness to PowerShell's
@@ -93,13 +93,20 @@ The expensive-to-reverse decisions, and the reason to take them before any featu
 "treat its shape as an interface and pin it in a test", and after that a wrong key costs a
 major version.
 
+**#42 and #14 shipped in 0.4.0** and are removed rather than ticked. The record's five
+fields, their order and their types are asserted exactly, so widening it fails a test and is
+a decision; and a unit now has an identity that is unique within a file and the same on both
+CI legs. That was this wave's whole purpose, and it lands **before** #2 or #5 persists a key
+-- which is the ordering this file existed to protect.
+
+One thing the sweep could not settle travels with it: **#83**, a boundary-list entry that
+changes no observable answer when removed. Recorded rather than removed on a guess.
+
 | Order | Issue | Why here |
 |---|---|---|
-| 1 | **#42** | Pin the five-field record before anything reads it. One test, and it stops being free the moment #2 commits a file or #5 publishes one. First in this wave precisely because it looks too small to schedule. (#43, deterministic order, shipped in 0.3.0 -- half of this item is already done.) |
-| 2 | **#14** | Unit identity is neither unique (two nested `Get-Inner`s collide) nor portable (`File` is absolute and platform-separated, and CI runs two OSes). #2 and #7 both assume otherwise **in their own text**. One function, because `Get-PSCxUnitName` centralises naming. |
-| 3 | **#20** | Promoted. The metric already moved once, in 0.3.0, with nothing recording that it did -- so two scores from either side of that release are not comparable and nothing says so. Every further metric change has the same cost, and #2 makes it a silent re-baseline of a committed file. |
-| 4 | **#17**, **#16** | The two missing levels. Take them together: they are the same decision about what a record is, and deciding one without the other produces a shape that has to move again. |
-| 5 | **#21** | The exception concept: today nobody can disagree with a number. Cheap now, and after #2 ships a bare snapshot a declaration is a mute button rather than an agreement. |
+| 1 | **#20** | Promoted. The metric already moved once, in 0.3.0, with nothing recording that it did -- so two scores from either side of that release are not comparable and nothing says so. Every further metric change has the same cost, and #2 makes it a silent re-baseline of a committed file. |
+| 2 | **#17**, **#16** | The two missing levels. Take them together: they are the same decision about what a record is, and deciding one without the other produces a shape that has to move again. |
+| 3 | **#21** | The exception concept: today nobody can disagree with a number. Cheap now, and after #2 ships a bare snapshot a declaration is a mute button rather than an agreement. |
 
 **#22 and #47 are not positions here.** Both are decisions to record, not work: complexity exists per
 unit, extraction lowers the score by design, and the README over-claims by calling the number
@@ -116,9 +123,13 @@ block adds 3/5 -- and it is the cheaper displacement route, so settle it alongsi
 `&&`, `||`, `??` and `??=`, and a pipeline body costs what the keyword form costs. What is
 left in this wave is what stops that vocabulary drifting again.
 
+**#32 shipped in 0.4.0.** Twenty reference cases pin every entry in all three type lists, and a
+leave-one-out sweep against a green control leaves 28 of 29 failing when deleted -- against 5 of
+7 cyclomatic and 4 of 8 cognitive deletable before. What is left is the other direction.
+
 | Order | Issue | Why here |
 |---|---|---|
-| 1 | **#32**, **#18** | Nothing pins the vocabulary from either side: 5 of 7 cyclomatic and 4 of 8 cognitive types can be deleted with the suite green (#32), and nothing notices when PowerShell adds one (#18). Same test file, opposite directions. |
+| 1 | **#18** | The half #32 cannot cover: nothing notices when PowerShell gains syntax the metric cannot see. An unrecognised construct can only lower a score, so the gate passes most easily on the code it understands least. |
 | 2 | **#4** | Pin the metric against the SonarSource examples. All eleven reference cases currently pass, including both "classic implementation errors" -- so this is a pinning gap, not a correctness bug, and it is cheaper after #16 makes increments addressable. |
 
 ## Wave D -- the features everyone actually wants
