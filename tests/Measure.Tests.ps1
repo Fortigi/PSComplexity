@@ -33,7 +33,7 @@ Describe 'the record shape a consumer depends on' {
         $row = @(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1'))[0]
         # Joined rather than Should-BeCollection, which ignores order: property order is
         # what Format-Table shows a consumer, so a reordering is a visible change.
-        ($row.PSObject.Properties.Name -join ',') | Should-Be 'File,Unit,Line,Cyclomatic,Cognitive'
+        ($row.PSObject.Properties.Name -join ',') | Should-Be 'File,Unit,Line,Cyclomatic,Cognitive,MetricVersion'
     }
 
     It 'emits those fields with the types a consumer sorts and compares on' {
@@ -45,6 +45,7 @@ Describe 'the record shape a consumer depends on' {
         $row.Line       | Should-HaveType ([int])
         $row.Cyclomatic | Should-HaveType ([int])
         $row.Cognitive  | Should-HaveType ([int])
+        $row.MetricVersion | Should-HaveType ([int])
     }
 
     It 'pins the shape for every record, not only the first' {
@@ -54,7 +55,7 @@ Describe 'the record shape a consumer depends on' {
         $rows = @(Measure-PSComplexity -Path $script:work -Recurse)
         $rows.Count | Should-BeGreaterThan 2
         $shapes = @($rows | ForEach-Object { $_.PSObject.Properties.Name -join ',' } | Sort-Object -Unique)
-        ($shapes -join ' | ') | Should-Be 'File,Unit,Line,Cyclomatic,Cognitive'
+        ($shapes -join ' | ') | Should-Be 'File,Unit,Line,Cyclomatic,Cognitive,MetricVersion'
     }
 }
 
@@ -153,6 +154,24 @@ function Get-OuterB { function Get-Inner { if ($y) { 1 } if ($z) { 2 } } }
 }
 
 Describe 'Get-PSCxRelativePath' {
+    It 'resolves a relative path against Root, not against the working directory' {
+        # The function only gave the right answer while its one caller happened to pass an
+        # absolute path AND a Root equal to the CWD. Both had to hold; neither was stated. A
+        # second caller passing a relative path would have got a path under wherever the shell
+        # happened to be standing, which is a wrong answer that looks entirely plausible.
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) 'some-repo'
+        Push-Location ([System.IO.Path]::GetTempPath())
+        try { Get-PSCxRelativePath -Path 'src/a.ps1' -Root $root | Should-Be 'src/a.ps1' }
+        finally { Pop-Location }
+    }
+
+    It 'still takes an absolute path as it stands' {
+        # The kept half: the production caller passes absolute paths, so a fix that only
+        # handled the relative case would break the one path that actually runs.
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) 'some-repo'
+        Get-PSCxRelativePath -Path (Join-Path $root 'src/b.ps1') -Root $root | Should-Be 'src/b.ps1'
+    }
+
     It 'strips a root that already ends with a separator' {
         # A root ending in a separator is not exotic -- a drive root and the temp directory
         # both do. Appending a second one unconditionally makes the prefix match fail, and the
@@ -180,6 +199,27 @@ Describe 'a function nested inside a class method' {
         $rows = @(Measure-PSComplexity -Path $f | Where-Object Unit -like '*Get-Inner')
         $rows.Count | Should-Be 1
         $rows[0].Unit | Should-Be 'C.M/Get-Inner'
+    }
+}
+
+Describe 'a score says which metric produced it' {
+    # Two numbers are comparable only if the same metric produced them, and this one has moved
+    # twice for unchanged source: 0.3.0 taught it PowerShell's flow constructs, 0.4.0 stopped
+    # merging two units written on one line. Both were corrections; both silently re-scored code
+    # nobody had touched. A committed baseline (#2) compares a stored score with a fresh one, so
+    # without this it would absorb an upgrade as if it were a change in the code.
+
+    It 'stamps every record with the metric version' {
+        $rows = @(Measure-PSComplexity -Path $script:work -Recurse)
+        $rows.Count | Should-BeGreaterThan 1
+        # Every record, not the first: a stamp applied in one branch of the emitter and not
+        # another is worse than none, because the gap is invisible.
+        @($rows | Where-Object { $_.MetricVersion -ne 1 }).Count | Should-Be 0
+    }
+
+    It 'is an int, so a consumer can compare it rather than parse it' {
+        (@(Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1'))[0]).MetricVersion |
+            Should-HaveType ([int])
     }
 }
 

@@ -35,6 +35,15 @@ keys it holds could not distinguish units the tool could.
 
 ### Fixed
 
+- **A relative path now resolves against the root it was given, not against the working
+  directory.** `Get-PSCxRelativePath` called `GetFullPath` on its `Path` argument directly, so
+  a relative one silently resolved against wherever the shell happened to be standing. It gave
+  the right answer only while its single caller passed an absolute path **and** a root equal to
+  the current directory -- two conditions that both had to hold and neither of which was
+  stated. Not reachable today; the sibling project shipped the same shape and it was a live
+  hole there, because a config may name a file by full path.
+
+
 - **CI now fails when `main` claims a version that has already shipped.** It once did: `main`
   stood at 0.2.0, 0.2.0 was on the gallery, and merged work sat under `[Unreleased]` with every
   gate green. Two people installing "0.2.0" -- one from the gallery, one from a clone -- got
@@ -64,6 +73,33 @@ keys it holds could not distinguish units the tool could.
   anything above a unit is edited.
 
 ### Added
+
+- **The construct vocabulary is closed against the parser.** The metrics recognise a
+  hand-maintained allowlist spread over three places, and nothing compared it against what the
+  parser can actually produce -- so a construct the module has never heard of contributed
+  nothing and the unit containing it scored as straight-line code. The direction is what made
+  it dangerous: an unrecognised construct can only lower a score, so the gate passed most
+  easily on the code it understood least. Every one of the 66 concrete `Ast` types is now
+  either handled by a metric or carries a written reason for not being; 42 exclusions, each
+  with its argument. The next PowerShell release turns the suite red instead of quietly
+  lowering everyone's numbers.
+
+
+- **A score now says which metric produced it.** Records carry `MetricVersion`, an int that
+  increments whenever a score can change for source that did not -- a narrower rule than the
+  module version, so a fix that only affects messages, or a new field on the record, leaves it
+  alone. It has already happened twice without being recorded: 0.3.0 taught the metric
+  PowerShell's own flow constructs, and 0.4.0 stopped merging two units written on one line.
+  Both were corrections, and both silently re-scored code nobody had touched. It starts at **1**
+  with this release; earlier releases carry no version and are not comparable with these.
+  Anything persisting or comparing scores should refuse to compare across two values rather than
+  mix them -- which is what a committed baseline will need.
+
+- The README's CI snippet now installs with **`-RequiredVersion`** rather than a floor. A gate
+  decides whether a build passes, so without an exact version two machines on the same commit
+  can legitimately disagree about whether it is green, and the one that upgraded first looks
+  like the one that broke it.
+
 
 - **The output record is now stated as the public contract and pinned by tests.** The five
   fields `Measure-PSComplexity` emits -- `File`, `Unit`, `Line`, `Cyclomatic`, `Cognitive` --

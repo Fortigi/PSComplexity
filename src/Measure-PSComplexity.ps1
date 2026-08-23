@@ -28,6 +28,20 @@ function Get-PSCxSourceFile {
             ForEach-Object { $_.FullName })
 }
 
+# Which metric produced a number. Two scores are comparable only if the same metric produced
+# them, and this module's metric has already moved twice for unchanged source: 0.3.0 taught it
+# PowerShell's own flow constructs, and 0.4.0 stopped merging two units written on one line.
+# Both were correct, and both silently re-scored code nobody had touched.
+#
+# It increments whenever a score can change for source that did not, which is a narrower rule
+# than the module version: a bug fix that only affects messages, or a new field on the record,
+# leaves it alone. Anything persisting or comparing scores -- a committed baseline, a diffed
+# report -- must refuse to compare across two different values rather than mix them.
+#
+# Starts at 1 with 0.4.0. Scores from earlier releases carry no version and are not comparable
+# with these; that is a statement about what was never recorded, not a claim that they agree.
+$script:PSCxMetricVersion = 1
+
 function Get-PSCxRelativePath {
     # A path two machines can agree on.
     #
@@ -51,7 +65,13 @@ function Get-PSCxRelativePath {
         [Parameter(Mandatory)] [string]$Path,
         [Parameter(Mandatory)] [string]$Root
     )
-    $full = [System.IO.Path]::GetFullPath($Path)
+    # A RELATIVE Path resolves against Root, not against the working directory. GetFullPath
+    # alone silently uses the CWD, so the function only gave the right answer while its one
+    # caller happened to pass an absolute path AND a Root equal to the CWD -- two conditions
+    # that both had to hold and neither of which was stated. The sibling project shipped the
+    # same shape and it was a live hole there, because a config may name a file by full path.
+    $full = if ([System.IO.Path]::IsPathRooted($Path)) { [System.IO.Path]::GetFullPath($Path) }
+    else { [System.IO.Path]::GetFullPath((Join-Path $Root $Path)) }
     $rootFull = [System.IO.Path]::GetFullPath($Root)
     if (-not $rootFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
         $rootFull += [System.IO.Path]::DirectorySeparatorChar
@@ -171,6 +191,10 @@ function Measure-PSComplexity {
                         Line       = $lines[$k]
                         Cyclomatic = $cyc[$k]
                         Cognitive  = $cog[$k]
+                        # Last, so the four fields a reader scans stay together. Widening this
+                        # record fails the test that pins it, which is how this addition became
+                        # a decision rather than a side effect.
+                        MetricVersion = $script:PSCxMetricVersion
                     }
                 }
             }
