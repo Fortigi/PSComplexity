@@ -94,7 +94,9 @@ jobs:
 
       - name: Release consistency (ModuleVersion, CHANGELOG, ReleaseNotes)
         shell: pwsh
-        run: ./tools/Test-PSCxRelease.ps1
+        # -CheckGallery here and not locally: the question is whether this version has
+        # already shipped, which the working tree cannot answer.
+        run: ./tools/Test-PSCxRelease.ps1 -CheckGallery
 
       # One committed script, called by this gate and by code-scanning.yml. Spelled out in
       # both, they disagreed about severity and scope, so an Information finding failed

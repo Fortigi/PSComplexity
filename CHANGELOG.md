@@ -35,6 +35,15 @@ keys it holds could not distinguish units the tool could.
 
 ### Fixed
 
+- **CI now fails when `main` claims a version that has already shipped.** It once did: `main`
+  stood at 0.2.0, 0.2.0 was on the gallery, and merged work sat under `[Unreleased]` with every
+  gate green. Two people installing "0.2.0" -- one from the gallery, one from a clone -- got
+  different code, and nothing in the repo could tell them apart. The release gate now asks the
+  gallery, and faults only on the pair: a published version **and** unreleased entries above
+  it. Either alone is a normal state. It checks the gallery is reachable **first** and refuses
+  when it is not, because "never published" and "could not look" are the same empty answer and
+  treating them alike is how a gate silently stops being able to fail.
+
 - **Two units written on one line are two units again.** A unit was keyed by its name and its
   *line*, and a line is not unique: two overloads on one physical line shared a key, so their
   scores were **added** and the file reported a single unit that exists nowhere in the source.
