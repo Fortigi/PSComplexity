@@ -5,6 +5,14 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+### Internal
+
+- The mutation gate moves from PSMutant 0.3.1 to **0.3.2**, so neither module gates on a
+  version behind the one it ships beside. The score is unchanged; two of that release's
+  guards -- a per-mutant budget shorter than the baseline suite, and a config path escaping
+  the source root -- are inert here, because this config sets no timeout keys and no path
+  leaves the root.
+
 ## [0.3.0] - 2026-08-22
 
 ### For consumers
