@@ -65,6 +65,22 @@ keys it holds could not distinguish units the tool could.
 
 ### Added
 
+- **A score now says which metric produced it.** Records carry `MetricVersion`, an int that
+  increments whenever a score can change for source that did not -- a narrower rule than the
+  module version, so a fix that only affects messages, or a new field on the record, leaves it
+  alone. It has already happened twice without being recorded: 0.3.0 taught the metric
+  PowerShell's own flow constructs, and 0.4.0 stopped merging two units written on one line.
+  Both were corrections, and both silently re-scored code nobody had touched. It starts at **1**
+  with this release; earlier releases carry no version and are not comparable with these.
+  Anything persisting or comparing scores should refuse to compare across two values rather than
+  mix them -- which is what a committed baseline will need.
+
+- The README's CI snippet now installs with **`-RequiredVersion`** rather than a floor. A gate
+  decides whether a build passes, so without an exact version two machines on the same commit
+  can legitimately disagree about whether it is green, and the one that upgraded first looks
+  like the one that broke it.
+
+
 - **The output record is now stated as the public contract and pinned by tests.** The five
   fields `Measure-PSComplexity` emits -- `File`, `Unit`, `Line`, `Cyclomatic`, `Cognitive` --
   are the module's API besides the two command names, and nothing asserted them, so adding,
