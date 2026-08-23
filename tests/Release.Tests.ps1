@@ -297,3 +297,50 @@ Describe 'main must not claim a version that already shipped' {
         Should-BeFalse -Actual (Test-PSCxHasUnreleasedContent -Lines $lines)
     }
 }
+
+Describe 'a pin is watched, not just written down' {
+    # A pin is a decision that was correct on the day it was made. Nothing watched them, and
+    # the failure is asymmetric: a stale pin never breaks the build, it just quietly stops
+    # protecting you. The PSMutant pin sat at 0.1.0 across two majors -- one of which fixed a
+    # bug that scored EVERY mutant killed -- and CI was green throughout.
+
+    It 'reports a pin the gallery has moved past' {
+        Get-PSCxStalePinFault -Name 'Pester' -Pinned '5.0.0' -Latest '6.1.0' |
+            Should-MatchString ([regex]::Escape('6.1.0 is available'))
+    }
+
+    It 'says nothing when the pin is the newest release' {
+        # First kept case. Without it, a checker that faulted on every pin would pass the
+        # test above and file an issue every week about nothing.
+        Should-BeNull -Actual (Get-PSCxStalePinFault -Name 'Pester' -Pinned '6.1.0' -Latest '6.1.0')
+    }
+
+    It 'says nothing when the pin is ahead of the gallery' {
+        # Second kept case, and not hypothetical: a prerelease or a yanked version leaves the
+        # pin ahead, and a string comparison would call 6.1.0 newer than 10.0.0.
+        Should-BeNull -Actual (Get-PSCxStalePinFault -Name 'Pester' -Pinned '10.0.0' -Latest '6.1.0')
+    }
+
+    It 'reports an unreachable gallery as unknown, not as current' {
+        # The one that decides whether this is worth having. Find-Module returns nothing both
+        # when a module is current and when the gallery cannot be reached; treating those
+        # alike would make every run report all-clear -- a watcher that has silently stopped
+        # being able to fail.
+        Get-PSCxStalePinFault -Name 'Pester' -Pinned '6.1.0' -Latest '' |
+            Should-MatchString 'freshness is unknown'
+    }
+
+    It 'reports a module with no pin at all' {
+        Get-PSCxStalePinFault -Name 'Pester' -Pinned '' -Latest '6.1.0' |
+            Should-MatchString 'no pinned version'
+    }
+
+    It 'watches every module the workflows install' {
+        # The list in the checker and the keys in pins.env must not drift apart: a module
+        # installed by CI and absent from the watcher is exactly the pin that goes stale.
+        $script = Get-Content -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'tools/Test-PSCxPinFreshness.ps1') -Raw
+        foreach ($key in 'PESTER_VERSION', 'PSSA_VERSION', 'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION') {
+            $script | Should-MatchString ([regex]::Escape($key))
+        }
+    }
+}
