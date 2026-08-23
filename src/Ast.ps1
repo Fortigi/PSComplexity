@@ -82,24 +82,86 @@ function Get-PSCxUnitBoundary {
     return $null
 }
 
-function Get-PSCxUnitName {
-    # 'name@offset' for a function; 'Class.Member@offset' for a class member (whose
-    # Parent is the TypeDefinitionAst carrying the class name). A constructor is
-    # named after its class, so it reads 'Order.Order@offset'.
+function Get-PSCxDisplayName {
+    # Map ordered unit keys to the names a caller sees, disambiguating repeats.
     #
-    # The suffix is the extent's START OFFSET, not its line. A line is not unique: two
-    # overloads written on one physical line -- `[void] Add([int]$a) {} [void] Add([string]$b) {}`
-    # -- produced ONE key, so their scores were ADDED and the file reported a single unit
-    # that exists nowhere in the source. An offset is unique per node by construction, so
-    # two units can no longer collide however they are laid out. The line is still what the
-    # caller sees; Get-PSCxUnitTable records it separately.
+    # Qualification makes a nested unit distinct from one of the same name elsewhere, but it
+    # cannot separate two units with the SAME name in the SAME scope -- two overloads, or a
+    # function defined twice. Those still read alike, so a baseline keyed on the name merges
+    # them. An ordinal is appended to every member of such a group, first one included: were
+    # only the second suffixed, adding an overload would silently rename the first.
+    [OutputType([hashtable])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$OrderedKeys)
+    $bare = @{}
+    foreach ($k in $OrderedKeys) {
+        $n = $k -replace '@\d+$', ''
+        $bare[$k] = $n
+    }
+    $counts = @{}
+    foreach ($k in $OrderedKeys) { $counts[$bare[$k]] = 1 + [int]$counts[$bare[$k]] }
+    $seen = @{}
+    $out = @{}
+    foreach ($k in $OrderedKeys) {
+        $n = $bare[$k]
+        if ($counts[$n] -gt 1) {
+            $seen[$n] = 1 + [int]$seen[$n]
+            $out[$k] = '{0}#{1}' -f $n, $seen[$n]
+        }
+        else { $out[$k] = $n }
+    }
+    return $out
+}
+
+function Get-PSCxUnitOwnName {
+    # A unit's own name, unqualified: 'Get-Thing' for a function, 'Class.Member' for a class
+    # member (whose Parent is the TypeDefinitionAst carrying the class name). A constructor is
+    # named after its class, so it reads 'Order.Order'.
     [OutputType([string])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Boundary)
     if ($Boundary -is [System.Management.Automation.Language.FunctionDefinitionAst]) {
-        return '{0}@{1}' -f $Boundary.Name, $Boundary.Extent.StartOffset
+        return $Boundary.Name
     }
-    return '{0}.{1}@{2}' -f $Boundary.Parent.Name, $Boundary.Name, $Boundary.Extent.StartOffset
+    return '{0}.{1}' -f $Boundary.Parent.Name, $Boundary.Name
+}
+
+function Get-PSCxUnitName {
+    # The qualified unit name plus the extent's start offset: 'Outer/Inner@412'.
+    #
+    # QUALIFIED, because a bare name is not unique. `Get-Inner` defined inside `Get-OuterA`
+    # and again inside `Get-OuterB` produced two rows both reading `Get-Inner`, so anything
+    # keying on the name -- a committed baseline, a per-file report -- silently merged two
+    # different units. Class members were already qualified for exactly this reason; nested
+    # functions were not, and the promise that the qualification extends to "any per-unit
+    # baseline built from it" was true only for the half that had it.
+    #
+    # SUFFIXED WITH THE OFFSET, not the line, because a line is not unique either: two
+    # overloads written on one physical line shared a key and had their scores ADDED, so the
+    # file reported a single unit that exists nowhere in the source. An offset is unique per
+    # node however the source is laid out. The reported Line is recorded separately and is
+    # display data.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Boundary)
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add((Get-PSCxUnitOwnName -Boundary $Boundary))
+    # Walk out through every enclosing unit. Resolve each one first: a class method's body is
+    # itself a FunctionDefinitionAst inside the FunctionMemberAst, so an unresolved walk
+    # would name the same method twice.
+    $seen = Resolve-PSCxUnitBoundary -Boundary $Boundary
+    $p = $Boundary.Parent
+    while ($p) {
+        if ($p.GetType().Name -in $script:PSCxUnitBoundaryTypes) {
+            $outer = Resolve-PSCxUnitBoundary -Boundary $p
+            if (-not [object]::ReferenceEquals($outer, $seen)) {
+                $parts.Insert(0, (Get-PSCxUnitOwnName -Boundary $outer))
+                $seen = $outer
+            }
+        }
+        $p = $p.Parent
+    }
+    return '{0}@{1}' -f ($parts -join '/'), $Boundary.Extent.StartOffset
 }
 
 function Get-PSCxUnitKey {

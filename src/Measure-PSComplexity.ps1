@@ -28,6 +28,37 @@ function Get-PSCxSourceFile {
             ForEach-Object { $_.FullName })
 }
 
+function Get-PSCxRelativePath {
+    # A path two machines can agree on.
+    #
+    # File used to be absolute and platform-separated, so the same source measured on the two
+    # CI legs produced disjoint key sets -- C:\...\src\A.ps1 against /home/.../src/A.ps1 --
+    # and anything comparing runs across them matched nothing while looking like it worked.
+    # The README had rendered it relative all along, so the absolute form was not a decision
+    # anyone recorded.
+    #
+    # Separators are normalised to '/' because that is the half that does not vary: a Windows
+    # reader understands src/A.ps1, and a key containing a backslash cannot be matched by a
+    # Linux run at all.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Path,
+        [Parameter(Mandatory)] [string]$Root
+    )
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $rootFull = [System.IO.Path]::GetFullPath($Root)
+    if (-not $rootFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $rootFull += [System.IO.Path]::DirectorySeparatorChar
+    }
+    # Outside the root, keep the full path. A ../../ chain says less than the absolute path
+    # does and is no more portable, so pretending would only hide where the file came from.
+    if (-not $full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $full.Replace([char]92, '/')
+    }
+    return $full.Substring($rootFull.Length).Replace([char]92, '/')
+}
+
 function Measure-PSComplexity {
     <#
     .SYNOPSIS
@@ -58,6 +89,12 @@ function Measure-PSComplexity {
         record fails that test, so it is a decision rather than a side effect of an
         internal change. File and Unit are [string]; Line, Cyclomatic and Cognitive are
         [int] -- Line as a string would silently turn a numeric sort into a lexical one.
+
+        Unit identifies one unit: a class member reads Class.Member, a nested function
+        reads Outer/Inner, and units sharing a name in one scope carry an ordinal on every
+        member of the group (Repo.Add#1, Repo.Add#2). File is relative to the working
+        directory with forward slashes, so two machines produce the same key; a file outside
+        that root keeps its full path.
 
         Line is NOT an identity. It moves whenever anything above a unit is edited, so it
         says where a unit currently starts, not which unit it is. Anything persisting or
@@ -101,6 +138,9 @@ function Measure-PSComplexity {
                     continue
                 }
 
+                # Relative to where the caller is standing, which for a repo-scoped run is
+                # the repo. Not a parameter: a root nobody passes is a root nobody gets wrong.
+                $relative = Get-PSCxRelativePath -Path $file -Root (Get-Location).Path
                 $cyc = Get-PSCxCyclomaticMap -Ast $ast
                 $cog = Get-PSCxCognitiveMap -Ast $ast
                 $lines = Get-PSCxUnitTable -Ast $ast
@@ -114,11 +154,15 @@ function Measure-PSComplexity {
                 # Line first, then unit name: two units CAN start on the same line
                 # (`function A { } function B { }`), and a tie left unbroken puts the
                 # nondeterminism straight back.
-                $ordered = $lines.Keys | Sort-Object @{ Expression = { $lines[$_] } }, @{ Expression = { $_ } }
+                $ordered = @($lines.Keys | Sort-Object @{ Expression = { $lines[$_] } }, @{ Expression = { $_ } })
+                # Names computed over the whole file, because disambiguating a repeat needs to
+                # know there IS a repeat. Done per row, the first of a pair could not be told
+                # apart from a unit that never had a twin.
+                $display = Get-PSCxDisplayName -OrderedKeys $ordered
                 foreach ($k in $ordered) {
                     [pscustomobject]@{
-                        File       = $file
-                        Unit       = ($k -replace '@\d+$', '')
+                        File       = $relative
+                        Unit       = $display[$k]
                         Line       = $lines[$k]
                         Cyclomatic = $cyc[$k]
                         Cognitive  = $cog[$k]

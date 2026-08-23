@@ -5,15 +5,43 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-23
+
+### For consumers
+
+BEHAVIOUR CHANGE -- two published values change shape, and anything that stored them will
+not match. Read this before upgrading a pipeline that keeps records.
+
+`Unit` and `File` were neither unique within a file nor stable across machines, and both are
+fixed together because a half-fixed identity is still not one.
+
+**`Unit` is now qualified and disambiguated.** A function nested in another reads
+`Get-OuterA/Get-Inner` rather than `Get-Inner` -- two such units in one file used to be
+indistinguishable, and they score differently. Two units sharing a name in the same scope --
+overloads, or a function defined twice -- get an ordinal on **every** member of the group:
+`Repo.Add#1`, `Repo.Add#2`. Both, not just the second, because suffixing only the later one
+would silently rename the first the day an overload is added. Class members were already
+qualified; this extends the same rule to the half that lacked it.
+
+**`File` is now relative to the working directory, with forward slashes.** It was absolute
+and platform-separated, so identical source measured on two CI legs produced disjoint key
+sets -- `C:\...\src\A.ps1` against `/home/.../src/A.ps1` -- and anything comparing runs
+across them matched nothing while appearing to work. A file outside the root keeps its full
+path, because a `../../` chain is no more portable and says less. The README had rendered
+this relative all along.
+
+If you have a stored baseline, it will not match after upgrading. That is the point: the
+keys it holds could not distinguish units the tool could.
+
 ### Fixed
 
 - **Two units written on one line are two units again.** A unit was keyed by its name and its
-  *line*, and a line is not unique: two overloads on one physical line -- `[void] Add([int]$a)
-  { } [void] Add([string]$b) { }` -- shared a key, so their scores were **added** and the file
-  reported a single unit that exists nowhere in the source. That is a wrong number, not merely
-  a wrong name: the pair above reported one `Repo.Add` at cyclomatic 3 where there are two,
-  each 2. Units are now keyed by the extent's start offset, which is unique per node however
-  the source is laid out. The reported `Line` is unchanged.
+  *line*, and a line is not unique: two overloads on one physical line shared a key, so their
+  scores were **added** and the file reported a single unit that exists nowhere in the source.
+  The pair reported one `Repo.Add` at cyclomatic 3 where there are two, each 2. Units are now
+  keyed by the extent's start offset, unique per node however the source is laid out. The
+  reported `Line` is unchanged and remains display data, not identity -- it moves whenever
+  anything above a unit is edited.
 
 ### Added
 
