@@ -154,6 +154,24 @@ function Get-OuterB { function Get-Inner { if ($y) { 1 } if ($z) { 2 } } }
 }
 
 Describe 'Get-PSCxRelativePath' {
+    It 'resolves a relative path against Root, not against the working directory' {
+        # The function only gave the right answer while its one caller happened to pass an
+        # absolute path AND a Root equal to the CWD. Both had to hold; neither was stated. A
+        # second caller passing a relative path would have got a path under wherever the shell
+        # happened to be standing, which is a wrong answer that looks entirely plausible.
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) 'some-repo'
+        Push-Location ([System.IO.Path]::GetTempPath())
+        try { Get-PSCxRelativePath -Path 'src/a.ps1' -Root $root | Should-Be 'src/a.ps1' }
+        finally { Pop-Location }
+    }
+
+    It 'still takes an absolute path as it stands' {
+        # The kept half: the production caller passes absolute paths, so a fix that only
+        # handled the relative case would break the one path that actually runs.
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) 'some-repo'
+        Get-PSCxRelativePath -Path (Join-Path $root 'src/b.ps1') -Root $root | Should-Be 'src/b.ps1'
+    }
+
     It 'strips a root that already ends with a separator' {
         # A root ending in a separator is not exotic -- a drive root and the temp directory
         # both do. Appending a second one unconditionally makes the prefix match fail, and the

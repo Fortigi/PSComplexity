@@ -65,7 +65,13 @@ function Get-PSCxRelativePath {
         [Parameter(Mandatory)] [string]$Path,
         [Parameter(Mandatory)] [string]$Root
     )
-    $full = [System.IO.Path]::GetFullPath($Path)
+    # A RELATIVE Path resolves against Root, not against the working directory. GetFullPath
+    # alone silently uses the CWD, so the function only gave the right answer while its one
+    # caller happened to pass an absolute path AND a Root equal to the CWD -- two conditions
+    # that both had to hold and neither of which was stated. The sibling project shipped the
+    # same shape and it was a live hole there, because a config may name a file by full path.
+    $full = if ([System.IO.Path]::IsPathRooted($Path)) { [System.IO.Path]::GetFullPath($Path) }
+    else { [System.IO.Path]::GetFullPath((Join-Path $Root $Path)) }
     $rootFull = [System.IO.Path]::GetFullPath($Root)
     if (-not $rootFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
         $rootFull += [System.IO.Path]::DirectorySeparatorChar
