@@ -41,12 +41,16 @@ if (-not (Test-PSComplexity ./src -Recurse -MaxCyclomatic 15 -MaxCognitive 15)) 
 ```
 File                    Unit                 Line Cyclomatic Cognitive
 ----                    ----                 ---- ---------- ---------
-C:\proj\src\Foo.ps1     <script-body>           1          1         0
-C:\proj\src\Foo.ps1     Get-Foo                12          8         9
-C:\proj\src\Foo.ps1     Order.Process          31          5        10
+src/Foo.ps1             <script-body>           1          1         0
+src/Foo.ps1             Get-Foo                12          8         9
+src/Foo.ps1             Order.Process          31          5        10
 ```
 
-Class members are reported as `Class.Member`, so two classes with a method of the same
+A unit name identifies one unit. Class members are reported as `Class.Member`, a function
+nested inside another as `Outer/Inner`, and units sharing a name in the same scope — two
+overloads, or a function defined twice — carry an ordinal on **every** member of the group
+(`Repo.Add#1`, `Repo.Add#2`). Suffixing only the second would silently rename the first the
+day an overload is added. So two classes with a method of the same
 name — or a class method and a function of that name — stay distinct, in the output and
 in any per-unit baseline built from it. A class property is a unit only when it has an
 initialiser: that is code which runs, and it belongs to the property rather than to the
@@ -81,7 +85,7 @@ nested loop-in-loop-in-`if` grows fast — mirroring how hard it is to follow.
 
 | Field | Type | |
 |---|---|---|
-| `File` | `[string]` | absolute path |
+| `File` | `[string]` | path relative to the working directory, forward slashes; full path if outside it |
 | `Unit` | `[string]` | function, method, or `<script-body>` |
 | `Line` | `[int]` | where the unit starts |
 | `Cyclomatic` | `[int]` | |
