@@ -56,6 +56,27 @@ function Get-Fib { param($n) if ($n -le 1) { return $n }; return (Get-Fib ($n - 
     @{ name = 'null-coalescing nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $x, $y) if ($a) { $z = $x ?? $y } }' }
     @{ name = 'null-coalescing assignment nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $x) if ($a) { $x ??= 1 } }' }
     @{ name = 'flat function scores 0'; expected = 0; code = 'function T { param($x) $y = $x + 1; return $y }' }
+    # Every remaining entry in the cognitive block list, flat. Four of the eight type names
+    # could be DELETED with the whole suite green: tests/ contained no `catch` and no `trap`
+    # at all, and a do-until but no do-while.
+    @{ name = 'while = 1'; expected = 1; code = 'function T { param($n) while ($n -gt 0) { $n-- } }' }
+    @{ name = 'do-while = 1'; expected = 1; code = 'function T { param($n) do { $n-- } while ($n -gt 0) }' }
+    @{ name = 'catch = 1'; expected = 1; code = 'function T { try { 1 } catch { 2 } }' }
+    @{ name = 'trap = 1'; expected = 1; code = 'function T { trap { continue } 1 }' }
+
+    # And every entry in $script:PSCxNestingTypes, which is a DIFFERENT list and needs a
+    # different shape: an `if` INSIDE the construct. "X inside an if" pins IfStatementAst's
+    # membership, not X's -- the nesting bonus belongs to whatever encloses. Each of these is
+    # construct(1) + if(1 + 1 nesting) = 3, and drops to 2 the moment the construct stops
+    # raising nesting.
+    @{ name = 'while raises nesting'; expected = 3; code = 'function T { param($n,$a) while ($n -gt 0) { if ($a) { 1 } } }' }
+    @{ name = 'for raises nesting'; expected = 3; code = 'function T { param($a) for ($i = 0; $i -lt 3; $i++) { if ($a) { 1 } } }' }
+    @{ name = 'do-while raises nesting'; expected = 3; code = 'function T { param($n,$a) do { if ($a) { 1 } } while ($n -gt 0) }' }
+    @{ name = 'do-until raises nesting'; expected = 3; code = 'function T { param($n,$a) do { if ($a) { 1 } } until ($n -le 0) }' }
+    @{ name = 'switch raises nesting'; expected = 3; code = 'function T { param($a,$b) switch ($a) { 1 { if ($b) { 2 } } } }' }
+    @{ name = 'catch raises nesting'; expected = 3; code = 'function T { param($a) try { 1 } catch { if ($a) { 2 } } }' }
+    @{ name = 'trap raises nesting'; expected = 3; code = 'function T { param($a) trap { if ($a) { continue } } 1 }' }
+    @{ name = 'foreach raises nesting'; expected = 3; code = 'function T { param($xs,$a) foreach ($x in $xs) { if ($a) { 1 } } }' }
 )
 
 BeforeAll {

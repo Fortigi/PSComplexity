@@ -44,6 +44,17 @@ keys it holds could not distinguish units the tool could.
   when it is not, because "never published" and "could not look" are the same empty answer and
   treating them alike is how a gate silently stops being able to fail.
 
+- **The construct vocabulary is pinned, so a half-finished addition cannot ship green.** Three
+  hardcoded type lists drive every number this module produces, and a leave-one-out sweep found
+  most entries deletable with the whole suite green at 100% coverage: 5 of 7 cyclomatic types,
+  4 of 8 cognitive types, and the entire `switch` decision-point block -- which made a 12-case
+  switch score cyclomatic **1** instead of 13. The cause was blunt: `tests/` contained no
+  `catch` and no `trap` at all, one `switch` fixture asserting cognitive only, and a `do-until`
+  but no `do-while`. The mutation gate cannot reach this -- its operators are arithmetic and
+  boolean, and none deletes a statement or touches a type name -- so "100% self-mutation" was
+  true and said nothing about the vocabulary. Twenty reference cases now pin every entry;
+  re-running the sweep against a green control leaves **28 of 29** entries failing when deleted.
+
 - **Two units written on one line are two units again.** A unit was keyed by its name and its
   *line*, and a line is not unique: two overloads on one physical line shared a key, so their
   scores were **added** and the file reported a single unit that exists nowhere in the source.
