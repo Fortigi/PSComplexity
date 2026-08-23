@@ -90,6 +90,15 @@ nested loop-in-loop-in-`if` grows fast — mirroring how hard it is to follow.
 | `Line` | `[int]` | where the unit starts |
 | `Cyclomatic` | `[int]` | |
 | `Cognitive` | `[int]` | |
+| `MetricVersion` | `[int]` | which metric produced these numbers |
+
+`MetricVersion` increments whenever a score can change for source that did not -- a narrower
+rule than the module version, so a bug fix that only affects messages, or a new field on this
+record, leaves it alone. It has happened twice: 0.3.0 taught the metric PowerShell's own flow
+constructs, and 0.4.0 stopped merging two units written on one line. Both were corrections, and
+both silently re-scored code nobody had touched. Anything that persists or compares scores should
+refuse to compare across two values rather than mix them. It starts at **1** with 0.4.0; earlier
+releases carry no version and are not comparable with these.
 
 Those names, their order and their types are the public contract, and a test asserts them
 exactly -- a sixth field fails the suite, so widening this is a decision rather than a side
@@ -101,9 +110,14 @@ is edited, so it says where a unit currently starts, not which unit it is.
 ```yaml
 - shell: pwsh
   run: |
-    Install-Module PSComplexity -Force -Scope CurrentUser
+    Install-Module PSComplexity -RequiredVersion 0.4.0 -Force -Scope CurrentUser
     if (-not (Test-PSComplexity ./src -Recurse)) { throw 'Complexity gate failed' }
 ```
+
+**`-RequiredVersion`, not a floor.** A gate decides whether a build passes, and this
+module's metric has already moved twice for unchanged source. Without an exact version two
+machines on the same commit can legitimately disagree about whether the build is green --
+and the one that upgraded first looks like the one that broke it.
 
 ## Development
 
