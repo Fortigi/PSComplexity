@@ -74,6 +74,17 @@ keys it holds could not distinguish units the tool could.
 
 ### Added
 
+- **Every reference score is attributed to something outside this project.** The README claims
+  the cognitive metric reproduces the SonarSource scores; the suite checked numbers the project
+  had chosen itself, so a wrong interpretation would have had the suite agreeing with the bug --
+  and the mutation gate agreeing too, because both only ever compare the code against itself.
+  Each case now names its source: 11 taken from the specification, the PowerShell extensions the
+  spec does not cover, and the vocabulary pins. A case added without attribution fails **by
+  name**, so a number this project chose cannot sit among the reference scores looking like one
+  of them -- including the two the specification calls the classic implementation errors, which
+  are asserted by count as well as present.
+
+
 - **A scan says what it is reading.** `Measure-PSComplexity -Verbose` now names each file
   **before** parsing it, so a slow scan and a stuck one stop looking identical. The ordering is
   the feature: a line written afterwards names a file that is already finished, and a scan stuck
