@@ -166,11 +166,16 @@ What is left:
   One negative worth keeping, because it looks like protection and is not: a `tag_name_pattern`
   ruleset is accepted by the API and **never evaluated**. Verified by pushing a violating tag
   with that rule as the only active one. Do not reach for it to constrain tag names.
-- **#35** -- `ConvertToSARIF` is pinned now; what is left is watching whether any pin has gone
-  stale, which is #54's job.
-- **#50**, **#54** -- nothing fails when `main` claims a version already on the gallery, and
-  nothing watches the pins or the `uses:` SHAs. Both are about drift that announces itself to
-  nobody. Do them with whatever touches the release path next.
+*#35 and #50 are gone too.* #35 was already fixed when it was re-read: `ConvertToSARIF` is
+pinned from `.github/pins.env` and imported with `-RequiredVersion`, so the required check
+cannot change behaviour on someone else's release. #50 shipped in 0.4.0 -- the release gate now
+asks the gallery and faults when a published `ModuleVersion` has unreleased entries above it,
+which is the state `main` was once in with every gate green. It checks reachability **first**
+and refuses when the gallery cannot be reached, because "never published" and "could not look"
+are the same empty answer from `Find-Module`.
+
+- **#54** -- nothing watches the pins or the `uses:` SHAs. Drift that announces itself to
+  nobody, and the last of this cluster. Do it with whatever touches the release path next.
 - **#56** -- the parity tracker. Most rows are closed; keep it until the last one is.
 - **#73** -- `Test-PSComplexity` is silent until it finishes, so a slow scan and a stuck one
   look the same. Small, and it pairs naturally with #37.
