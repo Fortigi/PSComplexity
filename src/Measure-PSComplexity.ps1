@@ -53,6 +53,16 @@ function Measure-PSComplexity {
     .OUTPUTS
         [pscustomobject] with File, Unit, Line, Cyclomatic, Cognitive -- one per unit.
 
+        These five names, their order and their types are the module's public contract
+        alongside the two command names, and a test asserts them exactly: widening the
+        record fails that test, so it is a decision rather than a side effect of an
+        internal change. File and Unit are [string]; Line, Cyclomatic and Cognitive are
+        [int] -- Line as a string would silently turn a numeric sort into a lexical one.
+
+        Line is NOT an identity. It moves whenever anything above a unit is edited, so it
+        says where a unit currently starts, not which unit it is. Anything persisting or
+        comparing records across commits needs something else.
+
     .EXAMPLE
         Measure-PSComplexity ./src -Recurse | Sort-Object Cognitive -Descending
 
