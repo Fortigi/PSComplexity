@@ -96,6 +96,15 @@ keys it holds could not distinguish units the tool could.
   reached flat and reached nested look different and say different things. Default output is
   unchanged: no switch, no property, and the six published fields stay exactly as they were.
 
+- **The README now says what the number does not say.** Two consequences of measuring per unit,
+  written down as decisions rather than left to be discovered from the output and mistaken for
+  bugs. The gate cannot tell decomposition from displacement: splitting identical control flow
+  into helpers drops the maximum from 14/38 to 6/10 and the gate passes, and whether that made
+  the code easier to read is a question the tool cannot answer. This module does the same thing
+  to itself and now says so. And a nested named function contributes nothing to its parent where
+  the same body as a script block contributes 3/5 -- a **deliberate departure from SonarSource**,
+  which increments for nested declarations, recorded rather than left silent.
+
 - **Every reference score is attributed to something outside this project.** The README claims
   the cognitive metric reproduces the SonarSource scores; the suite checked numbers the project
   had chosen itself, so a wrong interpretation would have had the suite agreeing with the bug --
