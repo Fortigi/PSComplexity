@@ -84,6 +84,17 @@ keys it holds could not distinguish units the tool could.
   of them -- including the two the specification calls the classic implementation errors, which
   are asserted by count as well as present.
 
+- **Pinned dependencies are watched instead of only written down.** A weekly job checks each
+  pinned module against the gallery and opens one tracking issue when any has moved on;
+  Dependabot watches the action SHAs, which `pins.env` structurally cannot hold because `uses:`
+  does not expand variables and a SHA cannot be read to learn whether something newer exists.
+  A pin is a decision that was correct on the day it was made, and the failure is asymmetric --
+  a stale pin never breaks the build, it just quietly stops protecting you. The PSMutant pin sat
+  at 0.1.0 across two majors, one of which fixed a bug that scored **every** mutant killed, and
+  CI was green throughout. An unreachable gallery is reported as **unknown** rather than as
+  current, because a watcher that reads "could not look" as "nothing newer" has silently stopped
+  being able to fail.
+
 
 - **A scan says what it is reading.** `Measure-PSComplexity -Verbose` now names each file
   **before** parsing it, so a slow scan and a stuck one stop looking identical. The ordering is

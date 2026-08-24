@@ -1,0 +1,18 @@
+# Watches the one class of pin that .github/pins.env cannot hold.
+#
+# `uses:` does not expand variables, so action SHAs are written out per workflow and have to be
+# kept in step by hand. A SHA also cannot be read to find out whether something newer exists --
+# unlike a module version, looking at it tells you nothing. So this is the half that needs a
+# watcher rather than a shared file.
+#
+# It opens pull requests rather than failing builds: a stale pin is a decision to make, not a
+# build to break, and a scheduled job that goes red for something nobody chose gets muted.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci

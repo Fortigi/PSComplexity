@@ -177,6 +177,35 @@ function Test-PSCxHasUnreleasedContent {
     return $false
 }
 
+function Get-PSCxStalePinFault {
+    <#
+    .SYNOPSIS
+        The fault, if any, when a pinned module has a newer release available.
+    #>
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Name,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$Pinned,
+        [Parameter(Mandatory)] [AllowEmptyString()] [AllowNull()] [string]$Latest
+    )
+    # A pin is a decision that was correct on the day it was made. Without a watcher it decays
+    # into a decision nobody is making, and the failure is asymmetric: a stale pin never breaks
+    # the build, it just quietly stops protecting you. The PSMutant pin sat at 0.1.0 across two
+    # majors -- one of which fixed a bug that scored EVERY mutant killed -- and CI was green
+    # throughout.
+    if ([string]::IsNullOrWhiteSpace($Pinned)) { return "$Name has no pinned version in .github/pins.env." }
+    # "Could not look" is not "nothing newer". Reported as its own fault, because a checker
+    # that treats an unreachable gallery as good news stops being able to fail at all.
+    if ([string]::IsNullOrWhiteSpace($Latest)) {
+        return "$Name is pinned at $Pinned and the gallery did not answer, so freshness is unknown."
+    }
+    $p = [version]$Pinned
+    $l = [version]$Latest
+    if ($l -le $p) { return $null }
+    return "$Name is pinned at $Pinned; $Latest is available."
+}
+
 function Get-PSCxRewrittenManifest {
     # The manifest TEXT with only its ReleaseNotes value replaced. Returns a string and writes
     # nothing -- the caller decides whether to save it.
