@@ -72,6 +72,17 @@ keys it holds could not distinguish units the tool could.
   reported `Line` is unchanged and remains display data, not identity -- it moves whenever
   anything above a unit is edited.
 
+### Internal
+
+- **Every metric increment now records the construct that caused it and the line it is on.**
+  Nineteen producers emitted an anonymous `{Key; Amount}` pair and the amounts were folded into
+  a total, so *what* caused an increment and *where* were destroyed at the moment the increment
+  was created rather than at the boundary. The rows carry both now; the maps stay projections
+  over them, so summation happens exactly once and **no published number changes**. This is what
+  #3 needs -- reporting which construct contributed each point asks the pipeline for information
+  it used to throw away two layers below where the question is asked, which makes that an
+  architectural change rather than an addition.
+
 ### Added
 
 - **Every reference score is attributed to something outside this project.** The README claims

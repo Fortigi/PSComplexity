@@ -58,3 +58,45 @@ Describe 'Cyclomatic complexity - reference scores' {
         Get-CyclomaticOf -Code $code | Should-Be $expected
     }
 }
+
+Describe 'every cyclomatic increment says which construct produced it' {
+    # Same change as the cognitive side, and for the same reason: the amount was summed at
+    # emission, so what caused it and where were gone before anything could report them.
+
+    BeforeAll {
+        $script:CycAttrFile = Join-Path ([System.IO.Path]::GetTempPath()) "cxcycattr-$([System.Guid]::NewGuid().ToString('N')).ps1"
+        Set-Content $script:CycAttrFile @'
+function T {
+    param($a, $xs)
+    foreach ($x in $xs) {
+        if ($a) { 1 }
+    }
+}
+'@ -Encoding utf8
+        $script:CycAttrAst = [System.Management.Automation.Language.Parser]::ParseFile($script:CycAttrFile, [ref]$null, [ref]$null)
+    }
+
+    AfterAll { Remove-Item $script:CycAttrFile -Force -ErrorAction SilentlyContinue }
+
+    It 'names the construct and the line on every row' {
+        $rows = @(Get-PSCxCycClauseRow -Ast $script:CycAttrAst) + @(Get-PSCxCycBlockRow -Ast $script:CycAttrAst)
+        @($rows | Where-Object { [string]::IsNullOrWhiteSpace($_.Construct) }).Count | Should-Be 0
+        @($rows | Where-Object { $_.Line -le 0 }).Count | Should-Be 0
+    }
+
+    It 'leaves the map a projection of the rows: base 1 plus their sum' {
+        # Asserted as the relationship rather than as a number, because the number is what a
+        # reference case already pins -- what THIS test protects is that widening the row did
+        # not change how the map is derived from it. Summation happens once, in the fold.
+        #
+        # The base 1 lives in the MAP, not in Measure-PSComplexity: rows sum to 2 here and the
+        # map reads 3. I had that backwards in the first version of this test, and the failure
+        # is what corrected it.
+        $rows = @(Get-PSCxCycClauseRow -Ast $script:CycAttrAst) + @(Get-PSCxCycBlockRow -Ast $script:CycAttrAst) +
+                @(Get-PSCxCycFlowCommandRow -Ast $script:CycAttrAst) + @(Get-PSCxCycOperatorRow -Ast $script:CycAttrAst)
+        $map = Get-PSCxCyclomaticMap -Ast $script:CycAttrAst
+        $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
+        $unitRows = @($rows | Where-Object { $_.Key -eq $unit })
+        $map[$unit] | Should-Be (1 + (($unitRows | Measure-Object Amount -Sum).Sum))
+    }
+}
