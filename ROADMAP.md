@@ -8,7 +8,7 @@ This file records **ordering rationale only**. Status lives in the issues. Do no
 progress here: a second status list drifts from the first, which is the exact failure this
 project exists to find in other people's code.
 
-Snapshot 2026-08-23, with **0.4.0 prepared and unreleased**. 17 issues open.
+Snapshot 2026-08-24, with **0.4.0 prepared and unreleased**. 14 issues open.
 
 Everything that release contained is gone from this file rather than ticked, per the rule
 below: discovery, the empty verdict, the vacuous test, the metric's blindness to PowerShell's
@@ -136,9 +136,14 @@ or carrying a written reason for not being. The next PowerShell release turns th
 instead of quietly lowering everyone's numbers, which is the direction that never announced
 itself. What is left in this wave is the outward-facing half.
 
-| Order | Issue | Why here |
-|---|---|---|
-| 1 | **#4** | Pin the metric against the SonarSource examples. All eleven reference cases currently pass, including both "classic implementation errors" -- so this is a pinning gap, not a correctness bug, and it is cheaper after #16 makes increments addressable. |
+**#4 shipped too, and Wave C is closed.** Every reference score now names its source: eleven
+from the specification, the PowerShell extensions the spec does not cover, and the vocabulary
+pins. A case added without attribution fails BY NAME, so a number this project chose cannot
+sit among the reference scores looking like one of them.
+
+The behaviour was already right -- both cases the specification calls the classic
+implementation errors passed before this. What was missing was traceability: an attribution
+does not make a number right, it makes the claim checkable by someone holding the spec.
 
 ## Wave D -- the features everyone actually wants
 
@@ -182,11 +187,18 @@ which is the state `main` was once in with every gate green. It checks reachabil
 and refuses when the gallery cannot be reached, because "never published" and "could not look"
 are the same empty answer from `Find-Module`.
 
-- **#54** -- nothing watches the pins or the `uses:` SHAs. Drift that announces itself to
-  nobody, and the last of this cluster. Do it with whatever touches the release path next.
-- **#56** -- the parity tracker. Most rows are closed; keep it until the last one is.
-- **#73** -- `Test-PSComplexity` is silent until it finishes, so a slow scan and a stuck one
-  look the same. Small, and it pairs naturally with #37.
+*#54 and #73 are gone, and this cluster is down to its tracker.* #54 shipped as two watchers,
+because the two halves cannot be solved the same way: a weekly job over `.github/pins.env` for
+the module versions, and Dependabot for the action SHAs -- `uses:` does not expand variables,
+and unlike a version, looking at a SHA tells you nothing about whether something newer exists.
+It earned itself on day one, finding two stale action SHAs. An unreachable gallery reports
+**unknown** rather than current, because a watcher that reads "could not look" as "nothing
+newer" has stopped being able to fail.
+
+#73 named each file BEFORE measuring it. Written afterwards the line names files already done,
+so a scan stuck on the next one reads exactly like one that finished.
+
+  - **#56** -- the parity tracker. Most rows are closed; keep it until the last one is.
 
 ## Low-coupling fillers
 

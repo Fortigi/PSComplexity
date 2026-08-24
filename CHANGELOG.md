@@ -74,6 +74,39 @@ keys it holds could not distinguish units the tool could.
 
 ### Added
 
+- **Every reference score is attributed to something outside this project.** The README claims
+  the cognitive metric reproduces the SonarSource scores; the suite checked numbers the project
+  had chosen itself, so a wrong interpretation would have had the suite agreeing with the bug --
+  and the mutation gate agreeing too, because both only ever compare the code against itself.
+  Each case now names its source: 11 taken from the specification, the PowerShell extensions the
+  spec does not cover, and the vocabulary pins. A case added without attribution fails **by
+  name**, so a number this project chose cannot sit among the reference scores looking like one
+  of them -- including the two the specification calls the classic implementation errors, which
+  are asserted by count as well as present.
+
+- **Pinned dependencies are watched instead of only written down.** A weekly job checks each
+  pinned module against the gallery and opens one tracking issue when any has moved on;
+  Dependabot watches the action SHAs, which `pins.env` structurally cannot hold because `uses:`
+  does not expand variables and a SHA cannot be read to learn whether something newer exists.
+  A pin is a decision that was correct on the day it was made, and the failure is asymmetric --
+  a stale pin never breaks the build, it just quietly stops protecting you. The PSMutant pin sat
+  at 0.1.0 across two majors, one of which fixed a bug that scored **every** mutant killed, and
+  CI was green throughout. An unreachable gallery is reported as **unknown** rather than as
+  current, because a watcher that reads "could not look" as "nothing newer" has silently stopped
+  being able to fail.
+
+
+- **A scan says what it is reading.** `Measure-PSComplexity -Verbose` now names each file
+  **before** parsing it, so a slow scan and a stuck one stop looking identical. The ordering is
+  the feature: a line written afterwards names a file that is already finished, and a scan stuck
+  on the next one would read exactly like a scan that completed. It matters because analysis is
+  O(nodes x depth), so one deeply nested file can dominate a run -- and because
+  `Test-PSComplexity` is the entry point people automate, so it runs against whole repositories
+  where nobody is watching a terminal. The gate inherits it through the nested call; silent
+  unless asked, because a gate that chatters by default gets its output filtered, and the filter
+  takes the parse errors with it.
+
+
 - **The construct vocabulary is closed against the parser.** The metrics recognise a
   hand-maintained allowlist spread over three places, and nothing compared it against what the
   parser can actually produce -- so a construct the module has never heard of contributed
