@@ -85,6 +85,17 @@ keys it holds could not distinguish units the tool could.
 
 ### Added
 
+- **A score can say where it came from: `Measure-PSComplexity -Detailed`.** A unit reported as
+  `Cognitive = 23` was correct and unactionable -- nothing distinguished one deeply-nested loop
+  from twenty flat guards, and those call for opposite fixes. `-Detailed` attaches a
+  `Contributions` list of `{ Line, Construct, Amount }` in line order, and the amounts **sum to
+  the score**, asserted by a test -- which guards attribution, not scoring: both sides are
+  computed from the same rows, so a row lost on the way to the list fails the check and a
+  construct scored wrong does not. Confirmed in both directions rather than assumed. Read the amounts and not the
+  count -- anything above `+1` is a structure plus the nesting charged for it, so the same total
+  reached flat and reached nested look different and say different things. Default output is
+  unchanged: no switch, no property, and the six published fields stay exactly as they were.
+
 - **Every reference score is attributed to something outside this project.** The README claims
   the cognitive metric reproduces the SonarSource scores; the suite checked numbers the project
   had chosen itself, so a wrong interpretation would have had the suite agreeing with the bug --

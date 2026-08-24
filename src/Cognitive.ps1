@@ -176,16 +176,55 @@ function Get-PSCxCogMethodRecursionRow {
     }
 }
 
+function Get-PSCxCognitiveRow {
+    # Every cognitive increment, attributed per unit. Composed from one collector per KIND of
+    # increment, mirroring Cyclomatic.ps1 -- and separate from the map so that "the map is a
+    # projection of the rows" is structural rather than a claim about a private local.
+    #
+    # The rows are what -Detailed publishes: a total of 23 is correct and unactionable, because
+    # nothing in it says whether that is one deeply-nested loop or twenty flat guards, and those
+    # call for opposite fixes.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Ast)
+    @(Get-PSCxCogIfRow -Ast $Ast) + @(Get-PSCxCogBlockRow -Ast $Ast) + @(Get-PSCxCogTernaryRow -Ast $Ast) +
+    @(Get-PSCxCogFlowCommandRow -Ast $Ast) + @(Get-PSCxCogNullCoalesceRow -Ast $Ast) +
+    @(Get-PSCxCogPipelineChainRow -Ast $Ast) + @(Get-PSCxCogBooleanRow -Ast $Ast) +
+    @(Get-PSCxCogJumpRow -Ast $Ast) + @(Get-PSCxCogRecursionRow -Ast $Ast) +
+    @(Get-PSCxCogMethodRecursionRow -Ast $Ast)
+}
+
+function Get-PSCxContributionMap {
+    # unit key -> the increments that produced its cognitive score, in line order.
+    #
+    # Its own function because the caller is already a nested walk over files and units, where
+    # this loop would carry that nesting on top of its own and put the caller over the cognitive
+    # ceiling this module gates itself on. Grouping rows by unit is also a separable question
+    # with its own test, which is what keeps the split from being a branch hidden to buy a
+    # number.
+    [OutputType([hashtable])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Ast)
+    $byUnit = @{}
+    foreach ($row in (Get-PSCxCognitiveRow -Ast $Ast)) {
+        if (-not $byUnit.ContainsKey($row.Key)) {
+            $byUnit[$row.Key] = [System.Collections.Generic.List[object]]::new()
+        }
+        $byUnit[$row.Key].Add([pscustomobject]@{ Line = $row.Line; Construct = $row.Construct; Amount = $row.Amount })
+    }
+    # Sorted here rather than at the call site: the question this answers is "where did 23 come
+    # from", and a reader scans a unit top to bottom.
+    $out = @{}
+    foreach ($k in $byUnit.Keys) { $out[$k] = @($byUnit[$k] | Sort-Object Line, Construct) }
+    return $out
+}
+
 function Get-PSCxCognitiveMap {
     # unit key -> cognitive complexity (summed rows; decision-free unit = 0).
     [OutputType([hashtable])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    $rows = @(Get-PSCxCogIfRow -Ast $Ast) + @(Get-PSCxCogBlockRow -Ast $Ast) + @(Get-PSCxCogTernaryRow -Ast $Ast) +
-        @(Get-PSCxCogFlowCommandRow -Ast $Ast) + @(Get-PSCxCogNullCoalesceRow -Ast $Ast) +
-        @(Get-PSCxCogPipelineChainRow -Ast $Ast) +
-            @(Get-PSCxCogBooleanRow -Ast $Ast) + @(Get-PSCxCogJumpRow -Ast $Ast) + @(Get-PSCxCogRecursionRow -Ast $Ast) +
-            @(Get-PSCxCogMethodRecursionRow -Ast $Ast)
+    $rows = @(Get-PSCxCognitiveRow -Ast $Ast)
     $map = @{}
     foreach ($row in $rows) { $map[$row.Key] = [int]$map[$row.Key] + $row.Amount }
     $out = @{}
