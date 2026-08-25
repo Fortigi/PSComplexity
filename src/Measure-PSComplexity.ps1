@@ -121,14 +121,13 @@ function Get-PSCxUnitRecord {
     return $record
 }
 
-function Get-PSCxFileRecord {
-    # Every unit in ONE file, in source order. The caller owns which files and whether one
-    # has been seen already; this owns what a file yields.
+function Get-PSCxFileScan {
+    # One file's measurement AS DATA: the units it produced, or the reason it produced none.
     #
-    # Separate from the caller because the caller is two foreach levels deep before it does
-    # anything: everything here would start at +3 inside it, and the parse-error guard and the
-    # emit loop together are enough to put Measure-PSComplexity over the ceiling this module
-    # gates itself on. Keeping it here is also what makes "measure one file" testable alone.
+    # Nothing is written to the error stream here, and that is the point. A skip that exists
+    # only as an error is a fact the caller has to rebuild by capturing the stream and reading
+    # message text -- which is what the gate did, with -ErrorAction SilentlyContinue, so any
+    # unrelated failure reached the user described as a parse error.
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param(
@@ -137,24 +136,26 @@ function Get-PSCxFileRecord {
     )
     $errors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($File, [ref]$null, [ref]$errors)
+    # Relative to where the caller is standing, which for a repo-scoped run is the repo. Not a
+    # parameter: a root nobody passes is a root nobody gets wrong. Resolved for BOTH arms, so a
+    # skipped file is named the same way a measured one is.
+    $relative = Get-PSCxRelativePath -Path $File -Root (Get-Location).Path
     if ($errors) {
-        # Write-Error, not Write-Warning: non-terminating, so measuring a tree with one bad
-        # file still returns every other file's units -- but it lands on a stream that
-        # -ErrorVariable can capture and CI does not swallow. Test-PSComplexity captures
-        # exactly this and refuses.
-        Write-Error "Skipped '$File' -- parse error: $($errors[0].Message)"
-        return
+        # The FIRST error. Later ones are usually cascade from it, and a skip that does not say
+        # why is the one thing the reason string exists to prevent.
+        return [pscustomobject]@{
+            File       = $relative
+            Units      = @()
+            SkipReason = "parse error: $($errors[0].Message)"
+        }
     }
 
-    # Relative to where the caller is standing, which for a repo-scoped run is the repo.
-    # Not a parameter: a root nobody passes is a root nobody gets wrong.
-    $relative = Get-PSCxRelativePath -Path $File -Root (Get-Location).Path
     $cyc = Get-PSCxCyclomaticMap -Ast $ast
     $cog = Get-PSCxCognitiveMap -Ast $ast
     $lines = Get-PSCxUnitTable -Ast $ast
-    # Source order, not hashtable order. .NET enumerates a hashtable by bucket layout, which
-    # is neither insertion nor line order and is not required to be stable -- so two runs over
-    # one unchanged file could emit the same rows in different sequences. Nothing noticed,
+    # Source order, not hashtable order. .NET enumerates a hashtable by bucket layout, which is
+    # neither insertion nor line order and is not required to be stable -- so two runs over one
+    # unchanged file could emit the same rows in different sequences. Nothing here noticed,
     # because the gate takes a max and a human reads a table; a committed baseline or a diffed
     # report would have.
     #
@@ -170,22 +171,99 @@ function Get-PSCxFileRecord {
     # would re-walk the tree for every function in the file.
     $byUnit = @{}
     if ($Detailed) { $byUnit = Get-PSCxContributionMap -Ast $ast }
-    foreach ($k in $ordered) {
+    $units = foreach ($k in $ordered) {
         # Two traps stacked here, and the empty list has to survive BOTH.
         #
-        # A decision-free unit has no entry, and @($byUnit[$k]) on a missing key gives an
-        # array of ONE null rather than an empty one -- a contribution with no line, no
-        # construct and no amount, which is worse than the absent property this exists to
-        # avoid because it survives a count check.
+        # A decision-free unit has no entry, and @($byUnit[$k]) on a missing key gives an array
+        # of ONE null rather than an empty one -- a contribution with no line, no construct and
+        # no amount, which is worse than the absent property this exists to avoid because it
+        # survives a count check.
         #
-        # And the fix cannot be written as `$c = if (...) { ... } else { @() }`: an if used
-        # as an expression yields its branch's OUTPUT, and emitting @() emits nothing, so
-        # the variable lands back on $null. Assign first, then overwrite.
+        # And the fix cannot be written as `$c = if (...) { ... } else { @() }`: an if used as
+        # an expression yields its branch's OUTPUT, and emitting @() emits nothing, so the
+        # variable lands back on $null. Assign first, then overwrite.
         $contrib = @()
         if ($byUnit.ContainsKey($k)) { $contrib = $byUnit[$k] }
         Get-PSCxUnitRecord -File $relative -Unit $display[$k] -Line $lines[$k] `
             -Cyclomatic $cyc[$k] -Cognitive $cog[$k] -MetricVersion $script:PSCxMetricVersion `
             -Contributions $contrib -Detailed:$Detailed
+    }
+    return [pscustomobject]@{ File = $relative; Units = @($units); SkipReason = $null }
+}
+
+function Get-PSCxPathScan {
+    # Every file under Path, measured, ONE per-file scan at a time.
+    #
+    # Streaming on purpose. Measure-PSComplexity emits units as it walks, and the aggregate
+    # below is a fold over this -- so both public commands share one walk without forcing the
+    # streaming one to buffer a whole tree to get it.
+    #
+    # -Seen belongs to the caller, because dedup has to span pipeline input: paths arrive one
+    # invocation at a time, and a set created here would forget the previous one.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string[]]$Path,
+        # AllowEmptyCollection, because an empty set is the NORMAL starting point and
+        # Mandatory alone rejects it. Without this the binding failure surfaces wherever the
+        # caller happens to report errors -- the gate described it as a file that did not
+        # parse, which is the same class of misdiagnosis this scan exists to end.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.HashSet[string]]$Seen,
+        [switch]$Recurse,
+        [switch]$Detailed
+    )
+    foreach ($p in $Path) {
+        foreach ($file in (Get-PSCxSourceFile -Path $p -Recurse:$Recurse)) {
+            # OrdinalIgnoreCase: Windows and macOS resolve the same file under different
+            # casing, and a case-sensitive check would let those through as two files.
+            if (-not $Seen.Add($file)) { continue }
+            # BEFORE the parse, not after. A line written afterwards names files that are
+            # already done, so a scan stuck on one file looks exactly like a scan that has
+            # finished -- which is the whole complaint. Named here, the last line printed IS
+            # the file being read.
+            #
+            # Verbose rather than a progress bar or a default-on line: this is the command a
+            # CI gate calls, and a gate that chatters gets its output filtered, which takes
+            # the parse errors with it.
+            Write-Verbose "Measuring $file"
+            Get-PSCxFileScan -File $file -Detailed:$Detailed
+        }
+    }
+}
+
+function Get-PSCxScan {
+    # The complete measurement: what was asked for, what was measured, and what was not.
+    #
+    # The record stream Measure-PSComplexity publishes is a PROJECTION of this -- the same
+    # relationship a cognitive map has to its rows. Facts about the RUN, which files were
+    # skipped and why and what was in scope, have nowhere else to live: without this they are
+    # destroyed at emission and every consumer rebuilds them from whatever leaked out.
+    #
+    # Internal deliberately. This is the shape a report, a changed-files run and a committed
+    # baseline all need, and settling it in one place is what stops each inventing a private
+    # version and the first one shipped becoming the contract by accident.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string[]]$Path,
+        [switch]$Recurse,
+        [switch]$Detailed
+    )
+    $units = [System.Collections.Generic.List[object]]::new()
+    $skipped = [System.Collections.Generic.List[object]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Recurse:$Recurse -Detailed:$Detailed)) {
+        if ($fileScan.SkipReason) {
+            $skipped.Add([pscustomobject]@{ File = $fileScan.File; Reason = $fileScan.SkipReason })
+            continue
+        }
+        $units.AddRange([object[]]$fileScan.Units)
+    }
+    return [pscustomobject]@{
+        Units         = @($units)
+        Skipped       = @($skipped)
+        Scope         = [pscustomobject]@{ Path = @($Path); Recurse = [bool]$Recurse; Root = (Get-Location).Path }
+        MetricVersion = $script:PSCxMetricVersion
     }
 }
 
@@ -202,8 +280,9 @@ function Measure-PSComplexity {
         extends it for PowerShell constructs the specification does not cover:
         ForEach-Object and Where-Object score as the loop and conditional they stand in for,
         && and || as a boolean run, ?? and ??= as a ternary. Cyclomatic is the classic
-        decision-point count, over the same set of constructs. Files that fail to parse are
-        skipped with a warning.
+        decision-point count, over the same set of constructs. A file that fails to parse is
+        skipped and reported on the error stream, naming the file and the parse error;
+        measurement continues over every other file rather than stopping.
 
     .PARAMETER Path
         One or more files or directories to measure.
@@ -211,14 +290,33 @@ function Measure-PSComplexity {
     .PARAMETER Recurse
         Recurse into subdirectories when a directory is given.
 
-    .OUTPUTS
-        [pscustomobject] with File, Unit, Line, Cyclomatic, Cognitive -- one per unit.
+    .PARAMETER Detailed
+        Add a Contributions list to each record: one entry per cognitive increment, carrying
+        the Line it sits on, the Construct that caused it and the Amount it added, in line
+        order. The amounts sum to Cognitive.
 
-        These five names, their order and their types are the module's public contract
+        Read the amounts rather than the count. Anything above +1 is a structure plus the
+        nesting charged for it, so four +1 rows and one +4 row reach the same total and mean
+        different things -- points spread flat say the unit does too many things, points
+        concentrated in one deep row say extract.
+
+        A unit with no increments gets an empty list, not a missing property. Without the
+        switch the record is exactly as documented below.
+
+    .OUTPUTS
+        [pscustomobject] with File, Unit, Line, Cyclomatic, Cognitive, MetricVersion -- one
+        per unit, plus Contributions when -Detailed is given.
+
+        These six names, their order and their types are the module's public contract
         alongside the two command names, and a test asserts them exactly: widening the
         record fails that test, so it is a decision rather than a side effect of an
-        internal change. File and Unit are [string]; Line, Cyclomatic and Cognitive are
-        [int] -- Line as a string would silently turn a numeric sort into a lexical one.
+        internal change. File and Unit are [string]; Line, Cyclomatic, Cognitive and
+        MetricVersion are [int] -- Line as a string would silently turn a numeric sort into
+        a lexical one.
+
+        MetricVersion says which metric produced the numbers, and increments only when a
+        score can change for source that did not. Anything that stores or compares scores
+        should refuse to compare across two different values rather than mix them.
 
         Unit identifies one unit: a class member reads Class.Member, a nested function
         reads Outer/Inner, and units sharing a name in one scope carry an ordinal on every
@@ -255,22 +353,18 @@ function Measure-PSComplexity {
         $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     }
     process {
-        foreach ($p in $Path) {
-            foreach ($file in (Get-PSCxSourceFile -Path $p -Recurse:$Recurse)) {
-                # OrdinalIgnoreCase: Windows and macOS resolve the same file under different
-                # casing, and a case-sensitive check would let those through as two files.
-                if (-not $seen.Add($file)) { continue }
-                # BEFORE the parse, not after. A line written afterwards names files that are
-                # already done, so a scan stuck on one file looks exactly like a scan that has
-                # finished -- which is the whole complaint. Named here, the last line printed
-                # IS the file being read.
-                #
-                # Verbose rather than a progress bar or a default-on line: this is the command
-                # a CI gate calls, and a gate that chatters gets its output filtered, which
-                # takes the parse errors with it.
-                Write-Verbose "Measuring $file"
-                Get-PSCxFileRecord -File $file -Detailed:$Detailed
+        foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Recurse:$Recurse -Detailed:$Detailed)) {
+            # The projection: units to the output stream, a skip to the error stream.
+            #
+            # Write-Error rather than a warning: CI logs routinely swallow warnings, and this
+            # is the module admitting it did not measure something it was asked to. It is a
+            # RENDERING of $fileScan.SkipReason, not the only place that fact exists -- which
+            # is what lets the gate read the reason as data instead of capturing this stream.
+            if ($fileScan.SkipReason) {
+                Write-Error "Skipped '$($fileScan.File)' -- $($fileScan.SkipReason)"
+                continue
             }
+            $fileScan.Units
         }
     }
 }
@@ -319,17 +413,21 @@ function Test-PSComplexity {
         $collected.AddRange([string[]]$Path)
     }
     end {
-        # Parse failures are captured rather than allowed past. A file the gate could not
-        # read is a file it cannot vouch for, and "no unit exceeded a ceiling" is trivially
-        # true of a file that produced no units -- the same shape as passing over an empty
-        # selection.
         $paths = $collected.ToArray()
-        $units = @(Measure-PSComplexity -Path $paths -Recurse:$Recurse -ErrorVariable parseErrors -ErrorAction SilentlyContinue)
-        if ($parseErrors.Count -gt 0) {
-            throw ("Refusing to vouch for $($parseErrors.Count) file(s) that did not parse: " +
-                (($parseErrors | ForEach-Object { $_.Exception.Message }) -join '; ') +
+        # The scan, not the record stream. What was skipped is a fact the measurement already
+        # holds; reading it back off the error stream required -ErrorAction SilentlyContinue,
+        # which swallowed every OTHER error into the same variable and then described it to
+        # the caller as a file that did not parse.
+        $scan = Get-PSCxScan -Path $paths -Recurse:$Recurse
+        # Parse failures are refused rather than allowed past. A file the gate could not read
+        # is a file it cannot vouch for, and "no unit exceeded a ceiling" is trivially true of
+        # a file that produced no units -- the same shape as passing over an empty selection.
+        if ($scan.Skipped.Count -gt 0) {
+            throw ("Refusing to vouch for $($scan.Skipped.Count) file(s) that did not parse: " +
+                (($scan.Skipped | ForEach-Object { "$($_.File) -- $($_.Reason)" }) -join '; ') +
                 ". Fix the syntax, or exclude the file from the path you gate on.")
         }
+        $units = $scan.Units
 
         # Refuse rather than pass. "No unit breached a ceiling" and "no unit was measured"
         # are the same $true, so a gate pointed at the wrong place reports clean -- which is
