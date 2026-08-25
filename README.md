@@ -76,7 +76,7 @@ nested loop-in-loop-in-`if` grows fast — mirroring how hard it is to follow.
 
 | Command | Returns | Purpose |
 |---|---|---|
-| `Measure-PSComplexity -Path <files/dirs> [-Recurse]` | per-unit records | inspect / report |
+| `Measure-PSComplexity -Path <files/dirs> [-Recurse] [-Detailed]` | per-unit records | inspect / report |
 | `Test-PSComplexity -Path <files/dirs> [-Recurse] [-MaxCyclomatic 15] [-MaxCognitive 15]` | `[bool]` | CI gate (warns per offender) |
 
 ### The record is the API
@@ -104,6 +104,64 @@ Those names, their order and their types are the public contract, and a test ass
 exactly -- a sixth field fails the suite, so widening this is a decision rather than a side
 effect. `Line` is deliberately **not** an identity: it moves whenever anything above a unit
 is edited, so it says where a unit currently starts, not which unit it is.
+
+### Where a score came from
+
+A unit comes back as `Cognitive = 23`. That number is correct and, on its own, unactionable:
+it does not say whether it is one deeply-nested loop or twenty flat guards, and those call for
+opposite fixes. `-Detailed` adds a `Contributions` list holding every increment that made up
+the total:
+
+```powershell
+# Thing.ps1
+# 1  function Invoke-Thing {
+# 2      param($a, $b)
+# 3      & {
+# 4          if ($a) {
+# 5              if ($a -and $b) { 'x' }
+# 6          }
+# 7      }
+# 8  }
+
+$unit = Measure-PSComplexity ./Thing.ps1 -Detailed | Where-Object Unit -eq 'Invoke-Thing'
+$unit.Contributions | Format-Table Line, Construct, Amount
+```
+
+```
+Line Construct   Amount
+---- ---------   ------
+   4 if               2
+   5 boolean-run      1
+   5 if               3
+```
+
+`Cognitive = 6`, and the breakdown says where: the `if` on line 4 costs 2 rather than 1
+because the `& { }` lambda already raised the nesting level, and the one on line 5 costs 3
+for sitting inside it. Two `if`s and one `-and` would be 3 points written flat; the same
+three constructs nested cost 6.
+
+Read the **amounts**, not just the count. A `+1` is a structure; anything larger is that
+structure plus its nesting depth, because nesting is what the B2 rule charges for. So four
+`+1` rows and one `+4` row reach the same total and mean different things -- points spread flat
+say the unit does too many things, points concentrated in one deep row say extract. That is
+the distinction the bare total cannot make.
+
+Three properties of the list are worth relying on:
+
+- **The amounts sum to `Cognitive`**, and a test asserts it. Be precise about what that buys:
+  the score and the breakdown are computed from the *same* rows, so the sum catches a row
+  dropped or misattributed on the way to this list -- it cannot catch a construct scored wrong
+  in the first place, because that moves both sides together. Verified both ways rather than
+  assumed. Whether the scores themselves are right is the reference-score suite's job.
+- **Rows are in line order**, so a unit reads top to bottom.
+- **A decision-free unit gets an empty list, not a missing property.** Absent and empty are
+  different answers, and iterating the property should not require telling them apart.
+
+`Contributions` covers the **cognitive** score only; cyclomatic is a count of decision points
+and its total is already its own explanation.
+
+Nothing changes without the switch. The six fields above are what a default run emits, in that
+order, and CI consumers that parse it are unaffected.
 
 ## Use it in CI
 

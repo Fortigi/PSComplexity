@@ -741,3 +741,86 @@ function Process { if (1) { } }
         Test-PSComplexity -Path $script:clsFile -MaxCognitive 10 -WarningAction SilentlyContinue | Should-BeTrue
     }
 }
+
+Describe 'a score can say where it came from' {
+    # A unit comes back as Cognitive = 23. Correct, and completely unactionable: nothing says
+    # whether that is one deeply-nested loop or twenty flat guards, and those call for opposite
+    # fixes. The data existed internally and the summation was the only reason it was lost.
+
+    BeforeAll {
+        $script:DetailFile = Join-Path $script:work 'detail.ps1'
+        Set-Content $script:DetailFile @'
+function Invoke-Thing {
+    param($a, $b, $xs)
+    foreach ($x in $xs) {
+        if ($a) { 1 }
+        if ($a -and $b) { 2 }
+    }
+}
+'@ -Encoding utf8
+    }
+
+    It 'says nothing extra by default' {
+        # The default shape is a CONTRACT -- CI consumers parse these records, and a field that
+        # appears unbidden is a breaking change dressed as a feature.
+        $row = @(Measure-PSComplexity -Path $script:DetailFile)[0]
+        ($row.PSObject.Properties.Name -join ',') | Should-Be 'File,Unit,Line,Cyclomatic,Cognitive,MetricVersion'
+    }
+
+    It 'adds Contributions when asked' {
+        $row = @(Measure-PSComplexity -Path $script:DetailFile -Detailed)[0]
+        ($row.PSObject.Properties.Name -join ',') |
+            Should-Be 'File,Unit,Line,Cyclomatic,Cognitive,MetricVersion,Contributions'
+    }
+
+    It 'accounts for every point: the contributions sum to the score' {
+        # Guards ATTRIBUTION, not scoring, and the difference is worth stating because the
+        # test looks stronger than it is: the score and this list are summed from the same
+        # rows, so dropping or misgrouping a row on the way here fails, while a collector that
+        # scores a construct wrong moves both sides equally and passes. Checked by doing both.
+        # Whether a construct is scored correctly is what the reference-score suite is for.
+        $unit = @(Measure-PSComplexity -Path $script:DetailFile -Detailed | Where-Object Unit -eq 'Invoke-Thing')[0]
+        (($unit.Contributions | Measure-Object Amount -Sum).Sum) | Should-Be $unit.Cognitive
+    }
+
+    It 'names the construct and the line for each point' {
+        $unit = @(Measure-PSComplexity -Path $script:DetailFile -Detailed | Where-Object Unit -eq 'Invoke-Thing')[0]
+        # foreach at 3, if at 4 (+1 nesting), then the boolean run and the if at 5.
+        (($unit.Contributions | ForEach-Object { "$($_.Construct)@$($_.Line)+$($_.Amount)" }) -join ' ') |
+            Should-Be 'block@3+1 if@4+2 boolean-run@5+1 if@5+2'
+    }
+
+    It 'orders them by line, because that is how the unit is read' {
+        $unit = @(Measure-PSComplexity -Path $script:DetailFile -Detailed | Where-Object Unit -eq 'Invoke-Thing')[0]
+        $lines = @($unit.Contributions | ForEach-Object { $_.Line })
+        ($lines -join ',') | Should-Be (($lines | Sort-Object) -join ',')
+    }
+
+    It 'does not build a breakdown nobody asked for' {
+        # -Detailed costs an extra walk of the whole AST per file, and this is the command a
+        # CI gate runs on every push. The guard is invisible in the output either way -- the
+        # records are identical whether or not the map was built -- so nothing but this
+        # assertion stops it being dropped, and the cost would land on every consumer.
+        #
+        # Both halves, because the negative alone passes just as well against a guard that
+        # never calls it at all.
+        Mock Get-PSCxContributionMap { @{} }
+        Measure-PSComplexity -Path $script:DetailFile | Out-Null
+        Should-NotInvoke Get-PSCxContributionMap
+        Measure-PSComplexity -Path $script:DetailFile -Detailed | Out-Null
+        Should-Invoke Get-PSCxContributionMap -Times 1 -Exactly
+    }
+
+    It 'gives a decision-free unit an empty list rather than nothing' {
+        # Absent and empty are different answers, and a consumer iterating the property should
+        # not have to tell them apart.
+        $flat = Join-Path $script:work 'flat.ps1'
+        Set-Content $flat 'function Get-Flat { param($x) $x }' -Encoding utf8
+        try {
+            $unit = @(Measure-PSComplexity -Path $flat -Detailed | Where-Object Unit -eq 'Get-Flat')[0]
+            ($unit.PSObject.Properties.Name -contains 'Contributions') | Should-BeTrue
+            @($unit.Contributions).Count | Should-Be 0
+        }
+        finally { Remove-Item $flat -Force -ErrorAction SilentlyContinue }
+    }
+}

@@ -280,3 +280,84 @@ Describe 'every reference score is attributed to something outside this project'
         $Actual | Should-BeGreaterThan 0
     }
 }
+
+Describe 'every increment says which construct produced it' {
+    # The amounts used to be summed at emission, so the construct that caused an increment and
+    # where it was were gone at the moment the increment was created rather than at the
+    # boundary. #3 asks the pipeline for information the pipeline destroyed two layers below
+    # where the question is asked -- which makes it an architectural change, not an addition.
+    #
+    # The maps stay projections over these rows, so the published output does not change and
+    # summation happens exactly once, in the fold.
+
+    BeforeAll {
+        $script:AttrFile = Join-Path ([System.IO.Path]::GetTempPath()) "cxattr-$([System.Guid]::NewGuid().ToString('N')).ps1"
+        Set-Content $script:AttrFile @'
+function T {
+    param($a, $b, $xs)
+    foreach ($x in $xs) {
+        if ($a -and $b) { 1 }
+    }
+}
+'@ -Encoding utf8
+        $script:AttrAst = [System.Management.Automation.Language.Parser]::ParseFile($script:AttrFile, [ref]$null, [ref]$null)
+    }
+
+    AfterAll { Remove-Item $script:AttrFile -Force -ErrorAction SilentlyContinue }
+
+    It 'names the construct on every row' {
+        $rows = @(Get-PSCxCogIfRow -Ast $script:AttrAst) + @(Get-PSCxCogBlockRow -Ast $script:AttrAst) +
+                @(Get-PSCxCogBooleanRow -Ast $script:AttrAst)
+        $unnamed = @($rows | Where-Object { [string]::IsNullOrWhiteSpace($_.Construct) })
+        $unnamed.Count | Should-Be 0
+        # And the names are the ones a reader would expect, not a placeholder.
+        (@($rows | ForEach-Object { $_.Construct } | Sort-Object -Unique) -join ',') |
+            Should-Be 'block,boolean-run,if'
+    }
+
+    It 'points each row at the line the construct is on' {
+        # The `if` is on line 4 of the fixture and the `foreach` on line 3. Without a line a
+        # diagnostic can only point at a unit, which is what the SARIF half of #5 needs and
+        # cannot get from a per-unit total.
+        (@(Get-PSCxCogIfRow -Ast $script:AttrAst)[0]).Line | Should-Be 4
+        (@(Get-PSCxCogBlockRow -Ast $script:AttrAst)[0]).Line | Should-Be 3
+    }
+
+    It 'groups every row under the unit that produced it' {
+        # Three rows for one unit, deliberately: a map that starts a fresh list per row keeps
+        # only the LAST one, and a fixture whose unit has a single increment cannot tell the
+        # two apart. The full breakdown is asserted rather than the count, so a row landing
+        # under the wrong key fails here too.
+        $map = Get-PSCxContributionMap -Ast $script:AttrAst
+        $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
+        (@($map[$unit] | ForEach-Object { "$($_.Construct)@$($_.Line)+$($_.Amount)" }) -join ' ') |
+            Should-Be 'block@3+1 boolean-run@4+1 if@4+2'
+    }
+
+    It 'accounts for exactly the points the summed map reports' {
+        # The two projections over the same rows have to agree. This is what a consumer relies
+        # on when it reads a breakdown next to a score -- and it is the check that fails if the
+        # grouping drops a row on the way, which the summed map would not notice.
+        $map = Get-PSCxContributionMap -Ast $script:AttrAst
+        $sums = Get-PSCxCognitiveMap -Ast $script:AttrAst
+        $unit = @($sums.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
+        (($map[$unit] | Measure-Object Amount -Sum).Sum) | Should-Be $sums[$unit]
+    }
+
+    It 'keeps a unit with no increments out of the map entirely' {
+        # The decision-free unit is absent HERE and empty at the published boundary. Two
+        # different jobs: this map answers "which rows exist", and Measure-PSComplexity turns
+        # a missing key into an empty list so a consumer never has to tell absent from empty.
+        $map = Get-PSCxContributionMap -Ast $script:AttrAst
+        @($map.Keys | Where-Object { $_ -like '<script-body>*' }).Count | Should-Be 0
+    }
+
+    It 'leaves the summed map exactly as it was' {
+        # The point of keeping the maps as projections: the published number must not move
+        # because the intermediate representation grew a field.
+        $map = Get-PSCxCognitiveMap -Ast $script:AttrAst
+        $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
+        # foreach(1) + if(1 + 1 nesting) + boolean run(1) = 4
+        $map[$unit] | Should-Be 4
+    }
+}

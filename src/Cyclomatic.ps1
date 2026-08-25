@@ -17,10 +17,10 @@ function Get-PSCxCycClauseRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.IfStatementAst] }, $true)) {
-        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = $n.Clauses.Count }
+        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'clause'; Line = $n.Extent.StartLineNumber; Amount = $n.Clauses.Count }
     }
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.SwitchStatementAst] }, $true)) {
-        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = $n.Clauses.Count }
+        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'clause'; Line = $n.Extent.StartLineNumber; Amount = $n.Clauses.Count }
     }
 }
 
@@ -33,7 +33,7 @@ function Get-PSCxCycBlockRow {
         # The closure is required: without it $tn resolves at CALL time, when the loop has
         # already finished, and every type matches the last name in the list.
         foreach ($n in $Ast.FindAll({ param($x) $x.GetType().Name -eq $tn }.GetNewClosure(), $true)) {
-            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 }
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'block'; Line = $n.Extent.StartLineNumber; Amount = 1 }
         }
     }
 }
@@ -45,7 +45,7 @@ function Get-PSCxCycFlowCommandRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) Test-PSCxFlowCommand -Node $x }, $true)) {
-        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 }
+        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'flow-command'; Line = $n.Extent.StartLineNumber; Amount = 1 }
     }
 }
 
@@ -59,16 +59,16 @@ function Get-PSCxCycOperatorRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.PipelineChainAst] }, $true)) {
-        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 }
+        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 }
     }
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.TernaryExpressionAst] }, $true)) {
-        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 }
+        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 }
     }
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.BinaryExpressionAst] }, $true)) {
-        if ($n.Operator -in 'And', 'Or', 'QuestionQuestion') { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 } }
+        if ($n.Operator -in 'And', 'Or', 'QuestionQuestion') { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
     foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
-        if ($n.Operator -eq 'QuestionQuestionEquals') { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Amount = 1 } }
+        if ($n.Operator -eq 'QuestionQuestionEquals') { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
 }
 

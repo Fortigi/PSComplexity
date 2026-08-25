@@ -84,6 +84,111 @@ function Get-PSCxRelativePath {
     return $full.Substring($rootFull.Length).Replace([System.IO.Path]::DirectorySeparatorChar, '/')
 }
 
+function Get-PSCxUnitRecord {
+    # Shape one output record. The only place the published shape is decided.
+    #
+    # A function rather than inline, because the caller sits inside a per-unit loop and a
+    # conditional there costs its nesting depth rather than one point. Folded back into that
+    # loop, the -Detailed branch alone puts Measure-PSComplexity over the cognitive ceiling
+    # this module gates itself on.
+    #
+    # Get-, not New-, although it builds something: New- is a state-changing verb, so
+    # PSUseShouldProcessForStateChangingFunctions demands -WhatIf support this has no use for.
+    # It also matches the Get-PSCx*Row composers, which build rows the same way.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$File,
+        [Parameter(Mandatory)] [string]$Unit,
+        [Parameter(Mandatory)] [int]$Line,
+        [Parameter(Mandatory)] [int]$Cyclomatic,
+        [Parameter(Mandatory)] [int]$Cognitive,
+        [Parameter(Mandatory)] [int]$MetricVersion,
+        [AllowEmptyCollection()] [object[]]$Contributions,
+        [switch]$Detailed
+    )
+    $record = [pscustomobject]@{
+        File          = $File
+        Unit          = $Unit
+        Line          = $Line
+        Cyclomatic    = $Cyclomatic
+        Cognitive     = $Cognitive
+        MetricVersion = $MetricVersion
+    }
+    # Absent and empty are different answers, and a consumer iterating this should not have to
+    # tell them apart -- so -Detailed always adds the property, even for a decision-free unit.
+    if ($Detailed) { $record | Add-Member -NotePropertyName Contributions -NotePropertyValue @($Contributions) }
+    return $record
+}
+
+function Get-PSCxFileRecord {
+    # Every unit in ONE file, in source order. The caller owns which files and whether one
+    # has been seen already; this owns what a file yields.
+    #
+    # Separate from the caller because the caller is two foreach levels deep before it does
+    # anything: everything here would start at +3 inside it, and the parse-error guard and the
+    # emit loop together are enough to put Measure-PSComplexity over the ceiling this module
+    # gates itself on. Keeping it here is also what makes "measure one file" testable alone.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$File,
+        [switch]$Detailed
+    )
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($File, [ref]$null, [ref]$errors)
+    if ($errors) {
+        # Write-Error, not Write-Warning: non-terminating, so measuring a tree with one bad
+        # file still returns every other file's units -- but it lands on a stream that
+        # -ErrorVariable can capture and CI does not swallow. Test-PSComplexity captures
+        # exactly this and refuses.
+        Write-Error "Skipped '$File' -- parse error: $($errors[0].Message)"
+        return
+    }
+
+    # Relative to where the caller is standing, which for a repo-scoped run is the repo.
+    # Not a parameter: a root nobody passes is a root nobody gets wrong.
+    $relative = Get-PSCxRelativePath -Path $File -Root (Get-Location).Path
+    $cyc = Get-PSCxCyclomaticMap -Ast $ast
+    $cog = Get-PSCxCognitiveMap -Ast $ast
+    $lines = Get-PSCxUnitTable -Ast $ast
+    # Source order, not hashtable order. .NET enumerates a hashtable by bucket layout, which
+    # is neither insertion nor line order and is not required to be stable -- so two runs over
+    # one unchanged file could emit the same rows in different sequences. Nothing noticed,
+    # because the gate takes a max and a human reads a table; a committed baseline or a diffed
+    # report would have.
+    #
+    # Line first, then unit name: two units CAN start on the same line
+    # (`function A { } function B { }`), and a tie left unbroken puts the nondeterminism
+    # straight back.
+    $ordered = @($lines.Keys | Sort-Object @{ Expression = { $lines[$_] } }, @{ Expression = { $_ } })
+    # Names computed over the whole file, because disambiguating a repeat needs to know there
+    # IS a repeat. Done per row, the first of a pair could not be told apart from a unit that
+    # never had a twin.
+    $display = Get-PSCxDisplayName -OrderedKeys $ordered
+    # Once per file rather than per unit: the rows are one walk, and asking for them per unit
+    # would re-walk the tree for every function in the file.
+    $byUnit = @{}
+    if ($Detailed) { $byUnit = Get-PSCxContributionMap -Ast $ast }
+    foreach ($k in $ordered) {
+        # Two traps stacked here, and the empty list has to survive BOTH.
+        #
+        # A decision-free unit has no entry, and @($byUnit[$k]) on a missing key gives an
+        # array of ONE null rather than an empty one -- a contribution with no line, no
+        # construct and no amount, which is worse than the absent property this exists to
+        # avoid because it survives a count check.
+        #
+        # And the fix cannot be written as `$c = if (...) { ... } else { @() }`: an if used
+        # as an expression yields its branch's OUTPUT, and emitting @() emits nothing, so
+        # the variable lands back on $null. Assign first, then overwrite.
+        $contrib = @()
+        if ($byUnit.ContainsKey($k)) { $contrib = $byUnit[$k] }
+        Get-PSCxUnitRecord -File $relative -Unit $display[$k] -Line $lines[$k] `
+            -Cyclomatic $cyc[$k] -Cognitive $cog[$k] -MetricVersion $script:PSCxMetricVersion `
+            -Contributions $contrib -Detailed:$Detailed
+    }
+}
+
 function Measure-PSComplexity {
     <#
     .SYNOPSIS
@@ -137,7 +242,10 @@ function Measure-PSComplexity {
     param(
         [Parameter(Mandatory, ValueFromPipeline, Position = 0)] [ValidateNotNullOrEmpty()] [string[]]$Path,
         [switch]$Recurse
-    )
+        ,
+        # Off by default because the DEFAULT SHAPE IS A CONTRACT: CI consumers parse these
+        # records, and a field that appears unbidden is a breaking change dressed as a feature.
+        [switch]$Detailed    )
     begin {
         # Resolved paths already emitted. Two inputs can name one file -- a directory and
         # something inside it, or a wildcard and a literal -- and measuring it twice put
@@ -161,51 +269,7 @@ function Measure-PSComplexity {
                 # a CI gate calls, and a gate that chatters gets its output filtered, which
                 # takes the parse errors with it.
                 Write-Verbose "Measuring $file"
-                $errors = $null
-                $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$errors)
-                if ($errors) {
-                    # Write-Error, not Write-Warning: non-terminating, so measuring a tree
-                    # with one bad file still returns every other file's units -- but it
-                    # lands on a stream that -ErrorVariable can capture and CI does not
-                    # swallow. Test-PSComplexity captures exactly this and refuses.
-                    Write-Error "Skipped '$file' -- parse error: $($errors[0].Message)"
-                    continue
-                }
-
-                # Relative to where the caller is standing, which for a repo-scoped run is
-                # the repo. Not a parameter: a root nobody passes is a root nobody gets wrong.
-                $relative = Get-PSCxRelativePath -Path $file -Root (Get-Location).Path
-                $cyc = Get-PSCxCyclomaticMap -Ast $ast
-                $cog = Get-PSCxCognitiveMap -Ast $ast
-                $lines = Get-PSCxUnitTable -Ast $ast
-                # Source order, not hashtable order. .NET enumerates a hashtable by bucket
-                # layout, which is neither insertion nor line order and is not required to
-                # be stable -- so two runs over one unchanged file could emit the same rows
-                # in different sequences. Nothing here noticed, because the gate takes a
-                # max and a human reads a table; a committed baseline or a diffed report
-                # would have.
-                #
-                # Line first, then unit name: two units CAN start on the same line
-                # (`function A { } function B { }`), and a tie left unbroken puts the
-                # nondeterminism straight back.
-                $ordered = @($lines.Keys | Sort-Object @{ Expression = { $lines[$_] } }, @{ Expression = { $_ } })
-                # Names computed over the whole file, because disambiguating a repeat needs to
-                # know there IS a repeat. Done per row, the first of a pair could not be told
-                # apart from a unit that never had a twin.
-                $display = Get-PSCxDisplayName -OrderedKeys $ordered
-                foreach ($k in $ordered) {
-                    [pscustomobject]@{
-                        File       = $relative
-                        Unit       = $display[$k]
-                        Line       = $lines[$k]
-                        Cyclomatic = $cyc[$k]
-                        Cognitive  = $cog[$k]
-                        # Last, so the four fields a reader scans stay together. Widening this
-                        # record fails the test that pins it, which is how this addition became
-                        # a decision rather than a side effect.
-                        MetricVersion = $script:PSCxMetricVersion
-                    }
-                }
+                Get-PSCxFileRecord -File $file -Detailed:$Detailed
             }
         }
     }
