@@ -965,3 +965,160 @@ Describe 'the scan is the measurement; the record stream is a projection of it' 
             Should-Throw -ExceptionMessage '*bad.ps1*'
     }
 }
+
+Describe 'an acceptance is a checkable claim, not a mute button' {
+    # Every complexity gate meets a unit that is genuinely, irreducibly complex. The only
+    # answers used to be lower the ceiling for everyone or stop measuring the file, and the
+    # second is what this repo does to its own tests. An acceptance is the third answer -- and
+    # it fails when it stops being true, which is the whole difference between it and a
+    # suppression list.
+
+    BeforeAll {
+        $script:accDir = Join-Path ([System.IO.Path]::GetTempPath()) "cxacc-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:accDir -Force | Out-Null
+        # One unit that breaches a low ceiling and one that cannot: an acceptance test needs
+        # both, or "accepted" is indistinguishable from "nothing breached".
+        Set-Content (Join-Path $script:accDir 'hot.ps1') @'
+function Invoke-Hot {
+    param($a, $b, $c)
+    if ($a) { if ($b) { if ($c) { 1 } } }
+}
+function Get-Cool { param($x) $x }
+'@ -Encoding utf8
+        $script:accFile = (Measure-PSComplexity -Path (Join-Path $script:accDir 'hot.ps1') |
+                Where-Object Unit -eq 'Invoke-Hot').File
+        $script:accPath = Join-Path $script:accDir 'hot.ps1'
+    }
+
+    AfterAll { Remove-Item $script:accDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'lets a breaching unit pass when it carries an argument' {
+        $ok = @(@{ File = $script:accFile; Unit = 'Invoke-Hot'; Reason = 'a deliberately nested fixture' })
+        Test-PSComplexity -Path $script:accPath -MaxCyclomatic 1 -MaxCognitive 1 -Accept $ok `
+            -WarningAction SilentlyContinue | Should-BeTrue
+    }
+
+    It 'still fails the same unit when nobody argued for it' {
+        # The kept half. Without this the test above passes just as well against a gate that
+        # stopped checking ceilings altogether.
+        Test-PSComplexity -Path $script:accPath -MaxCyclomatic 1 -MaxCognitive 1 `
+            -WarningAction SilentlyContinue | Should-BeFalse
+    }
+
+    It 'accepts only the unit named, not every unit in the file' {
+        # Accepting Get-Cool must not excuse Invoke-Hot. A key compared too loosely -- on file
+        # alone -- passes the first test and silently mutes the whole file.
+        $wrong = @(@{ File = $script:accFile; Unit = 'Get-Cool'; Reason = 'r' })
+        { Test-PSComplexity -Path $script:accPath -MaxCyclomatic 1 -MaxCognitive 1 -Accept $wrong `
+                -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*within both ceilings*'
+    }
+
+    It 'throws when the acceptance names a unit that was not measured' {
+        # The stale case, and the reason this is a claim rather than a suppression: a unit that
+        # was renamed away takes its argument with it, and nothing else would say so.
+        $ghost = @(@{ File = $script:accFile; Unit = 'Invoke-Ghost'; Reason = 'r' })
+        # Asserted on the TAIL of the message, past the last concatenation. Break the `+` that
+        # builds it and PowerShell raises a conversion error QUOTING its left operand -- which
+        # contains every earlier phrase, so an assertion on one of those matches the very
+        # failure it exists to detect. Only text from after the break tells them apart.
+        { Test-PSComplexity -Path $script:accPath -MaxCyclomatic 1 -MaxCognitive 1 -Accept $ghost `
+                -WarningAction SilentlyContinue } |
+            Should-Throw -ExceptionMessage '*no such unit was measured*ageing quietly*'
+    }
+
+    It 'throws when the accepted unit is back within both ceilings' {
+        # Somebody fixed it and left the note. Left alone, the note goes on excusing a unit
+        # that no longer needs excusing, and the next breach of it passes unnoticed.
+        $fixed = @(@{ File = $script:accFile; Unit = 'Invoke-Hot'; Reason = 'r' })
+        { Test-PSComplexity -Path $script:accPath -MaxCyclomatic 15 -MaxCognitive 15 -Accept $fixed `
+                -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*within both ceilings*'
+    }
+
+    It 'throws when an acceptance carries no argument' {
+        # Whitespace, not absence: a Reason of spaces is the shape a copied template arrives in,
+        # and it is exactly the mute button this concept exists instead of.
+        $bare = @(@{ File = $script:accFile; Unit = 'Invoke-Hot'; Reason = '   ' })
+        { Test-PSComplexity -Path $script:accPath -MaxCyclomatic 1 -MaxCognitive 1 -Accept $bare `
+                -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*with no reason*'
+    }
+
+    It 'throws when an acceptance does not say which unit it is about' {
+        $vague = @(@{ File = $script:accFile; Reason = 'r' })
+        { Test-PSComplexity -Path $script:accPath -MaxCyclomatic 1 -MaxCognitive 1 -Accept $vague `
+                -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*needs both File and Unit*'
+    }
+
+    It 'reports every fault at once rather than the first' {
+        # A gate that fixes one acceptance per run costs a CI round trip each time.
+        $many = @(
+            @{ File = $script:accFile; Unit = 'Invoke-Ghost'; Reason = 'r' }
+            @{ File = $script:accFile; Unit = 'Get-Cool'; Reason = 'r' }
+        )
+        { Test-PSComplexity -Path $script:accPath -MaxCyclomatic 1 -MaxCognitive 1 -Accept $many `
+                -WarningAction SilentlyContinue } |
+            Should-Throw -ExceptionMessage '*no such unit was measured*within both ceilings*'
+    }
+
+    It 'accepts a unit that breaches only the cyclomatic ceiling' {
+        # Invoke-Hot is cyclomatic 4, cognitive 6. Ceilings 3/6 put it over one and inside the
+        # other, which is the only shape that tells "within BOTH ceilings" from "within either".
+        # Every earlier test had a unit over both or under both, where -and and -or agree and
+        # the first comparison never decides anything.
+        $ok = @(@{ File = $script:accFile; Unit = 'Invoke-Hot'; Reason = 'over on cyclomatic only' })
+        Test-PSComplexity -Path $script:accPath -MaxCyclomatic 3 -MaxCognitive 6 -Accept $ok `
+            -WarningAction SilentlyContinue | Should-BeTrue
+    }
+
+    It 'accepts a unit that breaches only the cognitive ceiling' {
+        # The mirror image, ceilings 4/5, so the SECOND comparison is the one that decides.
+        # Both halves are needed: each comparison is read separately, and a fault in one is
+        # invisible while the other still guards the result.
+        $ok = @(@{ File = $script:accFile; Unit = 'Invoke-Hot'; Reason = 'over on cognitive only' })
+        Test-PSComplexity -Path $script:accPath -MaxCyclomatic 4 -MaxCognitive 5 -Accept $ok `
+            -WarningAction SilentlyContinue | Should-BeTrue
+    }
+
+    It 'treats a unit sitting exactly ON both ceilings as within them' {
+        # At or under, not under. Ceilings 4/6 against cyclomatic 4 and cognitive 6: the unit is
+        # inside, so the acceptance is the one that should be deleted. Read as strictly-less
+        # this reports nothing and the stale acceptance survives -- and a fencepost here is
+        # silent, because it only ever shows up for a unit that lands exactly on the line.
+        $fixed = @(@{ File = $script:accFile; Unit = 'Invoke-Hot'; Reason = 'r' })
+        { Test-PSComplexity -Path $script:accPath -MaxCyclomatic 4 -MaxCognitive 6 -Accept $fixed `
+                -WarningAction SilentlyContinue } |
+            Should-Throw -ExceptionMessage '*within both ceilings*ageing quietly*'
+    }
+
+    It 'still measures a unit it accepts' {
+        # An acceptance is gate POLICY, not a measurement filter. Hiding the unit from
+        # Measure-PSComplexity would take it out of any report or baseline built on the same
+        # records, so the argument would disappear along with the number it is about.
+        $ok = @(@{ File = $script:accFile; Unit = 'Invoke-Hot'; Reason = 'r' })
+        Test-PSComplexity -Path $script:accPath -MaxCyclomatic 1 -MaxCognitive 1 -Accept $ok `
+            -WarningAction SilentlyContinue | Out-Null
+        (@(Measure-PSComplexity -Path $script:accPath | Where-Object Unit -eq 'Invoke-Hot')).Count |
+            Should-Be 1
+    }
+
+    It 'keys on file AND unit, so the same name in another file is a different claim' {
+        # File is half the identity. Compared on unit name alone, one acceptance excuses every
+        # like-named unit in the tree -- which is the failure mode of every suppression list
+        # that keys on a symbol.
+        $other = Join-Path $script:accDir 'other.ps1'
+        Set-Content $other @'
+function Invoke-Hot {
+    param($a, $b, $c)
+    if ($a) { if ($b) { if ($c) { 1 } } }
+}
+'@ -Encoding utf8
+        try {
+            # BOTH files in one run, so the acceptance describes this run and the only question
+            # left is which unit it excuses. Gating other.ps1 alone would throw instead --
+            # correctly, but for the different reason that the claim names a unit not measured.
+            $ok = @(@{ File = $script:accFile; Unit = 'Invoke-Hot'; Reason = 'r' })
+            Test-PSComplexity -Path $script:accDir -MaxCyclomatic 1 -MaxCognitive 1 -Accept $ok `
+                -WarningAction SilentlyContinue | Should-BeFalse
+        }
+        finally { Remove-Item $other -Force -ErrorAction SilentlyContinue }
+    }
+}

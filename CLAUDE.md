@@ -111,6 +111,24 @@ Two subtleties worth knowing before touching `Ast.ps1`:
 Habits this repo already has. They are written down because they are cheap to lose in a hurry
 and expensive to rebuild, and because each one has already earned its keep.
 
+- **An acceptance is a checkable claim, and there must never be a plain suppression beside
+  it.** `-Accept` names one unit by file AND unit, carries a written argument, and the gate
+  THROWS when the claim stops describing the run: no such unit measured, the unit back within
+  both ceilings, or no reason given. The value is entirely in the failure -- a suppression that
+  stops applying sits there excusing nothing while the next breach of that unit passes
+  unnoticed, which is how every suppression list ages into a mute button nobody dares delete.
+
+  Two design points that are easy to undo. The gate **throws** rather than returning `$false`,
+  because a stale acceptance is a fault in the policy and not a complaint about the code --
+  returning `$false` sends someone to refactor a unit that is fine. And an accepted unit is
+  still **measured**: this is gate policy, not a measurement filter, so a report or a baseline
+  built on the same records still sees the unit and its number.
+
+  There is deliberately no ambiguity arm, unlike the sibling project's equivalence
+  declarations. A unit identity is unique within a file, so an exact File+Unit match is one or
+  none by construction, and a rule that cannot fire looks exactly like a rule that passes. If
+  unit identity ever stops being unique, that is the moment to add one.
+
 - **The scan is the measurement; the published output is a projection of it.** `Get-PSCxScan`
   returns what was asked for, which units were found, and which files were skipped and why.
   `Measure-PSComplexity` renders the units to the pipeline and each skip to the error stream;

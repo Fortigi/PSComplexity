@@ -369,6 +369,87 @@ function Measure-PSComplexity {
     }
 }
 
+function Get-PSCxAcceptanceKey {
+    # The identity an acceptance is written against. Two fields, never one joined string: a
+    # File outside the measured root keeps its full path, and on Windows that starts "C:", so
+    # any single-separator key is ambiguous the first time somebody gates outside their repo.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$File,
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$Unit
+    )
+    return "$File`u{241F}$Unit"
+}
+
+function Get-PSCxAcceptanceFault {
+    # Why ONE acceptance fails to describe this run, as text. Nothing when it holds.
+    #
+    # An acceptance is a CHECKABLE CLAIM and not a mute button. It carries a written argument,
+    # and the run fails when the claim stops being true -- the unit was renamed away, or it came
+    # back under the ceilings and nobody deleted the note. A declaration that silently stops
+    # applying is indistinguishable from one nobody has read in a year, and a gate full of those
+    # is the thing this module exists to find in other people's code.
+    #
+    # One acceptance at a time, over the pipeline, so the four rules sit at the top level of a
+    # process block rather than inside a loop. Written as a foreach over the list they cost
+    # their nesting depth each and the function scored 14 against a ceiling of 15 -- passing,
+    # and one rule away from not passing, in the function most likely to grow another rule.
+    #
+    # There is deliberately NO ambiguity arm. A unit identity is unique within a file, so an
+    # exact File+Unit match is one or none by construction -- and a rule that cannot fire looks
+    # exactly like a rule that passes. If unit identity ever stops being unique, this is the
+    # comment that has to change with it.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(ValueFromPipeline)] [AllowNull()] $Acceptance,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unit,
+        [Parameter(Mandatory)] [int]$MaxCyclomatic,
+        [Parameter(Mandatory)] [int]$MaxCognitive
+    )
+    process {
+        $file = [string]$Acceptance.File
+        $name = [string]$Acceptance.Unit
+        $reason = [string]$Acceptance.Reason
+        if (-not $file -or -not $name) {
+            return "an acceptance needs both File and Unit, got File='$file' Unit='$name'"
+        }
+        if (-not $reason.Trim()) {
+            return "$file $name is accepted with no reason -- an acceptance carries the argument for it, or it is a mute button"
+        }
+        $found = @($Unit | Where-Object { $_.File -eq $file -and $_.Unit -eq $name })
+        if ($found.Count -eq 0) {
+            return "$file $name is accepted but no such unit was measured -- it was renamed, moved, or is outside the path being gated"
+        }
+        if ($found[0].Cyclomatic -le $MaxCyclomatic -and $found[0].Cognitive -le $MaxCognitive) {
+            return "$file $name is accepted but is within both ceilings -- delete the acceptance, it is no longer an argument about anything"
+        }
+    }
+}
+
+function Get-PSCxUnacceptedUnit {
+    # The units that breach a ceiling and that nobody has argued for. Separate from the gate
+    # because the gate is a thin predicate and this is the whole of what it decides.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unit,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Accept,
+        [Parameter(Mandatory)] [int]$MaxCyclomatic,
+        [Parameter(Mandatory)] [int]$MaxCognitive
+    )
+    $accepted = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($a in $Accept) { [void]$accepted.Add((Get-PSCxAcceptanceKey -File ([string]$a.File) -Unit ([string]$a.Unit))) }
+    # Emitted rather than returned as an array, so the declared OutputType describes what a
+    # caller actually receives -- one record at a time. The gate wraps the result in @() and
+    # gets an empty array when nothing breaches, which is the same answer either way.
+    $Unit | Where-Object {
+        ($_.Cyclomatic -gt $MaxCyclomatic -or $_.Cognitive -gt $MaxCognitive) -and
+        -not $accepted.Contains((Get-PSCxAcceptanceKey -File $_.File -Unit $_.Unit))
+    }
+}
+
 function Test-PSComplexity {
     <#
     .SYNOPSIS
@@ -387,6 +468,20 @@ function Test-PSComplexity {
     .PARAMETER Recurse
         Recurse into subdirectories when a directory is given.
 
+    .PARAMETER Accept
+        Units that are allowed to exceed a ceiling, each carrying the argument for why. One
+        entry per unit, with File, Unit and Reason -- for example
+        @{ File = 'src/Parser.ps1'; Unit = 'Read-Token'; Reason = 'table-driven lexer; splitting it hides the table' }.
+
+        An acceptance is a checkable claim, not a suppression. The gate THROWS, rather than
+        quietly ignoring it, when one stops describing the run: no unit of that name was
+        measured, the unit is now within both ceilings, or no reason was given. So a stale
+        acceptance fails the build that relies on it instead of ageing silently into a mute
+        button, which is what a plain suppression list becomes.
+
+        File must match the record's File exactly -- relative to the working directory with
+        forward slashes, or the full path for a file outside it.
+
     .OUTPUTS
         [bool]
 
@@ -399,7 +494,9 @@ function Test-PSComplexity {
         [Parameter(Mandatory, ValueFromPipeline, Position = 0)] [ValidateNotNullOrEmpty()] [string[]]$Path,
         [int]$MaxCyclomatic = 15,
         [int]$MaxCognitive = 15,
-        [switch]$Recurse
+        [switch]$Recurse,
+        # Empty is the normal case, and an empty array must bind rather than be rejected.
+        [AllowEmptyCollection()] [object[]]$Accept = @()
     )
     # ValueFromPipeline needs begin/process/end, not a bare body. A bare body IS the `end`
     # block, so it would run once with $Path holding only the LAST item piped in -- and the
@@ -439,8 +536,18 @@ function Test-PSComplexity {
                 ".ps1 or .psm1 files" + $hint + '.')
         }
 
-        $violations = @($units |
-                Where-Object { $_.Cyclomatic -gt $MaxCyclomatic -or $_.Cognitive -gt $MaxCognitive })
+        # Checked BEFORE the verdict, and thrown rather than returned as $false. A stale
+        # acceptance is a fault in the policy, not a complaint about the code -- reporting it
+        # as a failing gate would send someone to refactor a unit that is fine.
+        $faults = @($Accept | Get-PSCxAcceptanceFault -Unit $units `
+                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive)
+        if ($faults.Count -gt 0) {
+            throw ("The acceptance list does not describe this run: " + ($faults -join '; ') +
+                ". An acceptance that no longer applies is a mute button, so it fails here rather than ageing quietly.")
+        }
+
+        $violations = @(Get-PSCxUnacceptedUnit -Unit $units -Accept $Accept `
+                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive)
         foreach ($v in $violations) {
             Write-Warning ("{0}:{1} {2} -- cyclomatic {3} (max {4}), cognitive {5} (max {6})" -f `
                     $v.File, $v.Line, $v.Unit, $v.Cyclomatic, $MaxCyclomatic, $v.Cognitive, $MaxCognitive)
