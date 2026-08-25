@@ -96,6 +96,14 @@ keys it holds could not distinguish units the tool could.
   acyclic, and holds `Report.ps1` as a sink so a serialiser cannot start deciding what a number
   means. Each of its five assertions was checked by making it fail.
 
+- **The suite now has to give the same answer in a different order.** This project runs its own
+  tests in two orders -- alphabetically by hand, in config order under the mutation baseline -- and
+  nothing checked they agree, so an order-dependent suite would be green in one and red in the
+  other. A new gate runs the suite reversed and compares the environment before and after it. The
+  reversed run catches such a dependency by its symptom; the environment comparison catches the
+  cause, and is the half that fires on the file that leaks rather than the file that happens to
+  read. Values are never printed -- a variable holds tokens as often as it holds flags.
+
 - **The one entry the vocabulary sweep could not pin now says why.** `FunctionMemberAst` sits in
   the unit-boundary list and removing it broke nothing -- the single exception in a leave-one-out
   sweep that fails on 28 of 29 entries. It turns out to be unreachable for a reason rather than

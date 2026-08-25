@@ -34,6 +34,7 @@ CI (`.github/workflows/ci.yml`) runs:
 |---|---|
 | Lint | `tools/Invoke-PSCxAnalyzer.ps1` — **every severity**, and it throws. The same script code scanning and publish run |
 | Unit tests | whole `tests/` directory, 0 failures |
+| Order independence | `tools/Test-PSCxOrderIndependence.ps1` -- the same suite again, reversed, plus an environment comparison |
 | Complexity | **its own** `Test-PSComplexity` against `src/`, 15 / 15 per unit |
 | Self-mutation | PSMutant against `psmutant.self.config.json`, break = 100 |
 
@@ -270,6 +271,31 @@ and expensive to rebuild, and because each one has already earned its keep.
   versions. That negative was itself checked for vacuity -- renaming the loop variable so `$tn`
   is genuinely unresolvable collapses the score and breaks ten tests -- so the fixture does
   discriminate and the result means what it says.
+
+- **The suite runs in two orders here, and both are checked.** `Invoke-Pester ./tests` discovers
+  files alphabetically; the mutation baseline runs the mapped covering suites in the order
+  `psmutant.self.config.json` lists them. Those orders differ, so a developer running the suite by
+  hand and the gate running it never see the same sequence -- and an order-dependent suite is green
+  in one and red in the other. That is not hypothetical: the sibling spent three CI rounds finding
+  a variable one file cleared in an `AfterEach` and never restored.
+
+  `tools/Test-PSCxOrderIndependence.ps1` runs the suite **reversed** and compares the environment
+  before and after. The two halves fail on opposite ends of the same problem, which is why both are
+  there: the reversed run catches a dependency by its **symptom** and is a probe rather than a
+  proof -- one more permutation, not all of them -- while the environment comparison catches the
+  **cause** and is direction-blind, firing on the file that leaks whether or not anything reads it
+  yet. Only the second half would have caught the sibling's instance.
+
+  **Two other kinds of state were tried and rejected, and the measurements are in the script.** The
+  working directory cannot fire, because Pester restores it around a run -- verified with a test
+  that wanders off with `Set-Location` and still leaves the location unchanged. Global variables
+  fire on a *clean* suite, because Pester promotes every `-ForEach` case table to global scope, so
+  keeping them would mean an allowlist that grows with the tests it is watching. A check that
+  cannot fire and a check that always fires are the same defect wearing different clothes; neither
+  was written and left in.
+
+  The failure message names keys and **never values**. An environment variable holds tokens as
+  often as it holds flags, and this message is printed into a build log anyone can read.
 
 ## Practices to adopt
 

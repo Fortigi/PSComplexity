@@ -268,6 +268,68 @@ Describe 'Get-PSCxTestRunFault' {
     }
 }
 
+Describe 'Get-PSCxProcessStateFault' {
+    It 'says nothing about a run that put everything back' {
+        $m = @{ 'env:PATH' = '/usr/bin'; 'env:HOME' = '/home/x' }
+        Get-PSCxProcessStateFault -Before $m -After @{ 'env:PATH' = '/usr/bin'; 'env:HOME' = '/home/x' } |
+            Should-BeNull
+    }
+
+    It 'says nothing when there was nothing to compare' {
+        # Paired with the case above rather than left out: an empty environment must read as
+        # clean, not as every variable having been removed.
+        Get-PSCxProcessStateFault -Before @{} -After @{} | Should-BeNull
+    }
+
+    It 'names a variable the run added' {
+        Get-PSCxProcessStateFault -Before @{} -After @{ 'env:PSCX_LEAK' = '1' } |
+            Should-BeLikeString '*added: env:PSCX_LEAK*'
+    }
+
+    It 'names a variable the run removed' {
+        # The sibling's actual failure was this one: an AfterEach cleared a variable and never
+        # put it back, so every file after it ran in a different environment.
+        Get-PSCxProcessStateFault -Before @{ 'env:GITHUB_ACTIONS' = 'true' } -After @{} |
+            Should-BeLikeString '*removed: env:GITHUB_ACTIONS*'
+    }
+
+    It 'names a variable the run changed' {
+        Get-PSCxProcessStateFault -Before @{ 'env:TERM' = 'xterm' } -After @{ 'env:TERM' = 'dumb' } |
+            Should-BeLikeString '*changed: env:TERM*'
+    }
+
+    It 'treats a change of CASE as a change' {
+        # The comparison is -cne, not -ne. A case-insensitive compare calls 'true' and 'True'
+        # equal, and a variable whose value is read case-sensitively downstream is then reported
+        # as untouched. The one input that tells the two operators apart.
+        Get-PSCxProcessStateFault -Before @{ 'env:CI' = 'true' } -After @{ 'env:CI' = 'TRUE' } |
+            Should-BeLikeString '*changed: env:CI*'
+    }
+
+    It 'withholds the values' {
+        # Not tidiness. An environment variable holds tokens as often as it holds flags, and
+        # this message is printed into a build log that anybody can read. The key says which
+        # variable; the value would say what it was.
+        $fault = Get-PSCxProcessStateFault -Before @{ 'env:TOKEN' = 'ghp_secret' } `
+            -After @{ 'env:TOKEN' = 'ghp_other' }
+        $fault | Should-BeLikeString '*env:TOKEN*'
+        $fault | Should-NotBeLikeString '*ghp_secret*'
+        $fault | Should-NotBeLikeString '*ghp_other*'
+    }
+
+    It 'reports all three kinds at once, and every key in each' {
+        # One fault per run, so a message that stopped at the first kind would send the reader
+        # back for another round per variable.
+        $fault = Get-PSCxProcessStateFault `
+            -Before @{ 'env:GONE_A' = '1'; 'env:GONE_B' = '1'; 'env:SAME' = 'x'; 'env:MOVED' = 'x' } `
+            -After @{ 'env:SAME' = 'x'; 'env:MOVED' = 'y'; 'env:NEW' = '1' }
+        $fault | Should-BeLikeString '*added: env:NEW*'
+        $fault | Should-BeLikeString '*removed: env:GONE_A, env:GONE_B*'
+        $fault | Should-BeLikeString '*changed: env:MOVED*'
+        $fault | Should-NotBeLikeString '*env:SAME*'
+    }
+}
+
 Describe 'main must not claim a version that already shipped' {
     # It once did: main stood at 0.2.0, 0.2.0 was on the gallery, and merged work sat under
     # [Unreleased] with every gate passing. Two people installing "0.2.0" -- one from the
