@@ -361,3 +361,79 @@ function T {
         $map[$unit] | Should-Be 4
     }
 }
+
+Describe 'the invariant the unit-boundary list leans on' {
+    # FunctionMemberAst sits in $script:PSCxUnitBoundaryTypes and no test could be made to fail
+    # by removing it -- the leave-one-out sweep pins 28 of 29 entries, and this was the one.
+    #
+    # The reason is a PowerShell invariant rather than luck: a class member's body is its own
+    # FunctionDefinitionAst, nested inside the member, so every walk up the parent chain meets
+    # the body first and never needs the member's own type. That makes the entry defence against
+    # a shape the parser does not currently produce.
+    #
+    # This is what makes that negative checkable. If the invariant ever stops holding, these fail
+    # and the entry becomes load-bearing -- rather than the module quietly attributing a method's
+    # decisions to the script body, which is a wrong number in the output.
+
+    It 'wraps every class member body in its own FunctionDefinitionAst' -ForEach @(
+        @{ Shape = 'instance method'; Code = 'class C { [int] M() { return 1 } }' }
+        @{ Shape = 'empty method'; Code = 'class C { [void] M() { } }' }
+        @{ Shape = 'constructor'; Code = 'class C { C() { } }' }
+        @{ Shape = 'static constructor'; Code = 'class C { static C() { } }' }
+        @{ Shape = 'static method'; Code = 'class C { static [int] M() { return 1 } }' }
+        @{ Shape = 'hidden method'; Code = 'class C { hidden [int] M() { return 1 } }' }
+        @{ Shape = 'override'; Code = 'class B { [int] M() { return 1 } } class D : B { [int] M() { return 2 } }' }
+    ) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($Code, [ref]$null, [ref]$null)
+        $members = @($ast.FindAll({ param($n)
+                    $n -is [System.Management.Automation.Language.FunctionMemberAst] }, $true))
+        $members.Count | Should-BeGreaterThan 0
+        foreach ($m in $members) {
+            @($m.FindAll({ param($n)
+                        $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)).Count |
+                Should-BeGreaterThan 0 -Because "$Shape must carry its body as a FunctionDefinitionAst"
+        }
+    }
+
+    It 'reaches the body before the member from anywhere a decision can sit' {
+        # Not only inside the body. A parameter default and a ValidateScript attribute look like
+        # they live on the member rather than in it -- both were candidates for the case that
+        # would make the entry load-bearing, and PowerShell folds both into the body scriptblock.
+        $codes = @(
+            'class C { [int] M([int]$a) { if ($a) { return 1 } return 2 } }'
+            'class C { [int] M([int]$a = ($true ? 1 : 2)) { return $a } }'
+            'class C { [int] M([ValidateScript({ if ($_) { $true } else { $false } })][int]$a) { return $a } }'
+        )
+        foreach ($code in $codes) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseInput($code, [ref]$null, [ref]$null)
+            $nodes = @($ast.FindAll({ param($n)
+                        $n -is [System.Management.Automation.Language.IfStatementAst] -or
+                        $n -is [System.Management.Automation.Language.TernaryExpressionAst] }, $true))
+            $nodes.Count | Should-BeGreaterThan 0
+            foreach ($n in $nodes) {
+                $p = $n.Parent
+                $first = '<none>'
+                while ($p) {
+                    $tn = $p.GetType().Name
+                    if ($tn -in 'FunctionDefinitionAst', 'FunctionMemberAst', 'PropertyMemberAst') { $first = $tn; break }
+                    $p = $p.Parent
+                }
+                $first | Should-Be 'FunctionDefinitionAst' -Because "reaching $first first would make the FunctionMemberAst entry load-bearing"
+            }
+        }
+    }
+
+    It 'still attributes a class method to the member, which is what the entry protects' {
+        # The behaviour the invariant serves. A method's decisions belong to C.M, not to the
+        # script body -- that is the answer that would silently change if the boundary handling
+        # were wrong.
+        $f = Join-Path ([System.IO.Path]::GetTempPath()) "cxb-$([System.Guid]::NewGuid().ToString('N')).ps1"
+        Set-Content $f 'class C { [int] M([int]$a) { if ($a) { return 1 } return 2 } }' -Encoding utf8
+        try {
+            $u = @(Measure-PSComplexity -Path $f | Where-Object Unit -eq 'C.M')
+            $u.Count | Should-Be 1
+            $u[0].Cyclomatic | Should-Be 2
+        }
+        finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
+    }
+}
