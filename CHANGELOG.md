@@ -89,6 +89,13 @@ keys it holds could not distinguish units the tool could.
 
 ### Internal
 
+- **A new dependency edge between files in `src/` now has to be declared.** Every other gate is
+  blind to direction -- a shortcut call reaches full coverage and survives self-mutation exactly
+  as a well-layered one does -- so the graph was acyclic by habit rather than by check. An
+  allowlist of file-to-file relationships now fails in both directions, asserts the graph is
+  acyclic, and holds `Report.ps1` as a sink so a serialiser cannot start deciding what a number
+  means. Each of its five assertions was checked by making it fail.
+
 - **The one entry the vocabulary sweep could not pin now says why.** `FunctionMemberAst` sits in
   the unit-boundary list and removing it broke nothing -- the single exception in a leave-one-out
   sweep that fails on 28 of 29 entries. It turns out to be unreachable for a reason rather than

@@ -141,6 +141,33 @@ and expensive to rebuild, and because each one has already earned its keep.
   document containing such a marker, because raising the depth fixes today's document and the
   next nested field reintroduces it.
 
+- **A new file-to-file edge in `src/` is a decision, and `tests/Layering.Tests.ps1` makes you
+  make it.** Every other gate is blind to DIRECTION: a shortcut call from `Report.ps1` back into
+  `Ast.ps1` reaches full coverage and survives self-mutation exactly as a well-layered one does.
+  The graph is acyclic because nobody has added a shortcut, not because anything caught one.
+
+  The allowlist holds one entry per file-to-file **relationship**, not per call site, so adding a
+  call between files that already have an edge is free and adding the first is deliberate. It
+  fails in **both** directions -- an undeclared edge fails, and so does a declared edge the code
+  no longer has, because a list describing dropped relationships is one nobody can trust and it
+  silently readmits an edge later. It also asserts the graph is **acyclic**, which the allowlist
+  alone cannot give: two edges each reasonable on their own review make a cycle between them, and
+  nobody reviewing the second is looking at the first.
+
+  Two directions are design decisions rather than bookkeeping. `Ast.ps1` is the shared foundation
+  and knows nothing about metrics; `Report.ps1` is a **sink**, asserted separately, because a
+  serialiser that reached back into measurement would be deciding what a number MEANS while
+  claiming only to write it down.
+
+  This file was deliberately not written earlier. With no interior node a cycle was unreachable
+  and an allowlist would have been ceremony; `ROADMAP.md` recorded the condition for revisiting
+  and `src/Report.ps1` met it. Writing it while the edges are few and obviously correct is the
+  cheap moment -- ratifying a graph nobody remembers agreeing to is the expensive one.
+
+  There is no "one Write-Host" assertion like the sibling's, and that is deliberate:
+  `PSAvoidUsingWriteHost` is not excluded here, so PSScriptAnalyzer already fails the build. A
+  second gate over the same property is one more thing to keep in step for no extra coverage.
+
 - **One committed analyzer script, and running it IS passing it.** All three callers -- the
   lint step in `ci.yml`, the same check in `publish.yml`, and the required `code-scanning.yml`
   -- run `tools/Invoke-PSCxAnalyzer.ps1`, so they cannot analyse different paths, different
