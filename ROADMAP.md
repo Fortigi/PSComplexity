@@ -8,13 +8,9 @@ This file records **ordering rationale only**. Status lives in the issues. Do no
 progress here: a second status list drifts from the first, which is the exact failure this
 project exists to find in other people's code.
 
-Snapshot 2026-08-24, with **0.4.0 prepared and unreleased**. 14 issues open.
-
-Everything that release contained is gone from this file rather than ticked, per the rule
-below: discovery, the empty verdict, the vacuous test, the metric's blindness to PowerShell's
-own flow constructs, parse errors, duplicate rows, enum labels, row order, pipeline binding,
-the documentation claims, and the whole CI and publish cluster. What is left is genuinely
-left.
+Snapshot 2026-08-25, with **0.4.0 prepared and unreleased**. 10 issues open. The snapshot
+reflects what has **merged**; work with a pull request open still holds its ordering entry
+below, because an entry removed on the strength of an open PR is a status claim in disguise.
 
 Completed waves are **removed rather than ticked**. A plan that lists finished work is a worse
 plan, and this file holds no status by design. Removal is the one exception, because it is
@@ -25,224 +21,186 @@ as earlier ones disappear, so "Wave A" in an existing commit or PR still resolve
 
 ## The one fact that orders everything
 
-**The module has exactly one noun.** `Measure-PSComplexity` emits a flat stream of
-`{File; Unit; Line; Cyclomatic; Cognitive}` and `Test-PSComplexity` returns one bit. Every
-open feature request is asking for one of the **two nouns that do not exist**, or for an
-identity the one noun does not carry:
+This section used to say the module has exactly one noun, and that every open request was
+asking for one of the two that did not exist. Two of the three levels now exist, so the fact
+that orders the rest has changed shape and is worth restating rather than quietly editing.
 
 ```
-a located, named INCREMENT below the unit   ---> #3 attribution, #5 SARIF, the sharper form of #4
-a SCAN above the unit: what was looked at,  ---> #7 diff-scoped, #5 summary, #73 progress
-  skipped, in scope, under which thresholds
-a unit IDENTITY that survives a commit      ---> #2 baseline, #7, and #5 the moment it pins a shape
-  and a machine
+an INCREMENT below the unit   BUILT -- every row carries the construct that caused it and the
+                              line it sits on, and -Detailed publishes them per unit
+
+a RECORD at the unit          BUILT -- six fields, their order and their types pinned by a
+                              test; an identity unique within a file and equal on both CI
+                              legs; a MetricVersion that moves only when a score can change
+                              for source that did not
+
+a SCAN above the unit         BUILT, and deliberately unpublished -- what was in scope, which
+                              units were found, which files were skipped and why
 ```
 
-Both levels are destroyed at the moment of creation rather than at the boundary. That is not
-four problems; it is one design fact seen from four sides, and it is why the record shape has
-to be decided before any feature is built on it.
+**What is left is no longer a missing level.** It is one concept (#21), the decision of when
+to publish the scan, and the four features that read these three levels. That is a materially
+easier position than the one this file was written in, and the ordering below reflects it.
+
+The remaining structural claim is narrower and still true: **a level is destroyed the moment
+it is folded, not at the boundary where the question is asked.** That is why attribution had
+to precede the report, and why the scan had to precede the baseline. Anything new that folds
+information -- a file-level aggregate, a summary statistic -- inherits the same rule.
 
 ## The constraints that force the order
 
-The three that used to head this block -- discovery, the empty verdict, and the vacuous test
-that certified it -- shipped in 0.3.0. Every number this project publishes about itself is
-now a claim about a set that was actually measured, which is the precondition the rest of
-this file quietly assumed.
-
 ```
-#14 identity   ]
-#16 increment  ]--> #2 baseline, #3 attribution, #5 report, #7 diff-scoped
-#17 scan noun  ]    all four read or persist a record the current shape cannot express
+#21 exceptions ---> #2 baseline. A snapshot with no way to disagree with a number is a mute
+                    button: the first person who cannot accept a unit edits the baseline, and
+                    nothing records that an argument was ever made.
 
-#20 metric version ---> #2. A baseline compares two runs; if the metric moved between them,
-#21 exceptions     ---> #2. it re-baselines everything at once, or mutes without an argument
+#5 report      ---> the decision to PUBLISH the scan. It is the first consumer, so it is the
+                    point where an internal shape becomes a contract. Take that decision in
+                    #5, not before and not by accident.
 
-#42 record pinned  ---> #2, #3, #5, #7. Four features widen a five-field object that no test
-                                        describes. Free now, a breaking change the moment a
-                                        consumer persists one. (#43, stable order, shipped:
-                                        rows come back in source order.)
+#2 baseline    ---> #7 diff-scoped. #7 needs to say which units were in scope AND compare them
+                    against something; scope exists now, the comparison does not.
 ```
 
 Three things follow that are worth stating out loud:
 
-- **#2 is the most-wanted item and should not be first.** A committed baseline is the natural
-  next feature and it depends on four things that do not exist: a stable identity, a metric
-  version, an exception concept, and a scan. Building it first means building it twice.
-- **#3 is not a small issue.** It reads as "also report which construct" -- an afternoon. It is
-  a change to the intermediate representation: increments are summed at emission, twelve
-  producers deep, so the information it asks for is destroyed two layers below where the
-  question is asked. Size it as structural work or it will be scheduled as an afternoon.
-- **#20 is done, and it went in before the thing that needed it.** The metric had already MOVED
-  twice for unchanged source -- 0.3.0 scored `ForEach-Object`, `&&` and `??`, and 0.4.0 stopped
-  merging two units written on one line -- with nothing recording that it had. Every record now
-  carries a MetricVersion, so #2 can refuse to compare across two values instead of silently
-  re-baselining everything at once. That ordering was the point of this section.
+- **#2 is still the most-wanted item and still should not be first.** Its prerequisites used
+  to number four; three of them have shipped. What remains is #21, and the argument is
+  unchanged: build the baseline first and you build it twice.
+- **The scan is built and not exported, and that is a position rather than an omission.**
+  Publishing it means one command with two output shapes, where a pipeline written against the
+  record stream returns nothing under the other one. That price is worth paying when something
+  needs it and not before, and #5 is the something.
+- **#3 is gone from this file, and its lesson is not.** It read as "also report which
+  construct" -- an afternoon -- and was a change to the intermediate representation twelve
+  producers deep. Size the remaining features by what they fold, not by what they print.
 
 ---
 
 ## Wave A -- gone
 
-Shipped in 0.3.0 and removed rather than ticked. One item did not ship with it and moves down
-to the fillers: **#46**, three guard *applications* that deleted clean with the suite green,
-including the Sonar labelled-jump rule. That one is closed now too -- see the fillers for how,
-and for why the thing that closed it was not aimed at it.
+Shipped in 0.3.0 and removed rather than ticked.
 
-## Wave B -- decide the record shape
+## Wave B -- finish the record shape
 
-The expensive-to-reverse decisions, and the reason to take them before any feature: #5 says to
-"treat its shape as an interface and pin it in a test", and after that a wrong key costs a
-major version.
-
-**#42 and #14 shipped in 0.4.0** and are removed rather than ticked. The record's five
-fields, their order and their types are asserted exactly, so widening it fails a test and is
-a decision; and a unit now has an identity that is unique within a file and the same on both
-CI legs. That was this wave's whole purpose, and it lands **before** #2 or #5 persists a key
--- which is the ordering this file existed to protect.
-
-One thing the sweep could not settle travels with it: **#83**, a boundary-list entry that
-changes no observable answer when removed. Recorded rather than removed on a guess.
-
-**#20 shipped in 0.4.0 too.** Every record carries a MetricVersion, which increments only
-when a score can change for source that did not -- so a committed baseline can refuse to
-compare across two values rather than mix them. Wave B has now delivered everything that
-had to land before a key is persisted, which was its whole reason for going first.
+The expensive-to-reverse decisions. Most of this wave has landed: the record's fields, their
+order and their types are asserted exactly, a unit has a portable identity, every record
+carries a MetricVersion, and the increments underneath carry their construct and line. All of
+it landed **before** anything persists a key, which is the ordering this wave existed to
+protect.
 
 | Order | Issue | Why here |
 |---|---|---|
-| 1 | **#17**, **#16** | The two missing levels. Take them together: they are the same decision about what a record is, and deciding one without the other produces a shape that has to move again. |
-| 2 | **#21** | The exception concept: today nobody can disagree with a number. Cheap now, and after #2 ships a bare snapshot a declaration is a mute button rather than an agreement. |
+| 1 | **#17** | The scan: what was looked at, what was skipped and why, what was in scope. The last of the three levels, and the one every Wave D feature reads. |
+| 2 | **#21** | The exception concept. Cheap now; after #2 ships a bare snapshot, a declaration is a mute button rather than an agreement, and there is no later moment at which it gets cheaper. |
 
-**#22 and #47 are not positions here.** Both are decisions to record, not work: complexity exists per
-unit, extraction lowers the score by design, and the README over-claims by calling the number
-a measure of how hard code is to understand. Settle it in whichever PR touches the README --
-before #5 publishes a report shape that implies an answer. #47 is the same argument in
-miniature -- a nested named function adds nothing to its parent where the same body as a script
-block adds 3/5 -- and it is the cheaper displacement route, so settle it alongside.
+**#83** travels with this wave without being part of it: a boundary-list entry that changes no
+observable answer when removed. Recorded rather than removed on a guess, because "changes no
+answer I can find" and "changes no answer" are not the same claim.
 
-## Wave C -- make the metric honest
+**The two decisions this wave owed the README are recorded and gone from here.** That the gate
+cannot tell decomposition from displacement, and that a nested named function adds nothing to
+its parent where the same body as a script block adds 3/5 -- a deliberate departure from
+SonarSource -- are now stated in the README as properties of a per-unit metric. They were
+removed from this file rather than ticked, and they landed before #5 publishes a report shape
+that would imply an answer to either.
 
-| Order | Issue | Why here |
-|---|---|---|
-**#30 and #41 shipped in 0.3.0** -- the metric now scores `ForEach-Object`, `Where-Object`,
-`&&`, `||`, `??` and `??=`, and a pipeline body costs what the keyword form costs. What is
-left in this wave is what stops that vocabulary drifting again.
+## Wave C -- gone
 
-**#32 shipped in 0.4.0.** Twenty reference cases pin every entry in all three type lists, and a
-leave-one-out sweep against a green control leaves 28 of 29 failing when deleted -- against 5 of
-7 cyclomatic and 4 of 8 cognitive deletable before. What is left is the other direction.
-
-**#18 shipped in 0.4.0.** All 66 concrete Ast types are now classified: handled by a metric,
-or carrying a written reason for not being. The next PowerShell release turns the suite red
-instead of quietly lowering everyone's numbers, which is the direction that never announced
-itself. What is left in this wave is the outward-facing half.
-
-**#4 shipped too, and Wave C is closed.** Every reference score now names its source: eleven
-from the specification, the PowerShell extensions the spec does not cover, and the vocabulary
-pins. A case added without attribution fails BY NAME, so a number this project chose cannot
-sit among the reference scores looking like one of them.
-
-The behaviour was already right -- both cases the specification calls the classic
-implementation errors passed before this. What was missing was traceability: an attribution
-does not make a number right, it makes the claim checkable by someone holding the spec.
+Closed. The metric scores PowerShell's own flow constructs, all 66 concrete Ast types are
+classified as handled or reasoned about, twenty reference cases pin every entry in all three
+type lists, and every reference score names its source so a number this project chose cannot
+sit among them looking like one from the specification.
 
 ## Wave D -- the features everyone actually wants
 
 Only reachable once B is decided. In this order because each one's prerequisites are the
 previous one's output.
 
-**#5** machine-readable report, then **#3** per-construct attribution, then **#2** committed
-baseline, then **#7** diff-scoped measurement. (#6, a parse error as a silent warning, shipped
-in 0.3.0 -- the gate now refuses a verdict for a file it could not read. #17 still owes the
-scan the vocabulary to say so in a REPORT rather than only on the error stream.)
+| Order | Issue | What it needs that now exists | What it still decides |
+|---|---|---|---|
+| 1 | **#5** report | the scan, and increments that know their construct and line | whether the scan becomes public, and in what serialised shape |
+| 2 | **#2** baseline | identity, MetricVersion, the scan | #21 first; and what a ratchet does when the metric version moves |
+| 3 | **#7** diff-scoped | `Scope` on the scan | how "changed" is determined, and by whom |
+
+The ordering is not preference. #5 is first because it is the cheapest thing that consumes the
+scan end to end, so it proves the shape while the shape is still free to change. #2 is second
+because it is the first thing that **persists** a key, after which changing one costs a major
+version. #7 is last because it is the only one whose input is another tool's output.
 
 ---
 
+## Gate integrity
+
+Separated from the CI cluster because it is a different kind of claim. These are the scripts
+that decide whether every other number here is true, and a gate that has quietly stopped being
+able to fail looks exactly like a green build.
+
+  - **#85** -- `Invoke-PSCxAnalyzer.ps1` reports findings on the output stream and exits 0, so
+    running it by hand checks nothing and only the workflow's own `throw` makes it a gate. It
+    is not hypothetical: a hand-run "clean" was reported from its exit code more than once
+    while findings were sitting in the output, and CI caught what the local run had said was
+    fine. The sibling repo has the same defect filed against the same shape of script.
+
 ## CI and release -- most of this shipped
 
-The cluster is largely gone. One committed analyzer script both gates call, pins in
-`.github/pins.env`, an enforced 100% coverage gate, concurrency groups, timeouts and
-least-privilege permissions on all three workflows, `.gitattributes`, a publish that requires
-the CI conclusion for its exact commit on **both** matrix legs, a release-consistency check
-that generates the manifest notes from the CHANGELOG, and a staged-package smoke test that
-loads the artifact before it becomes permanent. All of it ran for real on the 0.3.0 tag.
+One committed analyzer script both gates call, pins in `.github/pins.env`, an enforced 100%
+coverage gate, concurrency groups, timeouts and least-privilege permissions on all three
+workflows, a publish that requires the CI conclusion for its exact commit on **both** matrix
+legs, a release-consistency check that generates the manifest notes from the CHANGELOG, a
+staged-package smoke test that loads the artifact before it becomes permanent, and two pin
+watchers -- a weekly job for module versions and Dependabot for the action SHAs, which
+`pins.env` structurally cannot hold because `uses:` does not expand variables.
+
+Two negatives worth keeping, because both look like protection and are not:
+
+- A `tag_name_pattern` ruleset is accepted by the API and **never evaluated**. Verified by
+  pushing a violating tag with that rule as the only active one.
+- `Find-Module` returns nothing both when a version is unpublished and when the gallery is
+  unreachable. Anything that asks the gallery must check reachability first, or "could not
+  look" is read as "nothing there".
 
 What is left:
 
-  *#33 and #38 are gone from this list, for two different reasons.* #33 is **fixed**: the tag
-  name now reaches PowerShell through an environment variable, so it is data rather than script
-  text, and the fix was checked in both directions -- the payload executes against the old form
-  and stays inert against the new one. #38 is **closed as decided**: tag creation, update and
-  deletion are restricted to a one-person team, so who may publish is enforced rather than
-  assumed, but the four-eyes rule it asked for needs a smaller admin set than an organisation
-  spanning thirteen repositories has. A separate org would buy it and was declined.
-
-  One negative worth keeping, because it looks like protection and is not: a `tag_name_pattern`
-  ruleset is accepted by the API and **never evaluated**. Verified by pushing a violating tag
-  with that rule as the only active one. Do not reach for it to constrain tag names.
-*#35 and #50 are gone too.* #35 was already fixed when it was re-read: `ConvertToSARIF` is
-pinned from `.github/pins.env` and imported with `-RequiredVersion`, so the required check
-cannot change behaviour on someone else's release. #50 shipped in 0.4.0 -- the release gate now
-asks the gallery and faults when a published `ModuleVersion` has unreleased entries above it,
-which is the state `main` was once in with every gate green. It checks reachability **first**
-and refuses when the gallery cannot be reached, because "never published" and "could not look"
-are the same empty answer from `Find-Module`.
-
-*#54 and #73 are gone, and this cluster is down to its tracker.* #54 shipped as two watchers,
-because the two halves cannot be solved the same way: a weekly job over `.github/pins.env` for
-the module versions, and Dependabot for the action SHAs -- `uses:` does not expand variables,
-and unlike a version, looking at a SHA tells you nothing about whether something newer exists.
-It earned itself on day one, finding two stale action SHAs. An unreachable gallery reports
-**unknown** rather than current, because a watcher that reads "could not look" as "nothing
-newer" has stopped being able to fail.
-
-#73 named each file BEFORE measuring it. Written afterwards the line names files already done,
-so a scan stuck on the next one reads exactly like one that finished.
-
-  - **#56** -- the parity tracker. Most rows are closed; keep it until the last one is.
+  - **#56** -- the parity tracker against the sibling repo. Most rows are closed; keep it
+    open until the last one is, then delete it rather than leaving a tracker of nothing.
 
 ## Low-coupling fillers
 
 - **#36**, **#37** -- `Get-PSCxUnitTable` rebuilt three times per file, two of them waste; and
-  analysis is O(nodes x depth). Neither matters at current scale -- measured, 37 KB and 401
-  units in 1.65s, and PSScriptAnalyzer over a comparable corpus is several times slower. Do
-  them when #7 makes per-file cost matter, or when a deeply nested file makes someone notice.
-  #37 is also the reason #73 matters: uneven cost is what makes a silent scan look stuck.
-*#46 is gone.* Measured rather than assumed, and in both directions: each guard application was
-  forced always-true and then never-fires, against a control run asserted green first. Ten
-  neuterings, zero unpinned -- including the Sonar labelled-jump rule, where "the application is
-  gone" means the increment silently stops and `break outer` scores as an ordinary `break`. What
-  closed it was not aimed at it: the reference cases added for #32 and the flow-construct work in
-  #30/#41 exercise every one of these guards through the real entry point, with a case on each
-  side.
-- **#47** -- a decision to record, not work: a nested named function adds nothing to its
-  parent where the same body as a script block adds 3/5. The cheaper displacement route, so
-  settle it beside #22.
-- **#22** -- the other decision to record: complexity exists per unit, so extraction lowers
-  the score by design and the gate cannot tell decomposition from displacement. Settle it in
-  whichever PR touches the README, before #5 publishes a report shape that implies an answer.
+  analysis is O(nodes x depth), so a deeply nested file costs orders of magnitude more per byte
+  than ordinary code. Neither matters at current scale -- measured, 37 KB and 401 units in
+  1.65s, and PSScriptAnalyzer over a comparable corpus is several times slower. Do them when #7
+  makes per-file cost matter, or when a deeply nested file makes someone notice.
+
+  #37 is also why naming each file before measuring it mattered: uneven per-file cost is
+  exactly what makes a scan that is working look stuck.
 
 ## Deliberately not doing
 
 Recorded so they are not rediscovered as good ideas. Each was considered and rejected with a
 reason.
 
-- **A layering/allowlist test.** Five edges and no interior node: `Ast.ps1` has out-degree 0,
-  the two metrics have one caller each, `Measure-PSComplexity` has none. A graph with no
-  interior node cannot grow a non-obvious cycle. Add it when #5 or #2 creates a module both
-  exported commands consume -- that is the trigger, not a line count.
+- **A layering/allowlist test.** The file graph is five edges wide and has never grown a
+  shortcut. Reconsider when a module both exported commands consume lives in its **own file** --
+  the scan is such a module, but it sits in `Measure-PSComplexity.ps1` beside its callers, so
+  the file graph is unchanged. That move is the trigger, not a line count.
 - **Merging the three construct lists into one constant.** They agree element-for-element
   today, and their differences are roles rather than drift: `ScriptBlockExpressionAst` is
   nesting-only (correct per Sonar B3) and `SwitchStatementAst` is handled separately by
   Cyclomatic because it counts per clause. One list is exactly as blind to a new construct as
-  three. The fix is #32 and #18, not the merge.
+  three.
 - **Making `Test-PSComplexity` return violation objects instead of `[bool]`.** The
-  thin-predicate-over-`Measure` split is right, documented, duplicates no measurement, and
-  matches the `Test-*` convention. Nothing in the queue routes through it -- #2, #3, #5 and #7
-  all build over `Measure-PSComplexity`'s records. What is missing is a scan noun, not a
-  richer verdict.
+  thin-predicate split is right, documented, and duplicates no measurement. This entry used to
+  say "what is missing is a scan noun, not a richer verdict" -- the scan now exists, and
+  `Test-PSComplexity` consumes it, which strengthens the entry rather than retiring it: the
+  richer answer has a home that is not the verdict.
 - **A second AST walk for attribution.** Cheapest to write, and the only option that can
   produce two answers to the same question.
 - **Content-hash unit identity for #2.** It survives moves and renames but changes whenever the
   unit is edited at all -- precisely when a ratchet needs to compare.
 - **Gating on a file-level aggregate.** It would punish legitimate decomposition, and no
-  published definition of either metric is file-level. See #22.
+  published definition of either metric is file-level. See "What the number does not say" in
+  the README, which now states that per-unit measurement cannot distinguish the two.
+- **Publishing the scan before something consumes it.** A shape with no consumer is a guess,
+  and an exported guess is a contract. #5 is the consumer; take the decision there.
