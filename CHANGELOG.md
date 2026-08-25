@@ -89,6 +89,20 @@ keys it holds could not distinguish units the tool could.
 
 ### Internal
 
+- **The one entry the vocabulary sweep could not pin now says why.** `FunctionMemberAst` sits in
+  the unit-boundary list and removing it broke nothing -- the single exception in a leave-one-out
+  sweep that fails on 28 of 29 entries. It turns out to be unreachable for a reason rather than
+  by luck: every use of that list walks UP the parent chain, and PowerShell wraps a class member's
+  body in its own `FunctionDefinitionAst`, so the body is always met first. Verified across
+  methods, constructors, static constructors, static and hidden members, overrides and an empty
+  body -- and for a parameter default and a `ValidateScript` attribute, both of which look like
+  they sit on the member and are folded into the body.
+
+  It stays, because the failure modes are not symmetric: keeping it costs nothing, and removing
+  it would silently attribute a method's decisions to the script body. The invariant it leans on
+  is now pinned by tests, so the day it stops holding is a red suite rather than a quiet
+  re-attribution.
+
 - **Every metric increment now records the construct that caused it and the line it is on.**
   Nineteen producers emitted an anonymous `{Key; Amount}` pair and the amounts were folded into
   a total, so *what* caused an increment and *where* were destroyed at the moment the increment

@@ -51,6 +51,17 @@ $script:PSCxFlowCommands = @(
 )
 
 $script:PSCxUnitBoundaryTypes = @(
+    # FunctionMemberAst is unreachable TODAY and kept on purpose. Every usage of this list walks
+    # UP the parent chain, and PowerShell wraps a class member's body in its own
+    # FunctionDefinitionAst -- verified across methods, constructors, static constructors, static
+    # and hidden members, overrides, and an empty body. So the body is always met first, and
+    # Resolve-PSCxUnitBoundary maps it back to the member without consulting this list at all.
+    #
+    # It stays because the failure modes are not symmetric. If PowerShell ever produced a member
+    # without that inner node, keeping the entry costs nothing and removing it would silently
+    # attribute the member's decisions to the script body -- a wrong number, which is the one
+    # thing this module must not produce. The invariant it leans on is pinned by a test, so the
+    # day it stops holding is a red suite rather than a quiet re-attribution.
     'FunctionDefinitionAst', 'FunctionMemberAst', 'PropertyMemberAst'
 )
 
