@@ -1,0 +1,171 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/Fortigi/PSComplexity/main/schemas/v1/report.schema.json",
+  "title": "PSComplexity report",
+  "description": "The machine-readable form of one PSComplexity run. Two shapes: a measurement report, written by Measure-PSComplexity, and a gate report, written by Test-PSComplexity, which additionally carries the thresholds that applied and the verdict they produced. The version lives in this file's PATH rather than in the $id's git ref, so a v2 goes in schemas/v2/ beside this one and a document naming this URL keeps resolving to the format it was written against.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "generatedFrom",
+    "schemaVersion",
+    "producedBy",
+    "generatedAt",
+    "mode",
+    "metricVersion",
+    "scope",
+    "skipped",
+    "summary",
+    "units"
+  ],
+  "properties": {
+    "generatedFrom": {
+      "const": "PSComplexity",
+      "description": "What wrote this. A consumer pointed at a directory of reports can tell ours from anything else before it reads a number."
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Changes when a field changes meaning or disappears, NEVER when one is added. That is why additionalProperties is true here: a consumer validating against this survives a release that records more."
+    },
+    "producedBy": {
+      "type": "object",
+      "required": ["module", "version"],
+      "properties": {
+        "module": { "type": "string" },
+        "version": { "type": "string", "description": "The ModuleVersion that produced the report." }
+      }
+    },
+    "generatedAt": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "UTC, ISO-8601, second precision. A STRING in the file: PowerShell's ConvertFrom-Json recognises the format and hands a caller a [datetime] instead, so a PowerShell reader never sees this text and a validator handed a round-tripped object is checking something that no longer exists. Validate the FILE."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["Measure", "Gate"],
+      "description": "Which command wrote it. A measurement applied no thresholds and reached no verdict; see the conditional at the end of this schema, which makes a verdict unrepresentable in a measurement report."
+    },
+    "metricVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Which metric produced these numbers. REQUIRED, and that is the point: the metric has already moved twice for source that did not change, so a stored report whose numbers cannot be checked for comparability is a trend chart waiting to mislead. Anything comparing two reports must refuse to compare across two different values rather than mix them."
+    },
+    "scope": {
+      "type": "object",
+      "required": ["path", "recurse", "root"],
+      "description": "What was asked for. REQUIRED alongside the summary: an aggregate that cannot say what it covered is the failure this project exists to find in other people's code.",
+      "properties": {
+        "path": { "type": "array", "items": { "type": "string" } },
+        "recurse": { "type": "boolean" },
+        "root": { "type": "string", "description": "The working directory the File fields are relative to." }
+      }
+    },
+    "skipped": {
+      "type": "array",
+      "description": "Files that were asked for and not measured, with the reason. REQUIRED, and an empty array is the normal case -- absent and empty are different answers, and a consumer must not have to tell them apart to know whether everything was read.",
+      "items": {
+        "type": "object",
+        "required": ["file", "reason"],
+        "properties": {
+          "file": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["fileCount", "unitCount", "maxCyclomatic", "maxCognitive", "averageCyclomatic", "averageCognitive"],
+      "description": "Aggregates over `units`. Every one of them is reconcilable against that array; none of them is the only place a fact lives.",
+      "properties": {
+        "fileCount": { "type": "integer", "minimum": 0 },
+        "unitCount": { "type": "integer", "minimum": 0 },
+        "maxCyclomatic": { "type": "integer", "minimum": 0 },
+        "maxCognitive": { "type": "integer", "minimum": 0 },
+        "averageCyclomatic": { "type": "number", "minimum": 0 },
+        "averageCognitive": { "type": "number", "minimum": 0 }
+      }
+    },
+    "units": {
+      "type": "array",
+      "description": "Every unit measured. PascalCase field names, unlike this envelope, because these ARE the records Measure-PSComplexity emits -- one vocabulary for the object and its serialisation, so a consumer reading the JSON sees the field names the README documents.",
+      "items": { "$ref": "#/definitions/unit" }
+    },
+    "thresholds": {
+      "type": "object",
+      "required": ["cyclomatic", "cognitive"],
+      "description": "The ceilings that applied. Present only in a gate report.",
+      "properties": {
+        "cyclomatic": { "type": "integer", "minimum": 1 },
+        "cognitive": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "passed": {
+      "type": "boolean",
+      "description": "The verdict. Present only in a gate report, and forbidden elsewhere -- see the conditional below."
+    },
+    "violations": {
+      "type": "array",
+      "description": "Units over a ceiling that no acceptance covered. A subset of `units`, repeated rather than referenced so a consumer needs one pass.",
+      "items": { "$ref": "#/definitions/unit" }
+    },
+    "accepted": {
+      "type": "array",
+      "description": "Units allowed over a ceiling, each with the argument for it. A report that hides these would report a pass without saying what it excused.",
+      "items": {
+        "type": "object",
+        "required": ["file", "unit", "reason"],
+        "properties": {
+          "file": { "type": "string" },
+          "unit": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "unit": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["File", "Unit", "Line", "Cyclomatic", "Cognitive", "MetricVersion"],
+      "properties": {
+        "File": { "type": "string", "description": "Relative to scope.root with forward slashes; a full path for a file outside it." },
+        "Unit": { "type": "string", "description": "Class.Member, Outer/Inner, <script-body>, or a name with an ordinal when several share one scope." },
+        "Line": { "type": "integer", "minimum": 1, "description": "Where the unit starts. NOT an identity: it moves whenever anything above the unit is edited." },
+        "Cyclomatic": { "type": "integer", "minimum": 1 },
+        "Cognitive": { "type": "integer", "minimum": 0 },
+        "MetricVersion": { "type": "integer", "minimum": 1 },
+        "Contributions": {
+          "type": "array",
+          "description": "Present only when the run used -Detailed. The increments that produced Cognitive, in line order; the amounts sum to it.",
+          "items": {
+            "type": "object",
+            "required": ["Line", "Construct", "Amount"],
+            "properties": {
+              "Line": { "type": "integer", "minimum": 1 },
+              "Construct": { "type": "string" },
+              "Amount": { "type": "integer", "minimum": 1 }
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "description": "A measurement report reaches no verdict, and the format makes one impossible rather than merely undocumented. Measure-PSComplexity applies no thresholds, so a 'passed' beside its numbers is an answer nobody computed -- the same shape of lie as a partial score quoted as a real one. Written as boolean-false property schemas rather than as 'not': PowerShell's Test-Json silently IGNORES the 'not' keyword, so the obvious spelling of this rule is a clause that can never fail, which looks exactly like one that passes.",
+      "if": {
+        "required": ["thresholds"]
+      },
+      "then": {
+        "required": ["thresholds", "passed", "violations", "accepted"]
+      },
+      "else": {
+        "properties": {
+          "passed": false,
+          "violations": false,
+          "accepted": false
+        }
+      }
+    }
+  ]
+}

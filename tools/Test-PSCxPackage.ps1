@@ -36,6 +36,18 @@ if ($orphans) {
 }
 Write-Output "  all $((Get-ChildItem -LiteralPath (Join-Path $stage 'src') -Filter *.ps1).Count) shipped src files are dot-sourced"
 
+# --- 2b. the report schema ships, and parses ----------------------------------------------
+# It is a public artifact: the format a consumer validates our report against. Left behind in
+# the repo it is no use to the person it exists for, and that failure is invisible from inside
+# the repo -- everything here can read it whether or not it travels.
+$schemaPath = Join-Path $stage 'schemas' -AdditionalChildPath 'v1', 'report.schema.json'
+if (-not (Test-Path -LiteralPath $schemaPath)) {
+    throw "The report schema did not ship: expected it at $schemaPath. Check the staging Copy-Item in publish.yml."
+}
+try { Get-Content -LiteralPath $schemaPath -Raw | ConvertFrom-Json | Out-Null }
+catch { throw "The shipped report schema is not valid JSON: $($_.Exception.Message)" }
+Write-Output "  the report schema ships and parses"
+
 # --- 3 and 4. import in a FRESH process and measure for real ------------------------------
 # A fresh process, because importing here is indistinguishable from the repo copy already
 # loaded in this session -- and "it worked on my machine, where the real one was loaded" is

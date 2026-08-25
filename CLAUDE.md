@@ -66,6 +66,10 @@ src/Cyclomatic.ps1             decision-point counting.
 src/Cognitive.ps1              the SonarSource metric (B1 structural, B2 nesting, B3 level).
 src/Measure-PSComplexity.ps1   the scan -- measurement as data -- and the two public
                                projections over it: Measure-PSComplexity, Test-PSComplexity.
+src/Report.ps1                 the two published formats -- our JSON report and SARIF -- and
+                               the one function that writes a file.
+schemas/v1/report.schema.json  the report format. Ships in the package; a consumer validates
+                               against it without reading this repo.
 ```
 
 **The mutation config maps each source file to specific test files.** `src/Cyclomatic.ps1`
@@ -110,6 +114,32 @@ Two subtleties worth knowing before touching `Ast.ps1`:
 
 Habits this repo already has. They are written down because they are cheap to lose in a hurry
 and expensive to rebuild, and because each one has already earned its keep.
+
+- **A published format makes the dangerous shape unrepresentable, not merely undocumented.**
+  `schemas/v1/report.schema.json` forbids `passed` unless `thresholds` are present, so a
+  measurement report cannot carry a verdict nobody computed; and it requires `metricVersion`,
+  `scope` and `skipped`, so no number in it can be read without what it excluded. Copied from
+  the sibling project, which forbids a mutation score in a recheck report for the same reason.
+
+  Four traps come with it, all already paid for elsewhere. **Validate the FILE, not a parsed
+  object** -- `ConvertFrom-Json` re-types the ISO-8601 `generatedAt` into a `[datetime]`.
+  **`Test-Json` silently ignores `not`**, so a forbidden property is written as
+  `"passed": false` in a `properties` block; the obvious spelling is a rule that can never
+  fire. **Prefer a type union to `oneOf`**, which reports a failure in every branch. And
+  **`additionalProperties` stays true** for the report, because `schemaVersion` moves only when
+  a field changes meaning or disappears -- the exact field list is pinned in a test instead, so
+  widening is a decision rather than a side effect.
+
+  **A data file the tests read must be in `sandboxSubtrees`.** The mutation sandbox copies only
+  what that list names, so `schemas` is there beside `src` and `tests`. Leave it out and the
+  baseline goes red before a single mutant is tried, with an error naming a missing path rather
+  than the missing subtree -- which is a long way from the cause.
+
+  **`ConvertTo-Json` truncates past its depth SILENTLY**, leaving valid JSON with a .NET type
+  name where a value belongs. That shipped here once: every SARIF location read
+  `System.Collections.Specialized.OrderedDictionary`. `Save-PSCxDocument` now refuses to write a
+  document containing such a marker, because raising the depth fixes today's document and the
+  next nested field reintroduces it.
 
 - **An acceptance is a checkable claim, and there must never be a plain suppression beside
   it.** `-Accept` names one unit by file AND unit, carries a written argument, and the gate

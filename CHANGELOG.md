@@ -101,6 +101,24 @@ keys it holds could not distinguish units the tool could.
 
 ### Added
 
+- **A run can leave the process: `-ReportPath` and `-SarifPath`.** The gate gave a build one bit
+  and the records were PowerShell objects, so anything that was not PowerShell -- a dashboard, a
+  trend, a pull request annotation -- had to re-implement the serialisation. `Measure-PSComplexity
+  -ReportPath` and `Test-PSComplexity -ReportPath` write a JSON report described by
+  `schemas/v1/report.schema.json`, which now ships with the module; `Test-PSComplexity -SarifPath`
+  writes a SARIF 2.1.0 log that GitHub code scanning renders against the diff.
+
+  The report is the scan serialised, not a new shape. Two forms: a measurement report, and a gate
+  report that adds the ceilings, the verdict, the breaches and every acceptance with its argument.
+  A measurement report **cannot** carry a verdict -- the schema forbids `passed` without
+  `thresholds`, because a command that applied no ceilings has no verdict to give. `metricVersion`,
+  `scope` and `skipped` are required for the same reason: no number in the file can be read
+  without what produced it and what it left out.
+
+  SARIF raises one result per breached ceiling under two independently suppressible rule ids, and
+  fingerprints on file and unit rather than on the line, which moves. An accepted unit raises
+  nothing -- the gate excused it, and the JSON report is where that argument is recorded.
+
 - **A number can be disagreed with: `Test-PSComplexity -Accept`.** The whole policy surface was
   two ceilings and a path, so the only answers to a unit that is genuinely, irreducibly complex
   were to lower the ceiling for everyone or stop measuring the file -- and the second is

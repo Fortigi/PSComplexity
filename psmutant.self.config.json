@@ -1,21 +1,51 @@
 {
   "_comment": "PSComplexity self-assessment: PSMutant mutation-tests PSComplexity's own metric logic against its reference-score test suite. Complements the self-complexity gate (how complex is our code?) with a self-mutation gate (how good are our tests?). Run: Invoke-PSMutation -ConfigFile ./psmutant.self.config.json -SourceRoot .",
-  "sandboxSubtrees": ["src", "tests"],
+  "sandboxSubtrees": [
+    "src",
+    "tests",
+    "schemas"
+  ],
+  "_sandboxSubtrees_comment": "schemas is copied for the same reason src and tests are: tests/Report.Tests.ps1 reads schemas/v1/report.schema.json to validate what a real run wrote. Without it the sandboxed suite cannot find the file and the BASELINE goes red -- before a single mutant is tried, and with an error that names a missing path rather than the missing subtree.",
   "mutate": [
     "src/Ast.ps1",
     "src/Cognitive.ps1",
     "src/Cyclomatic.ps1",
-    "src/Measure-PSComplexity.ps1"
+    "src/Measure-PSComplexity.ps1",
+    "src/Report.ps1"
   ],
   "tests": {
-    "src/Ast.ps1": ["tests/Cognitive.Tests.ps1", "tests/Measure.Tests.ps1"],
-    "src/Cognitive.ps1": ["tests/Cognitive.Tests.ps1"],
-    "src/Cyclomatic.ps1": ["tests/Cyclomatic.Tests.ps1"],
-    "src/Measure-PSComplexity.ps1": ["tests/Measure.Tests.ps1"]
+    "src/Ast.ps1": [
+      "tests/Cognitive.Tests.ps1",
+      "tests/Measure.Tests.ps1"
+    ],
+    "src/Cognitive.ps1": [
+      "tests/Cognitive.Tests.ps1"
+    ],
+    "src/Cyclomatic.ps1": [
+      "tests/Cyclomatic.Tests.ps1"
+    ],
+    "src/Measure-PSComplexity.ps1": [
+      "tests/Measure.Tests.ps1"
+    ],
+    "src/Report.ps1": [
+      "tests/Report.Tests.ps1"
+    ]
   },
   "coveredLinesOnly": true,
   "_operators_comment": "The three opt-in operators PSMutant itself runs. Without them the gate sees only expressions, so structural logic -- a guard, an early return, a fencepost -- scores a vacuous 100%. StringLiteral stays off: high volume, low signal.",
-  "operators": ["BinaryOperator", "BooleanLiteral", "NumberLiteral", "NegationRemoval", "ConditionalBoundary", "ConditionForcing", "ReturnValue"],
-  "thresholds": { "high": 90, "low": 75, "break": 100 },
+  "operators": [
+    "BinaryOperator",
+    "BooleanLiteral",
+    "NumberLiteral",
+    "NegationRemoval",
+    "ConditionalBoundary",
+    "ConditionForcing",
+    "ReturnValue"
+  ],
+  "thresholds": {
+    "high": 90,
+    "low": 75,
+    "break": 100
+  },
   "reportPath": "reports/ps-mutation-self.json"
 }

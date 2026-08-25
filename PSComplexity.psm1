@@ -9,7 +9,7 @@
 # on the strength of it.
 
 $src = Join-Path $PSScriptRoot 'src'
-foreach ($file in @('Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1')) {
+foreach ($file in @('Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1', 'Report.ps1')) {
     . (Join-Path $src $file)
 }
 

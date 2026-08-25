@@ -29,8 +29,19 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     # A wedged runner otherwise holds a REQUIRED check pending for the six-hour default,
-    # blocking every merge behind it. The full matrix runs in about two minutes.
-    timeout-minutes: 20
+    # blocking every merge behind it.
+    #
+    # Set for the LINUX leg, which is the only one that self-mutates and is therefore the only
+    # one this number is about: Windows finishes in about two minutes, Linux in tens of them.
+    # The budget is the mutant count times the per-mutant cost, and the mutant count grows
+    # whenever src/ does -- adding one file took the set from roughly 195 mutants to 300 and
+    # walked straight through a 20-minute limit, which GitHub reports as a CANCELLED job rather
+    # than a failed one, so it reads like somebody stopped the run.
+    #
+    # Raising this is the stopgap, not the answer: per-mutant cost here is 4.3s against the
+    # sibling project's 1.8s, because src/Ast.ps1 is mapped to two covering suites and pays for
+    # both on every one of its mutants (#96).
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

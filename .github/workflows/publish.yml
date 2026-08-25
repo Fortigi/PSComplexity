@@ -173,7 +173,7 @@ jobs:
           if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
           # Publish-Module requires the folder to be named exactly like the module.
-          Copy-Item ./PSComplexity.psd1, ./PSComplexity.psm1, ./src, ./LICENSE, ./README.md -Destination $stage -Recurse -Force
+          Copy-Item ./PSComplexity.psd1, ./PSComplexity.psm1, ./src, ./schemas, ./LICENSE, ./README.md -Destination $stage -Recurse -Force
           "STAGE_DIR=$stage" | Out-File -FilePath $env:GITHUB_ENV -Append
           Get-ChildItem $stage | ForEach-Object { Write-Host "  staged: $($_.Name)" }
 
