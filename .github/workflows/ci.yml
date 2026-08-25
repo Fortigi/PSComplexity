@@ -139,6 +139,15 @@ jobs:
               -ContainerName @($r.Containers | ForEach-Object { Split-Path $_.Item -Leaf })
           if ($fault) { throw $fault }
 
+      # The step above ran the suite alphabetically. The mutation baseline below runs the
+      # mapped covering suites in config order, and those two orders differ -- so an
+      # order-dependent suite is green in one and red in the other, which is how the sibling
+      # spent three CI rounds on a variable one file had cleared and not restored. Runs on both
+      # platforms: only one of them reaches the mutation gate at all.
+      - name: Order independence (the suite, reversed)
+        shell: pwsh
+        run: ./tools/Test-PSCxOrderIndependence.ps1
+
       # A committed script, not a snippet here, so measuring by hand and measuring in CI
       # cannot drift. The figure in CLAUDE.md was a claim nothing checked, and the one in
       # CHANGELOG.md had been wrong for two releases.
