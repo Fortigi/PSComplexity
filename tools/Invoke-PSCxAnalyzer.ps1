@@ -1,7 +1,8 @@
-# Run PSScriptAnalyzer the one way this project runs it, and return the findings.
+# Run PSScriptAnalyzer the one way this project runs it, and FAIL when it finds anything.
 #
-# Two gates analyse this repo: the lint step in ci.yml, which FAILS the build, and
-# code-scanning.yml, which uploads SARIF and is a REQUIRED check. They each spelled the
+# THREE callers analyse this repo, not two: the lint step in ci.yml, the same check in
+# publish.yml guarding the one irreversible action here, and code-scanning.yml, which uploads
+# SARIF and is a REQUIRED check. They each spelled the
 # invocation out inline and disagreed about both scope and severity -- ci.yml passed
 # `-Severity Error, Warning` over four paths, code scanning passed no filter over everything.
 #
@@ -22,7 +23,17 @@ param(
     # Defaults to PSSA_VERSION. The exact version matters: rules and their inference change
     # between releases, so an unpinned analyzer can report a finding CI does not, or miss one
     # it does.
-    [string]$AnalyzerVersion
+    [string]$AnalyzerVersion,
+
+    # Return the findings as data instead of failing on them. For the one caller that has its
+    # own use for them -- code-scanning.yml converts them to SARIF, where an EMPTY set is a
+    # meaningful upload that clears alerts for rules already fixed, so that consumer must never
+    # be failed.
+    #
+    # Opt-out rather than opt-in, deliberately. The dangerous shape is a human running this and
+    # reading exit 0 as a pass, so the safe behaviour has to be what you get without thinking
+    # about it.
+    [switch]$PassThru
 )
 
 $ErrorActionPreference = 'Stop'
@@ -72,8 +83,29 @@ $settings = Join-Path -Path $repoRoot -ChildPath 'PSScriptAnalyzerSettings.psd1'
 #
 # -Path takes a single item, so the loop is required rather than stylistic: passing the array
 # fails with "Cannot convert 'System.Object[]' to the type 'System.String'".
-$findings = $Path | ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Recurse -Settings $settings }
-
 # @() so a single finding is still a collection and callers can count it. No comma-wrap:
 # callers pipe this, and `, $array` would enter the pipeline as one item.
-return [object[]]@($findings)
+$findings = [object[]]@($Path | ForEach-Object { Invoke-ScriptAnalyzer -Path $_ -Recurse -Settings $settings })
+
+if ($PassThru) { return $findings }
+
+# Otherwise this script IS the gate, like Measure-PSCxCoverage.ps1 and Test-PSCxRelease.ps1
+# beside it. It used to return findings and exit 0 whether or not it found any, so $? was not a
+# verdict: a person who ran it by hand and checked the exit code got a confident wrong answer,
+# and the verdict lived in THREE workflow steps instead -- ci.yml, publish.yml and nowhere at
+# all for code scanning. Two of the three committed gate scripts failed loudly and this one did
+# not, which is the inconsistency that made the trap invisible.
+#
+# Printed before the throw, because a gate that says how many findings there are without saying
+# what they were sends the reader back to run it again.
+. (Join-Path -Path $PSScriptRoot -ChildPath 'ReleaseDecisions.ps1')
+$fault = Get-PSCxLintFault -FindingCount $findings.Count
+if ($fault) {
+    # Write-Output, not Write-Host: PSAvoidUsingWriteHost is NOT excluded in this repo and every
+    # other script in tools/ prints this way. The sibling project excludes the rule and uses
+    # Write-Host throughout, so this is the one line of that design that must not be copied
+    # across -- and the gate this change creates caught it immediately, on itself.
+    Write-Output ($findings | Format-Table Severity, RuleName, ScriptName, Line, Message -AutoSize | Out-String)
+    throw $fault
+}
+Write-Output 'Lint clean.'

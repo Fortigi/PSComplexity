@@ -35,6 +35,14 @@ keys it holds could not distinguish units the tool could.
 
 ### Fixed
 
+- **Running the analyzer by hand is now the same as passing it.**
+  `tools/Invoke-PSCxAnalyzer.ps1` returned its findings and exited 0 whether or not it found any,
+  so `$?` was not a verdict and the gate was the `if` around it -- in `ci.yml` and again in
+  `publish.yml`, which guards the one irreversible action here. It throws now, like
+  `Measure-PSCxCoverage.ps1` and `Test-PSCxRelease.ps1` beside it. `-PassThru` returns the
+  findings without failing, for code scanning, which uploads them rather than gating on them and
+  where an empty set is a meaningful upload that clears alerts for rules already fixed.
+
 - **The gate could describe an unrelated failure as a file that did not parse.**
   `Test-PSComplexity` rebuilt its list of unreadable files by capturing `Measure-PSComplexity`'s
   error stream with `-ErrorAction SilentlyContinue`, so *any* error landed in the same variable

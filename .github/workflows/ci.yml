@@ -115,9 +115,10 @@ jobs:
       - name: Lint (PSScriptAnalyzer)
         shell: pwsh
         run: |
-          $f = ./tools/Invoke-PSCxAnalyzer.ps1
-          if ($f) { $f | Format-Table Severity, RuleName, ScriptName, Line, Message -AutoSize; throw "$($f.Count) lint finding(s)" }
-          Write-Host 'Lint clean.'
+          # The script throws on its own now. The verdict used to live HERE, in YAML, while
+          # the script exited 0 with findings -- so running it by hand was not the same as
+          # passing it, and this step was the only thing that made it a gate.
+          ./tools/Invoke-PSCxAnalyzer.ps1
 
       - name: Tests (reference scores + self-complexity gate)
         shell: pwsh

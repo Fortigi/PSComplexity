@@ -32,7 +32,7 @@ CI (`.github/workflows/ci.yml`) runs:
 
 | Gate | What it is |
 |---|---|
-| Lint | PSScriptAnalyzer, `-Severity Error, Warning` |
+| Lint | `tools/Invoke-PSCxAnalyzer.ps1` — **every severity**, and it throws. The same script code scanning and publish run |
 | Unit tests | whole `tests/` directory, 0 failures |
 | Complexity | **its own** `Test-PSComplexity` against `src/`, 15 / 15 per unit |
 | Self-mutation | PSMutant against `psmutant.self.config.json`, break = 100 |
@@ -140,6 +140,25 @@ and expensive to rebuild, and because each one has already earned its keep.
   `System.Collections.Specialized.OrderedDictionary`. `Save-PSCxDocument` now refuses to write a
   document containing such a marker, because raising the depth fixes today's document and the
   next nested field reintroduces it.
+
+- **One committed analyzer script, and running it IS passing it.** All three callers -- the
+  lint step in `ci.yml`, the same check in `publish.yml`, and the required `code-scanning.yml`
+  -- run `tools/Invoke-PSCxAnalyzer.ps1`, so they cannot analyse different paths, different
+  settings or, as they did until #19, different severities. There is **no `-Severity` filter**:
+  rules are excluded by name in `PSScriptAnalyzerSettings.psd1`, with a reason, where a severity
+  filter mutes a whole band nobody decided about.
+
+  **It throws on a finding**, so the exit code is the answer. It did not always: it returned
+  findings and exited 0 either way, the verdict lived in two workflow steps, and running it by
+  hand was therefore not the same as passing it. `-PassThru` returns the findings without
+  failing, for code scanning, which uploads them rather than gating on them -- an empty set
+  there is a meaningful upload that clears alerts for rules already fixed. The decision itself
+  is `Get-PSCxLintFault` in `ReleaseDecisions.ps1`, with tests, like every other gate decision.
+
+  **`Write-Output`, never `Write-Host`, in `tools/`.** `PSAvoidUsingWriteHost` is not excluded
+  here and every other script in `tools/` prints that way. The sibling project made the opposite
+  choice -- it excludes the rule because its gate scripts print for a living -- so this is the
+  one part of its design not to copy across. Porting it failed this gate on its own first run.
 
 - **An acceptance is a checkable claim, and there must never be a plain suppression beside
   it.** `-Accept` names one unit by file AND unit, carries a written argument, and the gate
@@ -260,11 +279,6 @@ list above in the PR that closes it.
   at 100% in this file and measured by nobody -- the recipe lives in prose, so measuring by
   hand and measuring in CI cannot even be compared. Hand-maintained figures in this repo have
   already drifted.
-
-- **One analyzer invocation, called by both gates** (#19). The failing lint gate filters to
-  Error and Warning over four paths; the required code-scanning check has no filter and scans
-  everything. A finding in the gap is invisible to the gate that fails and visible to the one
-  that blocks.
 
 - **Anything the module says about itself is a claim someone should be able to check** (#28).
   Five statements in the docs are not true of the code, two of them provably: load order is

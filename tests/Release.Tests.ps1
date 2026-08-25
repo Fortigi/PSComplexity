@@ -217,6 +217,24 @@ Describe 'the pins file itself' {
     }
 }
 
+Describe 'Get-PSCxLintFault' {
+    It 'passes a run that found nothing' {
+        Should-BeNull -Actual (Get-PSCxLintFault -FindingCount 0)
+    }
+
+    It 'fails on a single finding' {
+        # One, not many. No -Severity filter reaches the analyzer and rules are excluded by name
+        # with a reason, so anything reported at all is a rule somebody decided to keep -- a gate
+        # needing two would let every lone Information-severity finding through.
+        Get-PSCxLintFault -FindingCount 1 | Should-BeLikeString '*lint gate failed*'
+    }
+
+    It 'says how many it found' {
+        # A failure without a number sends the reader back to run it again to size the work.
+        Get-PSCxLintFault -FindingCount 4 | Should-BeLikeString '*4 PSScriptAnalyzer finding*'
+    }
+}
+
 Describe 'Get-PSCxTestRunFault' {
     It 'says nothing about a run where every container passed' {
         Get-PSCxTestRunFault -FailedCount 0 -ContainerResult @('Passed', 'Passed') -ContainerName @('a', 'b') |
