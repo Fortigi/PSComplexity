@@ -64,7 +64,8 @@ under both. Tracked in **#10**.
 src/Ast.ps1                    unit discovery, attribution, nesting depth. Shared.
 src/Cyclomatic.ps1             decision-point counting.
 src/Cognitive.ps1              the SonarSource metric (B1 structural, B2 nesting, B3 level).
-src/Measure-PSComplexity.ps1   public API: Measure-PSComplexity, Test-PSComplexity.
+src/Measure-PSComplexity.ps1   the scan -- measurement as data -- and the two public
+                               projections over it: Measure-PSComplexity, Test-PSComplexity.
 ```
 
 **The mutation config maps each source file to specific test files.** `src/Cyclomatic.ps1`
@@ -109,6 +110,26 @@ Two subtleties worth knowing before touching `Ast.ps1`:
 
 Habits this repo already has. They are written down because they are cheap to lose in a hurry
 and expensive to rebuild, and because each one has already earned its keep.
+
+- **The scan is the measurement; the published output is a projection of it.** `Get-PSCxScan`
+  returns what was asked for, which units were found, and which files were skipped and why.
+  `Measure-PSComplexity` renders the units to the pipeline and each skip to the error stream;
+  `Test-PSComplexity` reads the skips as data. Both walk once, through `Get-PSCxPathScan`,
+  which streams per-file scans so the streaming command does not have to buffer a tree to
+  share the aggregate.
+
+  Facts about the RUN have nowhere else to live, and a fact that exists only on the error
+  stream has to be rebuilt by whoever needs it. The gate used to capture its own module's
+  errors with `-ErrorAction SilentlyContinue` -- which swallowed every OTHER error into the
+  same variable, so a parameter-binding failure reached the user described as a file that did
+  not parse. That was observed during the change that introduced this, not imagined.
+
+  It is the same shape as the rows underneath: emit the rich thing once, project it. A
+  consumer that needs run-level facts extends the scan rather than inventing a second shape,
+  which is what stops the first one shipped becoming the contract by accident. It is
+  deliberately **internal** until something publishes it; when that happens, the cost to weigh
+  is that one command would then have two output shapes, and a `| Where-Object` written
+  against the record stream returns nothing under the other one.
 
 - **The reference scores are the contract, not examples.** `tests/Cognitive.Tests.ps1` pins the
   SonarSource cases -- prime sieve 7, plain switch 1, recursive fibonacci 3,

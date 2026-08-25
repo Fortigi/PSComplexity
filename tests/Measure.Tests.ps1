@@ -289,6 +289,47 @@ Describe 'the shipped help' {
         }
     }
 
+    It 'documents every parameter it accepts' {
+        # Every parameter must carry SOME description. This does not police where the text
+        # comes from: PowerShell synthesises a description from a comment sitting immediately
+        # above a parameter as readily as from a .PARAMETER block, and -Detailed shipped
+        # documented that way -- by an argument written for a maintainer rather than guidance
+        # written for a caller, which is a different complaint and not one a test can make.
+        #
+        # What it does catch is a parameter with neither, where Get-Help shows a bare name.
+        # Confirmed by adding one; an earlier version of this test asserted on parameter NAMES
+        # and passed against exactly that.
+        $common = @([System.Management.Automation.Cmdlet]::CommonParameters) +
+                  @([System.Management.Automation.Cmdlet]::OptionalCommonParameters)
+        foreach ($cmd in 'Measure-PSComplexity', 'Test-PSComplexity') {
+            # Filtered on DESCRIPTION, not on name. PowerShell synthesises a parameter entry
+            # from the param block whether or not a .PARAMETER block exists, so a name check
+            # passes against exactly the undocumented switch this test was written to catch --
+            # it did, before this line.
+            $documented = @((Get-Help $cmd).parameters.parameter |
+                    Where-Object { ($_.Description | Out-String).Trim() } |
+                    ForEach-Object { $_.Name })
+            $declared = @((Get-Command $cmd).Parameters.Keys | Where-Object { $_ -notin $common })
+            $missing = @($declared | Where-Object { $_ -notin $documented })
+            ($missing -join ',') | Should-Be '' -Because "$cmd does not document $($missing -join ', ')"
+        }
+    }
+
+    It 'names every field the record actually carries in its .OUTPUTS' {
+        # The .OUTPUTS block said "these five names" and listed five, from the release that
+        # made it six. The record contract is pinned by a test; the prose describing it to
+        # consumers was not, so the two could disagree indefinitely.
+        #
+        # The expected list is read off a REAL record rather than written out here, so a field
+        # added to the record fails this until the help mentions it.
+        $fields = @((Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1') -Detailed)[0].PSObject.Properties.Name)
+        $fields.Count | Should-Be 7 -Because 'six published fields plus Contributions under -Detailed'
+        $outputs = ((Get-Help Measure-PSComplexity).returnValues | Out-String) -replace '\s+', ' '
+        foreach ($f in $fields) {
+            $outputs | Should-BeLikeString "*$f*" -Because "the .OUTPUTS block never names $f"
+        }
+    }
+
     It 'resolves to the command help, not to a file header' {
         # A <# #> block immediately before `function` becomes that function's help, so a file
         # header written that way silently shadows the documentation meant for users. Paired
@@ -822,5 +863,105 @@ function Invoke-Thing {
             @($unit.Contributions).Count | Should-Be 0
         }
         finally { Remove-Item $flat -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'the scan is the measurement; the record stream is a projection of it' {
+    # Facts about the RUN -- which files were skipped and why, what was in scope -- used to be
+    # destroyed at emission, exactly as construct and line used to be destroyed when amounts
+    # were summed at emission. The gate then rebuilt the skip list by capturing its own
+    # module's error stream, which is the shape this pins shut.
+
+    BeforeAll {
+        $script:scanDir = Join-Path ([System.IO.Path]::GetTempPath()) "cxscan-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:scanDir -Force | Out-Null
+        # One good file and one broken one in the SAME directory. A fixture with only the
+        # broken file proves a skip was recorded but not that measuring carried on around it,
+        # and a fixture with only the good file proves nothing about skips at all.
+        Set-Content (Join-Path $script:scanDir 'good.ps1') 'function Get-Good { param($x) if ($x) { 1 } }' -Encoding utf8
+        Set-Content (Join-Path $script:scanDir 'bad.ps1') 'function Oops { param(' -Encoding utf8
+        New-Item -ItemType Directory -Path (Join-Path $script:scanDir 'nested') -Force | Out-Null
+        Set-Content (Join-Path $script:scanDir 'nested/deep.ps1') 'function Get-Deep { param($x) if ($x) { 1 } }' -Encoding utf8
+    }
+
+    AfterAll { Remove-Item $script:scanDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'records a skip as data, writing nothing to the error stream' {
+        # The purity claim, and the reason the gate can stop capturing errors. A scan that
+        # announced skips on the error stream would leave the caller reconstructing text.
+        $ev = $null
+        $scan = Get-PSCxScan -Path $script:scanDir -ErrorVariable ev -ErrorAction SilentlyContinue
+        @($ev).Count | Should-Be 0
+        $scan.Skipped.Count | Should-Be 1
+    }
+
+    It 'keeps measuring around a file it had to skip' {
+        # The kept half. One broken file must not cost the other results, and asserting only
+        # the skip would pass just as well against a scan that stopped at the first failure.
+        $scan = Get-PSCxScan -Path $script:scanDir
+        (@($scan.Units | Where-Object Unit -eq 'Get-Good')).Count | Should-Be 1
+    }
+
+    It 'names the file and the reason for every skip' {
+        # A skip that does not say which file or why is the fact this type exists to carry.
+        $scan = Get-PSCxScan -Path $script:scanDir
+        $scan.Skipped[0].File | Should-BeLikeString '*bad.ps1'
+        $scan.Skipped[0].Reason | Should-BeLikeString '*parse error*'
+    }
+
+    It 'projects exactly the units the record stream emits' {
+        # The projection claim. If these two ever disagree there are two measurements, which
+        # is the thing having one noun is for.
+        $scan = Get-PSCxScan -Path $script:scanDir
+        $streamed = @(Measure-PSComplexity -Path $script:scanDir -ErrorAction SilentlyContinue)
+        (@($scan.Units | ForEach-Object { $_.Unit }) -join ',') |
+            Should-Be (@($streamed | ForEach-Object { $_.Unit }) -join ',')
+    }
+
+    It 'records what it was asked for, not just what it found' {
+        # Scope is what a changed-files run and a committed baseline both need: "these units"
+        # means nothing without "under this path, recursively or not".
+        $scan = Get-PSCxScan -Path $script:scanDir -Recurse
+        $scan.Scope.Recurse | Should-BeTrue
+        (@($scan.Scope.Path) -join ',') | Should-Be $script:scanDir
+        (Get-PSCxScan -Path $script:scanDir).Scope.Recurse | Should-BeFalse
+    }
+
+    It 'accepts an empty seen set, which is the normal starting point' {
+        # Mandatory alone rejects an empty collection, and the binding failure then surfaces
+        # wherever the caller reports errors -- the gate announced it as a file that did not
+        # parse. A test because the fix is one attribute that reads like decoration.
+        $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $scans = @(Get-PSCxPathScan -Path (Join-Path $script:scanDir 'good.ps1') -Seen $seen)
+        $scans.Count | Should-Be 1
+        $scans[0].SkipReason | Should-BeNull
+    }
+
+    It 'honours -Recurse when collecting, not only when recording it' {
+        # Scope saying Recurse=$true while the walk stayed flat is a scan that lies about
+        # itself, and the gate reads this and nothing else. Both halves: asserting only that
+        # the nested unit IS found passes just as well against a walk that always recurses.
+        $flat = Get-PSCxScan -Path $script:scanDir
+        $deep = Get-PSCxScan -Path $script:scanDir -Recurse
+        (@($flat.Units | Where-Object Unit -eq 'Get-Deep')).Count | Should-Be 0
+        (@($deep.Units | Where-Object Unit -eq 'Get-Deep')).Count | Should-Be 1
+    }
+
+    It 'passes -Detailed through to the units it collects, and withholds it otherwise' {
+        # The switch travels two hops to reach a record, and nothing about the gate's own
+        # output changes if it is dropped or forced -- so only an assertion on both shapes
+        # keeps the pass-through honest.
+        $with = Get-PSCxScan -Path $script:scanDir -Detailed
+        $without = Get-PSCxScan -Path $script:scanDir
+        ($with.Units[0].PSObject.Properties.Name -contains 'Contributions') | Should-BeTrue
+        ($without.Units[0].PSObject.Properties.Name -contains 'Contributions') | Should-BeFalse
+    }
+
+    It 'tells the gate which file it could not read' {
+        # The gate used to join Exception.Message from a captured error stream. It now reads
+        # File and Reason off the scan, so the message names the file as data rather than as
+        # whatever text happened to be in an error record.
+        { Test-PSComplexity -Path $script:scanDir } |
+            Should-Throw -ExceptionMessage '*bad.ps1*'
     }
 }

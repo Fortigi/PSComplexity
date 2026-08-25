@@ -35,6 +35,13 @@ keys it holds could not distinguish units the tool could.
 
 ### Fixed
 
+- **The gate could describe an unrelated failure as a file that did not parse.**
+  `Test-PSComplexity` rebuilt its list of unreadable files by capturing `Measure-PSComplexity`'s
+  error stream with `-ErrorAction SilentlyContinue`, so *any* error landed in the same variable
+  and was reported as a syntax problem in a file. It now reads what was skipped, and why, as
+  data. The symptom was reproduced during this change: a parameter-binding fault surfaced as
+  "Refusing to vouch for 1 file(s) that did not parse".
+
 - **A relative path now resolves against the root it was given, not against the working
   directory.** `Get-PSCxRelativePath` called `GetFullPath` on its `Path` argument directly, so
   a relative one silently resolved against wherever the shell happened to be standing. It gave
@@ -82,6 +89,15 @@ keys it holds could not distinguish units the tool could.
   #3 needs -- reporting which construct contributed each point asks the pipeline for information
   it used to throw away two layers below where the question is asked, which makes that an
   architectural change rather than an addition.
+
+### Internal
+
+- **Measurement has a noun.** `Get-PSCxScan` returns the complete measurement -- scope, units,
+  and skips with their reasons -- and the two public commands are projections over it. Facts
+  about the run were previously destroyed at emission, which is the same defect as summing an
+  increment before recording what caused it, one layer up. It stays internal until a consumer
+  publishes it; keeping the shape in one place is what stops a report, a changed-files run and
+  a committed baseline each inventing their own.
 
 ### Added
 
