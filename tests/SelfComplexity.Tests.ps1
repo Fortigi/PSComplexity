@@ -3,7 +3,7 @@
 
 BeforeAll {
     $script:src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
-    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1') { . (Join-Path $script:src $f) }
+    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1', 'Report.ps1') { . (Join-Path $script:src $f) }
     $script:units = @(Measure-PSComplexity -Path $script:src -Recurse)
 }
 

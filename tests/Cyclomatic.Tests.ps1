@@ -43,7 +43,7 @@ $script:CyclomaticCases = @(
 
 BeforeAll {
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
-    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1') { . (Join-Path $src $f) }
+    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1', 'Report.ps1') { . (Join-Path $src $f) }
     function script:Get-CyclomaticOf {
         param([string]$Code)
         $file = Join-Path ([System.IO.Path]::GetTempPath()) "cxcyc-$([System.Guid]::NewGuid().ToString('N')).ps1"

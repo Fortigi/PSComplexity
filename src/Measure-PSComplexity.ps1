@@ -290,6 +290,20 @@ function Measure-PSComplexity {
     .PARAMETER Recurse
         Recurse into subdirectories when a directory is given.
 
+    .PARAMETER ReportPath
+        Also write a machine-readable JSON report to this path, described by
+        schemas/v1/report.schema.json, which ships with the module.
+
+        The record stream is unchanged -- the report is written alongside it, not instead of it.
+        It carries the units, the scope that was asked for, the files that were skipped and why,
+        a summary, and the metric version that produced the numbers.
+
+        A report from this command reaches no verdict, because this command applies no
+        thresholds. The published schema makes that unrepresentable rather than merely
+        undocumented: a `passed` field is forbidden unless `thresholds` are present, so a
+        measurement report cannot carry an answer nobody computed. Use Test-PSComplexity when
+        the artefact needs a verdict.
+
     .PARAMETER Detailed
         Add a Contributions list to each record: one entry per cognitive increment, carrying
         the Line it sits on, the Construct that caused it and the Amount it added, in line
@@ -339,11 +353,12 @@ function Measure-PSComplexity {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, ValueFromPipeline, Position = 0)] [ValidateNotNullOrEmpty()] [string[]]$Path,
-        [switch]$Recurse
-        ,
+        [switch]$Recurse,
+        [string]$ReportPath,
         # Off by default because the DEFAULT SHAPE IS A CONTRACT: CI consumers parse these
         # records, and a field that appears unbidden is a breaking change dressed as a feature.
-        [switch]$Detailed    )
+        [switch]$Detailed
+    )
     begin {
         # Resolved paths already emitted. Two inputs can name one file -- a directory and
         # something inside it, or a wildcard and a literal -- and measuring it twice put
@@ -351,8 +366,17 @@ function Measure-PSComplexity {
         # counts. In `begin` rather than `process` so it also spans pipeline input, where
         # each item arrives as its own invocation of the block below.
         $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        # Always collected, unguarded, because these are strings the caller already holds: the
+        # cost is nil, and a guard here would be a branch nothing could observe. The report has
+        # to say what the WHOLE run was asked for, and paths arrive one invocation at a time.
+        $asked = [System.Collections.Generic.List[string]]::new()
     }
     process {
+        $asked.AddRange([string[]]$Path)
+        # With a report, the whole run is emitted from `end` instead, out of a single scan.
+        # Accumulating per file here would need three guards that only save memory -- and a
+        # branch that changes no output cannot be told from its own absence by any test.
+        if ($ReportPath) { return }
         foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Recurse:$Recurse -Detailed:$Detailed)) {
             # The projection: units to the output stream, a skip to the error stream.
             #
@@ -366,6 +390,22 @@ function Measure-PSComplexity {
             }
             $fileScan.Units
         }
+    }
+    end {
+        if (-not $ReportPath) { return }
+        # One scan over everything the run was asked for, walking each file once exactly as the
+        # streaming path does. What it gives up is emitting as it goes, which is the price of a
+        # report that has to describe the whole run at once.
+        $scan = Get-PSCxScan -Path $asked.ToArray() -Recurse:$Recurse -Detailed:$Detailed
+        # The same projection the streaming path makes: units out, a skip to the error stream.
+        # Rendered here too, so -ReportPath does not quietly silence the one thing the command
+        # says when it could not read a file.
+        foreach ($skip in $scan.Skipped) {
+            Write-Error "Skipped '$($skip.File)' -- $($skip.Reason)"
+        }
+        $scan.Units
+        Save-PSCxDocument -Path $ReportPath -Document (Get-PSCxReportDocument -Scan $scan `
+                -ModuleVersion (Get-PSCxModuleVersion) -GeneratedAt (Get-Date))
     }
 }
 
@@ -468,6 +508,34 @@ function Test-PSComplexity {
     .PARAMETER Recurse
         Recurse into subdirectories when a directory is given.
 
+    .PARAMETER ReportPath
+        Also write a machine-readable JSON report to this path, described by
+        schemas/v1/report.schema.json, which ships with the module.
+
+        A gate report carries everything a measurement report does -- units, scope, skipped
+        files, summary, metric version -- plus the ceilings that applied, the verdict, the units
+        that breached, and every acceptance with its argument. That last part is deliberate: a
+        report that said "passed" without saying what it excused would be the mute button the
+        acceptance concept exists instead of.
+
+        Written only when a verdict is reached. The refusals above -- a file that did not parse,
+        nothing measured, an acceptance that no longer applies -- throw before a report exists,
+        because each means the run cannot vouch for anything worth recording.
+
+    .PARAMETER SarifPath
+        Also write a SARIF 2.1.0 log to this path, for code scanning to render inline on a pull
+        request. SARIF has its own published schema; this module writes it and validates nothing
+        of its own.
+
+        One result per breached ceiling, so a unit over both produces two, under two rule ids
+        (PSCxCyclomatic, PSCxCognitive) that can be suppressed independently. An accepted unit
+        produces no result at all: the gate excused it, and the argument for it lives in the JSON
+        report rather than being repeated as a finding nobody should act on.
+
+        Only the gate writes SARIF. Without ceilings there is no such thing as a finding, so a
+        SARIF file from Measure-PSComplexity would be an empty results array claiming a clean
+        bill of health.
+
     .PARAMETER Accept
         Units that are allowed to exceed a ceiling, each carrying the argument for why. One
         entry per unit, with File, Unit and Reason -- for example
@@ -495,6 +563,8 @@ function Test-PSComplexity {
         [int]$MaxCyclomatic = 15,
         [int]$MaxCognitive = 15,
         [switch]$Recurse,
+        [string]$ReportPath,
+        [string]$SarifPath,
         # Empty is the normal case, and an empty array must bind rather than be rejected.
         [AllowEmptyCollection()] [object[]]$Accept = @()
     )
@@ -552,6 +622,10 @@ function Test-PSComplexity {
             Write-Warning ("{0}:{1} {2} -- cyclomatic {3} (max {4}), cognitive {5} (max {6})" -f `
                     $v.File, $v.Line, $v.Unit, $v.Cyclomatic, $MaxCyclomatic, $v.Cognitive, $MaxCognitive)
         }
-        return $violations.Count -eq 0
+        $passed = $violations.Count -eq 0
+        Write-PSCxGateArtifact -Scan $scan -Passed $passed -Violation $violations -Accept $Accept `
+            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
+            -ReportPath $ReportPath -SarifPath $SarifPath
+        return $passed
     }
 }

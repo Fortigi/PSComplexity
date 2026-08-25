@@ -3,7 +3,7 @@
 
 BeforeAll {
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
-    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1') { . (Join-Path $src $f) }
+    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1', 'Report.ps1') { . (Join-Path $src $f) }
 
     $script:work = Join-Path ([System.IO.Path]::GetTempPath()) "cxmeasure-$([System.Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path (Join-Path $script:work 'nested') -Force | Out-Null
@@ -1120,5 +1120,62 @@ function Invoke-Hot {
                 -WarningAction SilentlyContinue | Should-BeFalse
         }
         finally { Remove-Item $other -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'a run can be written down' {
+    # The wiring lives in Measure-PSComplexity.ps1, so it is tested HERE: the mutation config
+    # maps that file to this suite, and the same assertions written in Report.Tests.ps1 cover
+    # the code without being able to kill a single one of its mutants.
+    #
+    # What the report SAYS is Report.Tests.ps1's business. This is only about the switch.
+
+    BeforeAll {
+        $script:rpDir = Join-Path ([System.IO.Path]::GetTempPath()) "cxrp-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:rpDir -Force | Out-Null
+        Set-Content (Join-Path $script:rpDir 'one.ps1') 'function Get-One { param($x) if ($x) { 1 } }' -Encoding utf8
+    }
+
+    AfterAll { Remove-Item $script:rpDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'writes a report where it was asked to' {
+        $p = Join-Path $script:rpDir 'r.json'
+        Measure-PSComplexity -Path (Join-Path $script:rpDir 'one.ps1') -ReportPath $p | Out-Null
+        Should-BeTrue -Actual (Test-Path -LiteralPath $p)
+    }
+
+    It 'writes nothing when no report was asked for' {
+        # The paired half. Without it the test above passes against a command that writes a
+        # report unbidden, which would litter every consumer's working tree.
+        $before = @(Get-ChildItem $script:rpDir -File -Filter *.json).Count
+        Measure-PSComplexity -Path (Join-Path $script:rpDir 'one.ps1') | Out-Null
+        @(Get-ChildItem $script:rpDir -File -Filter *.json).Count | Should-Be $before
+    }
+
+    It 'emits each unit exactly once while also writing a report' {
+        # With -ReportPath the whole run is emitted from `end`, out of one scan, and the
+        # per-item streaming path returns early. Drop that early return and every unit is
+        # emitted TWICE -- once streamed, once from the scan -- which reads as a doubled
+        # codebase to anything counting, and no assertion on the report file would show it.
+        $p = Join-Path $script:rpDir 'r2.json'
+        $units = @(Measure-PSComplexity -Path (Join-Path $script:rpDir 'one.ps1') -ReportPath $p)
+        @($units | Where-Object Unit -eq 'Get-One').Count | Should-Be 1
+        $units.Count | Should-Be 2
+    }
+
+    It 'still reports a file it could not read while writing a report' {
+        # The error stream is the same projection either way. A report must not quietly buy
+        # silence about a file the run could not measure.
+        $bad = Join-Path $script:rpDir 'broken'
+        New-Item -ItemType Directory -Path $bad -Force | Out-Null
+        Set-Content (Join-Path $bad 'bad.ps1') 'function Oops { param(' -Encoding utf8
+        try {
+            $ev = $null
+            Measure-PSComplexity -Path $bad -ReportPath (Join-Path $script:rpDir 'r3.json') `
+                -ErrorVariable ev -ErrorAction SilentlyContinue | Out-Null
+            @($ev).Count | Should-Be 1
+            ($ev[0].Exception.Message) | Should-BeLikeString '*parse error*'
+        }
+        finally { Remove-Item $bad -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }

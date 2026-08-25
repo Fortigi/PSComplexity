@@ -76,8 +76,8 @@ nested loop-in-loop-in-`if` grows fast — mirroring how hard it is to follow.
 
 | Command | Returns | Purpose |
 |---|---|---|
-| `Measure-PSComplexity -Path <files/dirs> [-Recurse] [-Detailed]` | per-unit records | inspect / report |
-| `Test-PSComplexity -Path <files/dirs> [-Recurse] [-MaxCyclomatic 15] [-MaxCognitive 15] [-Accept <declarations>]` | `[bool]` | CI gate (warns per offender) |
+| `Measure-PSComplexity -Path <files/dirs> [-Recurse] [-Detailed] [-ReportPath <file>]` | per-unit records | inspect / report |
+| `Test-PSComplexity -Path <files/dirs> [-Recurse] [-MaxCyclomatic 15] [-MaxCognitive 15] [-Accept <declarations>] [-ReportPath <file>] [-SarifPath <file>]` | `[bool]` | CI gate (warns per offender) |
 
 ### The record is the API
 
@@ -210,6 +210,68 @@ Three properties worth relying on:
 
 `File` must match the record's `File` exactly: relative to the working directory with forward
 slashes, or the full path for a file outside it.
+
+### A report something else can read
+
+Objects are right for a shell and awkward for everything else. `-ReportPath` writes the same
+run as JSON, described by `schemas/v1/report.schema.json`, which ships with the module so a
+consumer can validate a report without reading this repo's tests.
+
+```powershell
+Measure-PSComplexity ./src -Recurse -ReportPath ./reports/complexity.json
+Test-PSComplexity   ./src -Recurse -ReportPath ./reports/gate.json -SarifPath ./reports/gate.sarif
+```
+
+The record stream is unchanged -- the report is written alongside it, never instead of it.
+
+**Two shapes, and the difference is load-bearing.** A measurement report carries the units, the
+scope that was asked for, the files that were skipped and why, a summary, and the metric version
+that produced the numbers. A gate report adds the ceilings that applied, the verdict, the units
+that breached, and every acceptance with its argument.
+
+A measurement report **cannot** carry a verdict, and the schema is what makes that true rather
+than a promise: `passed` is forbidden unless `thresholds` are present. `Measure-PSComplexity`
+applies no ceilings, so a verdict beside its numbers would be an answer nobody computed.
+
+Three fields are required for the same reason the summary exists at all:
+
+| Required | Because |
+|---|---|
+| `metricVersion` | the metric has moved twice for source that did not change; a stored number that cannot be checked for comparability is a trend chart waiting to mislead |
+| `scope` | an aggregate that cannot say what it covered is not an aggregate anyone can act on |
+| `skipped` | a report that omits what it could not read describes a smaller job than the one it was asked to do |
+
+`schemaVersion` changes when a field changes meaning or disappears, **never** when one is added
+-- so the schema permits properties it has never seen, and a consumer validating against it
+survives a release that records more.
+
+### Inline on a pull request
+
+`-SarifPath` writes a SARIF 2.1.0 log, which GitHub code scanning renders against the diff:
+
+```yaml
+- name: Complexity gate
+  shell: pwsh
+  run: |
+      $ok = Test-PSComplexity ./src -Recurse -SarifPath ./complexity.sarif
+      if (-not $ok) { Write-Host '::warning::complexity gate failed' }
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+      sarif_file: ./complexity.sarif
+```
+
+One result per breached ceiling, under two rule ids -- `PSCxCyclomatic` and `PSCxCognitive` --
+so a unit over both produces two, and a team can suppress one metric without silencing the
+other. Findings are fingerprinted on **file and unit, never on the line**: a line moves whenever
+anything above the unit is edited, and a fingerprint built on it would close and reopen the same
+finding on an unrelated change.
+
+**An accepted unit produces no SARIF result.** The gate excused it, and asking a reviewer to act
+on something already argued is noise. The argument is not lost -- the JSON report carries it
+under `accepted`, which is where "what did this run excuse" is answered.
+
+Only the gate writes SARIF. Without ceilings there is no such thing as a finding, so a SARIF file
+from `Measure-PSComplexity` would be an empty results array claiming a clean bill of health.
 
 ## Use it in CI
 
