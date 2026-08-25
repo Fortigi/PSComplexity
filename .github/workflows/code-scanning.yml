@@ -72,7 +72,11 @@ jobs:
         shell: pwsh
         run: |
           Import-Module ConvertToSARIF -RequiredVersion $env:CONVERTTOSARIF_VERSION
-          ./tools/Invoke-PSCxAnalyzer.ps1 | ConvertTo-SARIF -FilePath results.sarif
+          # -PassThru: this job UPLOADS findings rather than failing on them, and an empty set
+          # is a meaningful upload that clears alerts for rules already fixed. It is the one
+          # caller that wants data; the other two want a verdict, and now get one from the
+          # script rather than from YAML. Everything deciding WHAT is analysed is still shared.
+          ./tools/Invoke-PSCxAnalyzer.ps1 -PassThru | ConvertTo-SARIF -FilePath results.sarif
 
       - name: Upload SARIF to code scanning
         uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4

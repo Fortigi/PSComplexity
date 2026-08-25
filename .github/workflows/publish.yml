@@ -68,8 +68,7 @@ jobs:
           # The same committed script ci.yml and code-scanning.yml run. This was a THIRD
           # inline copy, and it carried the severity filter too -- so the release path could
           # publish over a finding the required check was already blocking on.
-          $f = ./tools/Invoke-PSCxAnalyzer.ps1
-          if ($f) { $f | Format-Table Severity, RuleName, ScriptName, Line, Message -AutoSize; throw "$($f.Count) lint finding(s) -- not publishing" }
+          ./tools/Invoke-PSCxAnalyzer.ps1
           Import-Module ./PSComplexity.psd1 -Force
           Import-Module Pester -RequiredVersion $env:PESTER_VERSION -Force
           $cfg = New-PesterConfiguration
