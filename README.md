@@ -77,7 +77,7 @@ nested loop-in-loop-in-`if` grows fast — mirroring how hard it is to follow.
 | Command | Returns | Purpose |
 |---|---|---|
 | `Measure-PSComplexity -Path <files/dirs> [-Recurse] [-Detailed]` | per-unit records | inspect / report |
-| `Test-PSComplexity -Path <files/dirs> [-Recurse] [-MaxCyclomatic 15] [-MaxCognitive 15]` | `[bool]` | CI gate (warns per offender) |
+| `Test-PSComplexity -Path <files/dirs> [-Recurse] [-MaxCyclomatic 15] [-MaxCognitive 15] [-Accept <declarations>]` | `[bool]` | CI gate (warns per offender) |
 
 ### The record is the API
 
@@ -162,6 +162,54 @@ and its total is already its own explanation.
 
 Nothing changes without the switch. The six fields above are what a default run emits, in that
 order, and CI consumers that parse it are unaffected.
+
+### Disagreeing with a number
+
+Every complexity gate eventually meets a unit that is genuinely, irreducibly complex -- a
+parser, a dispatch table, a state machine -- where the honest answer is "yes, and here is why
+that is correct". Without a way to say so the only options are lowering the ceiling for
+everyone or not measuring the file, and the second is indistinguishable from never having
+looked.
+
+`-Accept` is the third answer. Each entry names one unit and carries the argument for it:
+
+```powershell
+$accept = @(
+    @{ File   = 'src/Parser.ps1'
+       Unit   = 'Read-Token'
+       Reason = 'table-driven lexer; splitting the table across helpers hides it' }
+)
+
+if (-not (Test-PSComplexity ./src -Recurse -Accept $accept)) { throw 'Complexity gate failed' }
+```
+
+**It is a checkable claim, not a suppression.** The gate **throws** when an acceptance stops
+describing the run:
+
+| The claim | What happened |
+|---|---|
+| no unit of that `File` + `Unit` was measured | renamed, moved, or outside the path being gated |
+| the unit is within both ceilings | somebody fixed it and left the note behind |
+| `Reason` is empty or whitespace | a declaration with no argument is a mute button |
+| `File` or `Unit` missing | the claim does not say what it is about |
+
+That is the whole difference from a suppression list. A suppression that stops applying goes
+on sitting in the file, excusing nothing, and the next breach of that unit passes unnoticed --
+so the list ages into a mute button nobody dares delete. An acceptance fails the build that
+relies on it instead, on the run where it stopped being true.
+
+Three properties worth relying on:
+
+- **Every fault is reported at once**, not the first, so fixing a stale list costs one CI round
+  trip rather than one per entry.
+- **The key is `File` *and* `Unit`.** A gate keyed on the symbol alone would excuse every
+  like-named unit in the tree, which is how suppression lists usually leak.
+- **An accepted unit is still measured.** This is gate policy, not a measurement filter, so the
+  unit keeps its record and its number -- a report or a baseline built on the same records still
+  sees it. Hiding it would take the argument away along with the number it is about.
+
+`File` must match the record's `File` exactly: relative to the working directory with forward
+slashes, or the full path for a file outside it.
 
 ## Use it in CI
 

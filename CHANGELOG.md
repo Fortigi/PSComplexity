@@ -101,6 +101,19 @@ keys it holds could not distinguish units the tool could.
 
 ### Added
 
+- **A number can be disagreed with: `Test-PSComplexity -Accept`.** The whole policy surface was
+  two ceilings and a path, so the only answers to a unit that is genuinely, irreducibly complex
+  were to lower the ceiling for everyone or stop measuring the file -- and the second is
+  indistinguishable from never having looked. An acceptance names one unit, by file and unit
+  together, and carries the argument for it.
+
+  It is a **checkable claim, not a suppression**: the gate throws when one stops describing the
+  run -- the unit was not measured, or is back within both ceilings, or carries no reason. A
+  suppression that stops applying sits there excusing nothing while the next breach passes
+  unnoticed; this fails the build that relies on it, on the run where it stopped being true.
+  Every fault is reported at once rather than the first, and an accepted unit is still measured,
+  because this is gate policy and not a measurement filter.
+
 - **A score can say where it came from: `Measure-PSComplexity -Detailed`.** A unit reported as
   `Cognitive = 23` was correct and unactionable -- nothing distinguished one deeply-nested loop
   from twenty flat guards, and those call for opposite fixes. `-Detailed` attaches a
