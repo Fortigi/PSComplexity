@@ -8,7 +8,12 @@ This file records **ordering rationale only**. Status lives in the issues. Do no
 progress here: a second status list drifts from the first, which is the exact failure this
 project exists to find in other people's code.
 
-Snapshot 2026-08-25, with **0.4.0 prepared and unreleased**. 8 issues open. The snapshot
+Snapshot 2026-08-25, with **0.4.0 prepared and unreleased**. 6 issues open.
+
+Since the last snapshot the whole **Guards** section closed. A new dependency edge in `src/` now
+has to be declared, and the suite has to give the same answer in a different order. Removed rather
+than ticked, per the rule below -- what is worth keeping from them is recorded in `CLAUDE.md`,
+where somebody about to add an edge or a test file will actually meet it. The snapshot
 reflects what has **merged**; work with a pull request open still holds its ordering entry
 below, because an entry removed on the strength of an open PR is a status claim in disguise.
 
@@ -98,22 +103,6 @@ internal until something needs it exported.
 
 ---
 
-## Guards
-
-Not features and not cost. Each one is a thing that would otherwise be true only by luck.
-
-  - **#102** -- the layering test. This repo set its own trigger for it: reconsider when a module
-    both exported commands consume lives in its own file. `src/Report.ps1` is that file, so the
-    condition has fired. Every other gate here is blind to DIRECTION -- a shortcut call reaches
-    full coverage and survives self-mutation exactly as a well-layered one does. Cheap to write
-    while the edges are few and obviously correct.
-
-  - **#101** -- nothing checks the suite is order-independent, and the two orders this project
-    uses disagree: `Invoke-Pester ./tests` is alphabetical, the mutation baseline runs the mapped
-    suites in config order. It cost the sibling project three CI rounds when a file cleared an
-    environment variable an earlier file had not. No known dependency here today, which is a fact
-    about the tests as they stand rather than a property anything enforces.
-
 ## CI and release
 
 One committed analyzer script all three callers run -- and it **throws**, so running it by hand
@@ -121,7 +110,9 @@ is the same as passing it. Pins in `.github/pins.env` with a weekly watcher and 
 the action SHAs. An enforced 100% coverage gate, concurrency groups, timeouts, least-privilege
 permissions, a publish that requires the CI conclusion for its exact commit on **both** matrix
 legs, a release-consistency check that generates the manifest notes from the CHANGELOG, and a
-staged-package smoke test that loads the artifact before it becomes permanent.
+staged-package smoke test that loads the artifact before it becomes permanent. The suite also has
+to give the same answer reversed, and to leave the environment as it found it -- the two orders this
+project runs its own tests in used to differ with nothing checking they agreed.
 
 Two negatives worth keeping, because both look like protection and are not:
 
