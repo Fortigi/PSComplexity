@@ -187,6 +187,42 @@ Invoke-ScriptAnalyzer -Path ./src -Recurse -Settings ./PSScriptAnalyzerSettings.
 All gates (lint, reference-score tests, self-complexity gate) run on **Windows and
 Linux** in the required CI job and block the merge.
 
+## What the number does not say
+
+Two things follow from measuring **per unit**, and both are decisions rather than gaps. They
+are written down because a reader who discovers them from the output will reasonably assume
+one of them is a bug.
+
+**The gate cannot tell decomposition from displacement.** A 20-line `Invoke-Deploy` scoring
+14/38 fails at the default ceilings. Split the *identical* control flow into four private
+helpers plus an orchestrator and the maximum drops to 6/10, the gate passes, and the file's
+total cognitive falls from 38 to 21 -- a total that appears nowhere, because the output is
+per unit and the gate is a maximum over units.
+
+Whether that split made the code easier to read is a question the tool cannot answer. Often
+it does; sometimes it only moves the branch somewhere else. Complexity exists per unit, so a
+per-unit measure is the honest one, and this is the price of it. This module does the same
+thing to itself and says so: `Cognitive.ps1`'s row collectors are split into small functions
+partly so the metric clears its own gate, while `Get-PSCxCyclomaticRow` leaves the same shape
+inline and is the joint-highest unit here.
+
+A related consequence worth knowing before trusting a low score: a 60-line function assigning
+sixty fields through a `$global:` accumulator scores **1/0** -- identical to
+`function Get-Flat { $x }`. Neither metric measures length, coupling or state.
+
+**A nested named function contributes nothing to its parent.** The same body written as a
+script block contributes 3/5. That asymmetry is deliberate: a nested named function is
+discovered as its own unit and gets its own row, so its complexity is measured -- just not
+*there*. A script block has no unit of its own, so its complexity must land on the enclosing
+function or vanish.
+
+It is also the cheaper of the two displacement routes, since a hard branch moved into a
+nested named function drops the parent under the ceiling without moving a line out of the
+file. **This is a deliberate departure from SonarSource**, whose specification increments for
+nested function *declarations* in languages that have them, for exactly that reason. Recorded
+here rather than silently: every other reference score in this module matches the spec, and
+the ones that do are attributed in the test suite.
+
 ## Notes / scope
 
 - **PowerShell 7.2+ only** (Core). Windows PowerShell 5.1 is not supported.
