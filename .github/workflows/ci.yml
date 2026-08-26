@@ -41,7 +41,13 @@ jobs:
     # Raising this is the stopgap, not the answer: per-mutant cost here is 4.3s against the
     # sibling project's 1.8s, because src/Ast.ps1 is mapped to two covering suites and pays for
     # both on every one of its mutants (#96).
-    timeout-minutes: 40
+    # 60, and the mutation step is 29 minutes of it -- measured, not guessed. The budget went
+    # 20 -> 40 when that step first walked through it, and 40 -> 60 when the policy layer
+    # arrived. Raising a timeout does not make a gate faster; it stops a slow gate reading as
+    # a wedged runner, which holds a required check pending and blocks every merge behind it.
+    # The cost itself is #96, and the lever that matters is a covering suite that does not
+    # measure real source once per mutant.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

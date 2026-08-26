@@ -65,13 +65,39 @@ under both. Tracked in **#10**.
 src/Ast.ps1                    unit discovery, attribution, nesting depth. Shared.
 src/Cyclomatic.ps1             decision-point counting.
 src/Cognitive.ps1              the SonarSource metric (B1 structural, B2 nesting, B3 level).
+src/Policy.ps1                 which units are excused from the ceilings, and on what terms:
+                               acceptances, baselines, and the ONE unit-identity key both use.
+                               Pure.
+src/BaselineFile.ps1           the baseline file: read it, refuse it, write it back. The I/O
+                               half of the policy, kept apart so the deciding half stays pure.
 src/Measure-PSComplexity.ps1   the scan -- measurement as data -- and the two public
                                projections over it: Measure-PSComplexity, Test-PSComplexity.
 src/Report.ps1                 the two published formats -- our JSON report and SARIF -- and
-                               the one function that writes a file.
+                               the two functions that touch a file.
 schemas/v1/report.schema.json  the report format. Ships in the package; a consumer validates
                                against it without reading this repo.
 ```
+
+**A covering suite must be CHEAP, not only complete, and the cost is measured rather than
+guessed.** Every mutant of a file re-runs that file's covering suite, so the gate costs
+*mutants x suite*. `tests/Measure.Tests.ps1` takes 18 seconds because it measures real source,
+and that is the right price for what it proves -- but it is the wrong price to pay 100+ times.
+
+That is why `src/Policy.ps1` and `src/BaselineFile.ps1` exist as separate files with their own
+suites rather than sitting in `Measure-PSComplexity.ps1`. Measured, not assumed: Policy's 125
+mutants cost **19 minutes** against the measuring suite and **59 seconds** against a pure one,
+and moving the two baseline-file functions out took another eight minutes off. The end-to-end
+proofs did not move -- `Measure.Tests.ps1` still drives all of it through `Test-PSComplexity`,
+because covering a function is not covering its application and neither gate can tell the
+difference. They are simply not what each mutant pays for.
+
+Before adding a file to `mutate`, run it alone with a scratch config and look at the seconds. The
+whole gate has to fit inside a 40-minute CI job alongside everything else, and it reached 34
+minutes once during this work.
+
+**A `_`-prefixed comment key is exempt only at the TOP level of the config.** Inside the `tests`
+object it is read as a mutate path, and the run dies looking for a file named after your comment.
+Found the hard way.
 
 **The mutation config maps each source file to specific test files.** `src/Cyclomatic.ps1`
 maps only to `tests/Cyclomatic.Tests.ps1`; `src/Ast.ps1` maps to the Cognitive and Measure
@@ -79,6 +105,25 @@ suites. A test placed in the wrong file covers the code but **cannot kill its mu
 which has already happened once here — a ternary case landed in `Measure.Tests.ps1` and
 the mutant survived a test that exercised it. Check `psmutant.self.config.json` before
 choosing where a test goes.
+
+**`Policy.ps1` holds acceptance and baseline together because they share a key.** An acceptance
+is a *decision* -- a written argument that excuses a unit outright. A baseline is a *ratchet* --
+no argument, caps a unit at what it already scored, and exists so the gate is adoptable on a
+codebase that is already red. Different promises, so they fail differently. What they must never
+differ on is what "the same unit" means: two key builders would each be right on their own terms
+and disagree in exactly the case nobody tests.
+
+That key is `Get-PSCxPolicyKey`, and it is **not** `Get-PSCxUnitKey` in `Ast.ps1`, which keys an
+AST node during a walk. The two collided when this file was split out -- the module loaded and
+every measurement failed -- so if you add a third key, check the name first.
+
+**Unit identity is unique but not stable, and only the baseline cares.** Duplicate definitions in
+one file are told apart by an ordinal (`Get-Thing#1`, `#2`), which renumbers when a duplicate is
+inserted above it -- measured: inserting a third `Get-Thing` at the top moves the unit that was
+`#1` to `#2`, and `#1` then names a function nobody recorded. An acceptance keyed that way is
+re-read by whoever edits the file; a baseline is committed once and reviewed rarely, so a baseline
+entry with an ordinal in it is **refused** rather than approximated. A line number is no better
+and worse in the ordinary case, where it churns on every edit above the unit.
 
 ## What a "unit" is
 

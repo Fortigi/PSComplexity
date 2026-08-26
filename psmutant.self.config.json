@@ -8,15 +8,21 @@
   "_sandboxSubtrees_comment": "schemas is copied for the same reason src and tests are: tests/Report.Tests.ps1 reads schemas/v1/report.schema.json to validate what a real run wrote. Without it the sandboxed suite cannot find the file and the BASELINE goes red -- before a single mutant is tried, and with an error that names a missing path rather than the missing subtree.",
   "mutate": [
     "src/Ast.ps1",
+    "src/BaselineFile.ps1",
     "src/Cognitive.ps1",
     "src/Cyclomatic.ps1",
     "src/Measure-PSComplexity.ps1",
+    "src/Policy.ps1",
     "src/Report.ps1"
   ],
+  "_tests_comment": "A covering suite is re-run once per mutant of the file it covers, so it has to be CHEAP as well as complete. Policy.ps1 maps to its own tests/Policy.Tests.ps1 rather than to Measure.Tests.ps1, which also drives it end to end: against the measuring suite its 125 mutants cost 19 minutes, and against the pure one they cost 59 seconds. The end-to-end proofs did not move; they are simply not what each mutant pays for. NOTE: a _-prefixed key is exempt only at the TOP level -- inside this object it is read as a mutate path and the run dies looking for a file named after the comment.",
   "tests": {
     "src/Ast.ps1": [
       "tests/Cognitive.Tests.ps1",
       "tests/Measure.Tests.ps1"
+    ],
+    "src/BaselineFile.ps1": [
+      "tests/BaselineFile.Tests.ps1"
     ],
     "src/Cognitive.ps1": [
       "tests/Cognitive.Tests.ps1"
@@ -26,6 +32,9 @@
     ],
     "src/Measure-PSComplexity.ps1": [
       "tests/Measure.Tests.ps1"
+    ],
+    "src/Policy.ps1": [
+      "tests/Policy.Tests.ps1"
     ],
     "src/Report.ps1": [
       "tests/Report.Tests.ps1"

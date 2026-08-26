@@ -211,6 +211,81 @@ Three properties worth relying on:
 `File` must match the record's `File` exactly: relative to the working directory with forward
 slashes, or the full path for a file outside it.
 
+### Turning the gate on when you are already over the line
+
+A repo with forty units above the ceiling has two options without a baseline, and neither
+improves anything: set the ceiling so high it gates nothing, or leave the check off.
+
+`-BaselineFile` is the third. It is a committed JSON file recording what each already-over-the-limit
+unit scored, and it changes the answer to "we have forty violations" from *raise the threshold* to
+**record them, then never add a forty-first**.
+
+```powershell
+# once, to record where you are starting from -- then commit the file
+Test-PSComplexity ./src -Recurse -BaselineFile ./complexity-baseline.json -UpdateBaseline
+
+# from then on, in CI
+if (-not (Test-PSComplexity ./src -Recurse -BaselineFile ./complexity-baseline.json)) {
+    throw 'Complexity gate failed'
+}
+```
+
+Two rules, and the second is the one that makes it worth having:
+
+- A unit **in** the baseline may not exceed its recorded score. It is allowed to stay ugly.
+- A unit **not** in the baseline must be under the ceilings -- so new and touched code meets the
+  real bar from day one, on the first run, with no grace period to negotiate.
+
+The file looks like this:
+
+```json
+{
+  "schemaVersion": 1,
+  "metricVersion": 1,
+  "generatedAt": "2026-08-25T09:12:44Z",
+  "units": [
+    { "file": "src/Parser.ps1", "unit": "Read-Token", "cyclomatic": 34, "cognitive": 41 }
+  ]
+}
+```
+
+**It ratchets, and it only ratchets down.** `-UpdateBaseline` refuses to record a unit worse than
+the file already does, naming the units that regressed. Without that refusal, re-running the tool
+would absorb whatever the gate had just caught, and the baseline would be a suppression list that
+updates itself.
+
+**It is a checkable claim, like an acceptance.** The gate **throws** when an entry stops describing
+the run:
+
+| The entry | What happened |
+|---|---|
+| names a unit that was not measured | renamed, moved, or outside the path being gated |
+| names a unit now within both ceilings | it was fixed; the real bar covers it and the entry is fiction |
+| records a number **larger** than reality | it improved -- lower the entry, or `-UpdateBaseline` |
+| is also in `-Accept` | the acceptance already excuses it, so the entry permits nothing |
+| appears twice | one of the two decides what is permitted and the other silently does nothing |
+| `file` or `unit` missing | the entry does not say what it is about |
+
+The third row is the ratchet tightening, and it is deliberately a failure rather than a shrug: a
+baseline that keeps a number the code no longer needs has quietly stopped being a baseline.
+
+**The key is `file` and `unit`, never a line.** A line number moves whenever anything above it is
+edited, and the entry then goes stale although the unit did not change.
+
+One identity is refused outright. Duplicate definitions in a single file are told apart by an
+ordinal -- `Get-Thing#1`, `Get-Thing#2` -- and an ordinal **renumbers when a duplicate is inserted
+above it**, so the entry would silently begin capping a different function. Rename one of the
+duplicates; in PowerShell the later definition shadows the earlier at run time anyway, so one of
+them is already dead code.
+
+**A baseline recorded against a different `metricVersion` is refused rather than compared.** When
+the metric changes, old scores are not larger or smaller -- they are answers to a different
+question. `-UpdateBaseline` regenerates such a file wholesale, and the diff is where it gets
+reviewed.
+
+`-UpdateBaseline` writes no report and no SARIF: the verdict they would record is one the call
+just manufactured by recording every breach.
+
 ### A report something else can read
 
 Objects are right for a shell and awkward for everything else. `-ReportPath` writes the same
@@ -286,6 +361,20 @@ from `Measure-PSComplexity` would be an empty results array claiming a clean bil
 module's metric has already moved twice for unchanged source. Without an exact version two
 machines on the same commit can legitimately disagree about whether the build is green --
 and the one that upgraded first looks like the one that broke it.
+
+That pin is also what makes a committed baseline safe to compare against. A baseline records
+which `metricVersion` produced its numbers and refuses to be read across a change to it, so an
+unpinned upgrade turns into a clear refusal rather than a quietly wrong comparison -- but a
+refusal still fails the build, and pinning is how you choose when to deal with it.
+
+On a codebase already over the ceilings, add the baseline and nothing else changes about the
+above:
+
+```yaml
+    if (-not (Test-PSComplexity ./src -Recurse -BaselineFile ./complexity-baseline.json)) {
+        throw 'Complexity gate failed'
+    }
+```
 
 ## Development
 

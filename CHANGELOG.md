@@ -9,6 +9,23 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ### For consumers
 
+**The gate is now adoptable on a codebase that is already over the line.** `-BaselineFile` records
+what each already-breaching unit scored, in a committed JSON file. A unit in the baseline may not
+exceed its recorded score; a unit not in it must be under the ceilings, so new and touched code
+meets the real bar from day one. The answer to "we have forty violations" stops being "raise the
+threshold", which gates nothing.
+
+It is a ratchet rather than a suppression list, and it only ratchets **down**. `-UpdateBaseline`
+refuses to record a unit worse than the file already does -- otherwise re-running the tool would
+absorb whatever regression the gate had just caught. An entry that stops describing the run fails
+it: the unit was renamed away, it came back within both ceilings, it is also in `-Accept`, it
+appears twice, or it improved and the recorded number is now larger than reality.
+
+Entries are keyed by file and unit, never by line. A unit whose name carries an ordinal --
+`Get-Thing#2`, how duplicate definitions in one file are told apart -- is refused outright, because
+the ordinal renumbers when a duplicate is inserted above it and the entry would silently begin
+capping a different function.
+
 BEHAVIOUR CHANGE -- two published values change shape, and anything that stored them will
 not match. Read this before upgrading a pipeline that keeps records.
 
@@ -88,6 +105,13 @@ keys it holds could not distinguish units the tool could.
   anything above a unit is edited.
 
 ### Internal
+
+- **The policy layer is its own two files, and the reason is measured.** Acceptances and baselines
+  share a unit-identity key, so they share `src/Policy.ps1`; reading and writing the baseline file
+  is I/O, so it sits in `src/BaselineFile.ps1` and the deciding half stays pure. Both have their
+  own covering suites, because the self-mutation gate re-runs a file's covering suite once per
+  mutant: against the suite that measures real source those 153 mutants cost **27 minutes**, and
+  against pure ones they cost **two**. The end-to-end proofs did not move.
 
 - **A new dependency edge between files in `src/` now has to be declared.** Every other gate is
   blind to direction -- a shortcut call reaches full coverage and survives self-mutation exactly

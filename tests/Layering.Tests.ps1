@@ -40,6 +40,10 @@ BeforeAll {
         # Serialisation is downstream of measurement and must stay a sink. A report layer that
         # reached back into Ast.ps1 or a metric would be deciding what a number MEANS while
         # claiming only to write it down -- and the report is the artefact a consumer trusts.
+        'BaselineFile.ps1 -> Policy.ps1'
+        'BaselineFile.ps1 -> Report.ps1'
+        'Measure-PSComplexity.ps1 -> BaselineFile.ps1'
+        'Measure-PSComplexity.ps1 -> Policy.ps1'
         'Measure-PSComplexity.ps1 -> Report.ps1'
     )
 
