@@ -8,7 +8,7 @@ This file records **ordering rationale only**. Status lives in the issues. Do no
 progress here: a second status list drifts from the first, which is the exact failure this
 project exists to find in other people's code.
 
-Snapshot 2026-08-26, with **0.4.0 prepared and unreleased**. 5 issues open.
+Snapshot 2026-08-26, with **0.4.0 prepared and unreleased**. 4 issues open.
 
 Since the last snapshot the whole **Guards** section closed, and **#2** with it -- the committed
 baseline, which was the first thing here to persist a key. Removed rather than ticked, per the rule
@@ -17,7 +17,8 @@ a mutated source file will actually meet it.
 
 **#2 changed what this file says about cost, and the numbers below are now measured rather than
 estimated.** Building it took the self-mutation gate from 14.5 to 34 minutes, past a job budget of
-40, and finding out why produced a better answer than the one queued here. The snapshot
+40, and finding out why produced a better answer than the one queued here. #96 then closed on the
+same measurement: **21.3 minutes**, and a CI leg down from 24m34s to 16m19s. The snapshot
 reflects what has **merged**; work with a pull request open still holds its ordering entry
 below, because an entry removed on the strength of an open PR is a status claim in disguise.
 
@@ -141,31 +142,41 @@ What is left:
 
 ## Cost
 
-  - **#96** -- `src/Ast.ps1` is mapped to two covering suites and pays for both on all 57 of its
-    mutants. Still true, and **no longer the largest term**. Measured while building #2:
+The gate costs **mutants x suite**, and every reduction so far came from moving mutants onto a
+covering suite that does not measure real source. Not argued -- measured each time:
 
-    | | |
-    |---|---|
-    | `tests/Measure.Tests.ps1` | **18s** -- it measures real source |
-    | `tests/Report.Tests.ps1` | 2.1s |
-    | `tests/Cognitive.Tests.ps1` | 4.6s |
-    | `tests/Policy.Tests.ps1`, `tests/BaselineFile.Tests.ps1` | ~1s each |
+| move | before | after |
+|---|---|---|
+| `Policy.ps1`, 125 mutants, off `Measure.Tests.ps1` | 19 min | 59s |
+| the baseline-file functions, 28 mutants, likewise | -- | ~8 min off the run |
+| `Ast.ps1`, 57 mutants, off **two** suites (#96) | 22.6s each | 2s |
+| **the whole gate** | **28.8 min** | **21.3 min** |
 
-    The gate costs *mutants x suite*, so the dominant term is that one 18-second suite and every
-    file pointing at it -- `Measure-PSComplexity.ps1` alone, not `Ast.ps1`, is the bigger half.
-    Proven by the lever rather than argued: moving `Policy.ps1`'s 125 mutants off it took them from
-    **19 minutes to 59 seconds**, and moving two more functions out took another eight minutes off
-    the whole run.
+The CI leg followed: **24m34s -> 16m19s**.
 
-    So the cheapest real fix is not per-mutant test selection but **a covering suite that does not
-    measure real source**, which is a refactor of `Measure.Tests.ps1` and of what
-    `Measure-PSComplexity.ps1` still contains. Test selection (the sibling's #141) remains the
-    general answer and is still worth having; it is no longer the first thing to try.
+**The obvious version of #96 was measured and refused, and that is the part to keep.** Simply
+dropping `Ast.ps1`'s second suite gives 84% and **50 mutants where there were 57** -- with fewer
+covered lines, `coveredLinesOnly` produces fewer candidates, so the run gets faster partly by
+measuring less. So the acceptance test for any move like this is **two** numbers, the same mutant
+COUNT and the same verdicts. A score on its own cannot tell a clean run from a smaller one, which
+is the failure this project exists to find in other people's code.
 
-    The budget went 20 -> 40 when this first walked through a timeout, and 40 -> 60 when #2 landed.
-    Measured on the runner afterwards: the Linux leg takes **24m34s**. Raising a timeout is not a
-    speed fix -- it stops a slow gate reading as a wedged runner, which holds a required check
-    pending and blocks every merge behind it.
+What is left of the gate cost is one term: **`Measure-PSComplexity.ps1`, 77 mutants against an
+18-second suite**, roughly half the remaining run. Two levers, neither filed yet because both are
+refactors rather than defects:
+
+- move its remaining PURE functions (`Get-PSCxRelativePath`, `Get-PSCxUnitRecord`) to a cheap
+  suite, as Policy and BaselineFile already went;
+- make `tests/Measure.Tests.ps1` itself cheaper -- it writes fixture files per `Describe`, and
+  everything still pointed at it pays for that.
+
+Test selection (the sibling's #141) remains the general answer and is still worth having. It is
+not the first thing to try here, and measurement is why: this repo's suites are already narrow
+enough that selection could only narrow *within* one file.
+
+The job budget went 20 -> 40 when this first walked through a timeout, and 40 -> 60 when #2 landed.
+Raising a timeout is not a speed fix -- it stops a slow gate reading as a wedged runner, which
+holds a required check pending and blocks every merge behind it.
 
   - **#36**, **#37** -- `Get-PSCxUnitTable` rebuilt three times per file, two of them waste; and
     analysis is O(nodes x depth), so a deeply nested file costs orders of magnitude more per byte
