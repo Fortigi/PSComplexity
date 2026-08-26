@@ -59,25 +59,28 @@ at the boundary where the question is asked.** That is why attribution had to pr
 and the scan had to precede the baseline. Anything new that folds -- a file-level aggregate, a
 summary statistic, a trend -- inherits the rule.
 
-## The constraint that is left
+## The constraint is spent
+
+The one ordering arrow this file still carried has been satisfied:
 
 ```
 #2 baseline  --->  #7 diff-scoped. #7 must say which units were in scope AND compare them
-                   against something. Scope exists; the comparison does not.
+                   against something. Scope existed; the comparison did not. Now it does.
 ```
 
-That is the whole of it. #2's four prerequisites -- a portable identity, a metric version, an
-exception concept, and a scan -- have all landed, and #5 added the fifth thing it wanted without
-being asked for it: a published format to persist.
+**Nothing here blocks anything else any more.** Every remaining item is independent, so what to do
+next is a question about value rather than order -- which is the first time that has been true of
+this file, and the reason it is now mostly a record of what was decided rather than a sequence.
 
-Two things follow that are worth stating out loud:
+Two things #2 settled are worth keeping, because #7 inherits both:
 
-- **#2 is the most-wanted item and is now genuinely next.** It has been "not yet" for a long time
-  for good reasons, and none of them are true any more. What is left is its own decisions: what a
-  baseline file looks like, and what a ratchet does when the metric version moves under it.
-- **#2 is the first thing here that PERSISTS a key.** Everything before it could be reshaped in a
-  minor release. After it, a wrong key costs a major version and a migration, so the shape
-  deserves the time the prerequisites bought.
+- **The key is `file` + `unit`, never a line.** A line moves whenever anything above it is edited.
+  A unit name carrying an ordinal (`Get-Thing#2`, how duplicate definitions are told apart) is
+  refused outright: ordinals renumber when a duplicate is inserted above them, so an entry keyed
+  that way silently begins describing a different function. Measured, not assumed.
+- **Persisting a key costs a major version to get wrong**, which is why that decision took the time
+  the prerequisites bought. #7 does not get to re-open it; it compares runs using the identity #2
+  established.
 
 ---
 
