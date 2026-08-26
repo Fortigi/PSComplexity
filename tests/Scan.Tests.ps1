@@ -146,15 +146,18 @@ Describe 'Get-PSCxRelativePath' {
         Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'A.ps1'
     }
 
-    It 'never leaves a platform separator in the result' {
-        # The PLATFORM separator is replaced, not a literal backslash: on Linux a backslash is an
-        # ordinary filename character, so replacing it there corrupts a legal path -- and doing so
-        # is a no-op on the one platform the mutation gate runs, which is how a hard-coded one
-        # survived every mutant while looking tested.
+    It 'separates every level with a forward slash' {
+        # Asserted as the exact string it should be, on BOTH platforms.
+        #
+        # Written as "contains no DirectorySeparatorChar" this passed on Windows and failed on
+        # Linux, where that character IS '/' and the correct answer is full of them. The claim it
+        # was reaching for -- that the code replaces the PLATFORM separator rather than a literal
+        # backslash -- is a no-op on Linux and therefore not observable there at all, which
+        # CLAUDE.md already records as the reason a hard-coded backslash once survived every
+        # mutant while looking tested. An exact expectation says the observable half on both.
         $root = [System.IO.Path]::GetFullPath('/repo')
         $file = Join-Path $root (Join-Path 'a' (Join-Path 'b' 'C.ps1'))
-        Get-PSCxRelativePath -Path $file -Root $root |
-            Should-NotBeLikeString "*$([System.IO.Path]::DirectorySeparatorChar)*"
+        Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'a/b/C.ps1'
     }
 }
 

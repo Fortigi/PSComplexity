@@ -120,6 +120,14 @@ bodies against 2.3s of setup**, so sharing fixtures would have bought two second
 tests each measuring real source, which is what those tests are for. Moving mutants off the suite
 is the lever; making the suite cheaper is not.
 
+**An assertion about a SEPARATOR is a platform assumption.** `Should-NotBeLikeString
+"*$([System.IO.Path]::DirectorySeparatorChar)*"` passed here and failed on the Linux leg, where
+that character IS `/` and the correct answer is full of them. The claim it reached for -- that the
+code replaces the platform separator rather than a literal backslash -- is a **no-op on Linux** and
+not observable there at all, which is the same reason a hard-coded backslash once survived every
+mutant while looking tested. Assert the exact string instead; it says the observable half on both
+platforms and is stronger anyway.
+
 **Splitting a file moves whatever now sits first in it into the header's shadow.** A `<# #>` block
 immediately before `function` IS that function's comment-based help. `Measure-PSComplexity.ps1`
 carried one harmlessly for as long as an internal function sat first; splitting the scan out put a
