@@ -72,8 +72,11 @@ src/Policy.ps1                 which units are excused from the ceilings, and on
                                Pure.
 src/BaselineFile.ps1           the baseline file: read it, refuse it, write it back. The I/O
                                half of the policy, kept apart so the deciding half stays pure.
-src/Measure-PSComplexity.ps1   the scan -- measurement as data -- and the two public
-                               projections over it: Measure-PSComplexity, Test-PSComplexity.
+src/Scan.ps1                   the scan: paths in, measured units out, as data. Owns the
+                               metric version, and is the only file that talks to all three
+                               metric files.
+src/Measure-PSComplexity.ps1   the two public projections over the scan: Measure-PSComplexity
+                               and Test-PSComplexity. Wiring, and nothing else.
 src/Report.ps1                 the two published formats -- our JSON report and SARIF -- and
                                the two functions that touch a file.
 schemas/v1/report.schema.json  the report format. Ships in the package; a consumer validates
@@ -108,8 +111,28 @@ because covering a function is not covering its application and neither gate can
 difference. They are simply not what each mutant pays for.
 
 Before adding a file to `mutate`, run it alone with a scratch config and look at the seconds. The
-whole gate has to fit inside a 40-minute CI job alongside everything else, and it reached 34
-minutes once during this work.
+whole gate has to fit inside its CI job alongside everything else, and it reached 34 minutes once
+during this work.
+
+**Profile before choosing which half to make cheaper.** The obvious reading of an 18-second suite
+is that its fixtures are expensive; measured, `tests/Measure.Tests.ps1` spends **16.7s in test
+bodies against 2.3s of setup**, so sharing fixtures would have bought two seconds. The cost is 134
+tests each measuring real source, which is what those tests are for. Moving mutants off the suite
+is the lever; making the suite cheaper is not.
+
+**An assertion about a SEPARATOR is a platform assumption.** `Should-NotBeLikeString
+"*$([System.IO.Path]::DirectorySeparatorChar)*"` passed here and failed on the Linux leg, where
+that character IS `/` and the correct answer is full of them. The claim it reached for -- that the
+code replaces the platform separator rather than a literal backslash -- is a **no-op on Linux** and
+not observable there at all, which is the same reason a hard-coded backslash once survived every
+mutant while looking tested. Assert the exact string instead; it says the observable half on both
+platforms and is stronger anyway.
+
+**Splitting a file moves whatever now sits first in it into the header's shadow.** A `<# #>` block
+immediately before `function` IS that function's comment-based help. `Measure-PSComplexity.ps1`
+carried one harmlessly for as long as an internal function sat first; splitting the scan out put a
+PUBLIC command there and three help tests failed on the same run. File headers in `src/` are `#`
+line comments for exactly this reason -- check the top of a file after moving anything out of it.
 
 **A `_`-prefixed comment key is exempt only at the TOP level of the config.** Inside the `tests`
 object it is read as a mutate path, and the run dies looking for a file named after your comment.
