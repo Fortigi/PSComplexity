@@ -106,6 +106,16 @@ keys it holds could not distinguish units the tool could.
 
 ### Internal
 
+- **`src/Ast.ps1` has its own covering suite, taking about ten minutes off the self-mutation gate.**
+  It was mapped to two suites and paid for both on each of its 57 mutants -- 39% of the whole gate,
+  for a file that only parses and walks and never touches a disk. `tests/Ast.Tests.ps1` runs in two
+  seconds against those suites' 22, and kills all 57.
+
+  Dropping the second suite instead was measured and refused: it scores 84% **and** shrinks the set
+  to 50 mutants, because `coveredLinesOnly` sees fewer covered lines. The acceptance test for a move
+  like this is the same mutant count *and* the same verdicts -- a score on its own cannot tell a
+  clean run from a smaller one.
+
 - **The policy layer is its own two files, and the reason is measured.** Acceptances and baselines
   share a unit-identity key, so they share `src/Policy.ps1`; reading and writing the baseline file
   is I/O, so it sits in `src/BaselineFile.ps1` and the deciding half stays pure. Both have their
