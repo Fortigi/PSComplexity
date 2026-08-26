@@ -150,9 +150,10 @@ covering suite that does not measure real source. Not argued -- measured each ti
 | `Policy.ps1`, 125 mutants, off `Measure.Tests.ps1` | 19 min | 59s |
 | the baseline-file functions, 28 mutants, likewise | -- | ~8 min off the run |
 | `Ast.ps1`, 57 mutants, off **two** suites (#96) | 22.6s each | 2s |
-| **the whole gate** | **28.8 min** | **21.3 min** |
+| the scan, 37 mutants, out of the public API into `Scan.ps1` | 18s | 3s |
+| **the whole gate** | **28.8 min** | **15.5 min** |
 
-The CI leg followed: **24m34s -> 16m19s**.
+The CI leg followed: **24m34s -> 12m43s**.
 
 **The obvious version of #96 was measured and refused, and that is the part to keep.** Simply
 dropping `Ast.ps1`'s second suite gives 84% and **50 mutants where there were 57** -- with fewer
@@ -161,14 +162,14 @@ measuring less. So the acceptance test for any move like this is **two** numbers
 COUNT and the same verdicts. A score on its own cannot tell a clean run from a smaller one, which
 is the failure this project exists to find in other people's code.
 
-What is left of the gate cost is one term: **`Measure-PSComplexity.ps1`, 77 mutants against an
-18-second suite**, roughly half the remaining run. Two levers, neither filed yet because both are
-refactors rather than defects:
+**Both remaining levers are now spent, and one of them did not exist.** Moving the scan out took
+the last easy 37 mutants off the measuring suite. Making that suite itself cheaper was measured and
+**closed**: of its 19 seconds, **16.7 is in test bodies and 2.3 in setup**, so sharing fixtures
+would have bought two seconds. The cost is 134 tests each measuring real source, which is what they
+are for.
 
-- move its remaining PURE functions (`Get-PSCxRelativePath`, `Get-PSCxUnitRecord`) to a cheap
-  suite, as Policy and BaselineFile already went;
-- make `tests/Measure.Tests.ps1` itself cheaper -- it writes fixture files per `Describe`, and
-  everything still pointed at it pays for that.
+What is left is `Measure-PSComplexity.ps1` at 41 mutants -- the two public commands, which genuinely
+want end-to-end tests. There is no obvious next cut; the remaining time is the gate doing its job.
 
 Test selection (the sibling's #141) remains the general answer and is still worth having. It is
 not the first thing to try here, and measurement is why: this repo's suites are already narrow
