@@ -18,8 +18,7 @@
   "_tests_comment": "A covering suite is re-run once per mutant of the file it covers, so it has to be CHEAP as well as complete. Policy.ps1 maps to its own tests/Policy.Tests.ps1 rather than to Measure.Tests.ps1, which also drives it end to end: against the measuring suite its 125 mutants cost 19 minutes, and against the pure one they cost 59 seconds. The end-to-end proofs did not move; they are simply not what each mutant pays for. NOTE: a _-prefixed key is exempt only at the TOP level -- inside this object it is read as a mutate path and the run dies looking for a file named after the comment.",
   "tests": {
     "src/Ast.ps1": [
-      "tests/Cognitive.Tests.ps1",
-      "tests/Measure.Tests.ps1"
+      "tests/Ast.Tests.ps1"
     ],
     "src/BaselineFile.ps1": [
       "tests/BaselineFile.Tests.ps1"

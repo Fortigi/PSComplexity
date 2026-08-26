@@ -62,7 +62,9 @@ under both. Tracked in **#10**.
 ## Layout
 
 ```
-src/Ast.ps1                    unit discovery, attribution, nesting depth. Shared.
+src/Ast.ps1                    unit discovery, attribution, nesting depth. Shared. Pure: it
+                               parses and walks, and never touches a disk -- which is what lets
+                               tests/Ast.Tests.ps1 cover it in two seconds.
 src/Cyclomatic.ps1             decision-point counting.
 src/Cognitive.ps1              the SonarSource metric (B1 structural, B2 nesting, B3 level).
 src/Policy.ps1                 which units are excused from the ceilings, and on what terms:
@@ -84,9 +86,23 @@ guessed.** Every mutant of a file re-runs that file's covering suite, so the gat
 and that is the right price for what it proves -- but it is the wrong price to pay 100+ times.
 
 That is why `src/Policy.ps1` and `src/BaselineFile.ps1` exist as separate files with their own
-suites rather than sitting in `Measure-PSComplexity.ps1`. Measured, not assumed: Policy's 125
-mutants cost **19 minutes** against the measuring suite and **59 seconds** against a pure one,
-and moving the two baseline-file functions out took another eight minutes off. The end-to-end
+suites rather than sitting in `Measure-PSComplexity.ps1`, and why `src/Ast.ps1` has
+`tests/Ast.Tests.ps1`. Measured, not assumed: Policy's 125 mutants cost **19 minutes** against the
+measuring suite and **59 seconds** against a pure one; moving the two baseline-file functions out
+took another eight minutes off; and Ast's 57 mutants went from **~22s each** -- it was mapped to
+*two* suites and paid for both -- to a suite that runs in 2 seconds.
+
+**The obvious cheaper fix for Ast was tried first and is provably wrong, which is worth knowing
+before anyone proposes it again.** Simply dropping the second suite gives 84% and **50** mutants
+where there were 57: with fewer covered lines, `coveredLinesOnly` produces fewer candidates. A
+smaller set scoring the same is precisely the failure this project exists to find in other people's
+code. So the acceptance test for moving a file to a cheaper suite is **two** numbers, not one --
+the same mutant COUNT and the same verdicts. A score alone cannot tell the two apart.
+
+The eight mutants only the expensive suite had been killing were all in the naming and identity
+functions, which the cheap sibling suite never exercised because it tests scores rather than names.
+That is the general shape: when one suite covers something only incidentally, moving to a cheaper
+one means writing the assertions that were never written. The end-to-end
 proofs did not move -- `Measure.Tests.ps1` still drives all of it through `Test-PSComplexity`,
 because covering a function is not covering its application and neither gate can tell the
 difference. They are simply not what each mutant pays for.
