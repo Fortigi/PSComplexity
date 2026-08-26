@@ -43,7 +43,12 @@ $script:CyclomaticCases = @(
 
 BeforeAll {
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
-    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1', 'Report.ps1') { . (Join-Path $src $f) }
+    # Every src file, discovered rather than listed. A hand-kept list here is a second copy
+    # of the one in PSComplexity.psm1, and this is the copy that goes stale -- a file
+    # missing from it fails with 'term not recognized' in whichever test happens to call
+    # into it, which reads as a broken test rather than an unloaded file. Order does not
+    # matter: every cross-file reference sits in a function body and resolves at call time.
+    foreach ($f in Get-ChildItem $src -Filter *.ps1) { . $f.FullName }
     function script:Get-CyclomaticOf {
         param([string]$Code)
         $file = Join-Path ([System.IO.Path]::GetTempPath()) "cxcyc-$([System.Guid]::NewGuid().ToString('N')).ps1"

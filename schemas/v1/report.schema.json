@@ -72,6 +72,20 @@
         }
       }
     },
+    "baselined": {
+      "type": "array",
+      "description": "Units the baseline excused, each with the score it was held to. A baseline routinely excuses far more units than an acceptance ever will, so a report carrying one and not the other would report a pass over a set it never named. The score, not just the name: 'excused' without a number does not say how much room was left.",
+      "items": {
+        "type": "object",
+        "required": ["file", "unit", "cyclomatic", "cognitive"],
+        "properties": {
+          "file": { "type": "string" },
+          "unit": { "type": "string" },
+          "cyclomatic": { "type": "integer", "minimum": 0 },
+          "cognitive": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
     "summary": {
       "type": "object",
       "required": ["fileCount", "unitCount", "maxCyclomatic", "maxCognitive", "averageCyclomatic", "averageCognitive"],
@@ -157,13 +171,14 @@
         "required": ["thresholds"]
       },
       "then": {
-        "required": ["thresholds", "passed", "violations", "accepted"]
+        "required": ["thresholds", "passed", "violations", "accepted", "baselined"]
       },
       "else": {
         "properties": {
           "passed": false,
           "violations": false,
-          "accepted": false
+          "accepted": false,
+          "baselined": false
         }
       }
     }

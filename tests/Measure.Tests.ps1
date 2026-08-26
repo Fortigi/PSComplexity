@@ -3,7 +3,12 @@
 
 BeforeAll {
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
-    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1', 'Report.ps1') { . (Join-Path $src $f) }
+    # Every src file, discovered rather than listed. A hand-kept list here is a second copy
+    # of the one in PSComplexity.psm1, and this is the copy that goes stale -- a file
+    # missing from it fails with 'term not recognized' in whichever test happens to call
+    # into it, which reads as a broken test rather than an unloaded file. Order does not
+    # matter: every cross-file reference sits in a function body and resolves at call time.
+    foreach ($f in Get-ChildItem $src -Filter *.ps1) { . $f.FullName }
 
     $script:work = Join-Path ([System.IO.Path]::GetTempPath()) "cxmeasure-$([System.Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path (Join-Path $script:work 'nested') -Force | Out-Null
@@ -1177,5 +1182,339 @@ Describe 'a run can be written down' {
             ($ev[0].Exception.Message) | Should-BeLikeString '*parse error*'
         }
         finally { Remove-Item $bad -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+Describe 'a baseline is a ratchet, not a suppression list' {
+    # An acceptance answers "this unit is fine and here is why". A baseline answers a different
+    # question -- "we have forty of these and want the gate anyway" -- and it is the answer that
+    # makes the gate adoptable on a codebase that is already red. The two differ in what they
+    # promise, so they fail in different ways, and the tests below pair each permission with the
+    # case it must NOT permit.
+
+    BeforeAll {
+        $script:blDir = Join-Path ([System.IO.Path]::GetTempPath()) "cxbl-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:blDir -Force | Out-Null
+        # Two units that breach a low ceiling and one that cannot. Two breaching units, because a
+        # single one cannot tell an entry that matched from a file-wide mute; and one that cannot
+        # breach, because "recorded" has to be distinguishable from "nothing was over the line".
+        Set-Content (Join-Path $script:blDir 'hot.ps1') @'
+function Invoke-Hot {
+    param($a, $b, $c)
+    if ($a) { if ($b) { if ($c) { 1 } } }
+}
+function Alpha-Hot {
+    param($a, $b)
+    if ($a) { if ($b) { 1 } }
+}
+function Get-Cool { param($x) $x }
+'@ -Encoding utf8
+        # Duplicate definitions, which is the only way a unit name carries an ordinal.
+        Set-Content (Join-Path $script:blDir 'dupe.ps1') @'
+function Invoke-Twice { param($a) if ($a) { 1 } }
+function Invoke-Twice { param($a, $b) if ($a) { if ($b) { 2 } } }
+'@ -Encoding utf8
+
+        $script:blPath = Join-Path $script:blDir 'hot.ps1'
+        $script:dupePath = Join-Path $script:blDir 'dupe.ps1'
+        $script:blHot = Measure-PSComplexity -Path $script:blPath | Where-Object Unit -eq 'Invoke-Hot'
+        $script:blAlpha = Measure-PSComplexity -Path $script:blPath | Where-Object Unit -eq 'Alpha-Hot'
+        $script:blFile = $script:blHot.File
+
+        # Scores are READ from a real measurement rather than written down here. A hard-coded 4
+        # stops being the answer the moment either metric changes, and the test would then be
+        # asserting against a number this module no longer produces.
+        function script:New-Baseline {
+            param($Entries, [int]$MetricVersion = 1, [int]$SchemaVersion = 1)
+            $p = Join-Path $script:blDir "bl-$([System.Guid]::NewGuid().ToString('N')).json"
+            [pscustomobject]@{
+                schemaVersion = $SchemaVersion
+                metricVersion = $MetricVersion
+                generatedAt   = '2026-01-01T00:00:00Z'
+                units         = @($Entries)
+            } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $p -Encoding utf8
+            return $p
+        }
+        function script:Entry {
+            param([string]$Unit, [int]$Cyclomatic, [int]$Cognitive, [string]$File = $script:blFile)
+            return [pscustomobject]@{ file = $File; unit = $Unit; cyclomatic = $Cyclomatic; cognitive = $Cognitive }
+        }
+    }
+
+    AfterAll { Remove-Item $script:blDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    Context 'what it permits' {
+        It 'lets a recorded unit stay exactly as bad as it already was' {
+            $bl = New-Baseline @((Entry 'Invoke-Hot' $script:blHot.Cyclomatic $script:blHot.Cognitive),
+                (Entry 'Alpha-Hot' $script:blAlpha.Cyclomatic $script:blAlpha.Cognitive))
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -WarningAction SilentlyContinue | Should-BeTrue
+        }
+
+        It 'still fails the same units when no baseline mentions them' {
+            # The kept half. Without it the test above passes just as well against a gate that
+            # stopped checking ceilings at all.
+            $bl = New-Baseline @()
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -WarningAction SilentlyContinue | Should-BeFalse
+        }
+
+        It 'records only the unit named, not every unit in the file' {
+            # Recording Alpha-Hot must not excuse Invoke-Hot. A key compared on file alone passes
+            # the permitting test above and silently mutes the whole file.
+            $bl = New-Baseline @(Entry 'Alpha-Hot' $script:blAlpha.Cyclomatic $script:blAlpha.Cognitive)
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -WarningAction SilentlyContinue | Should-BeFalse
+        }
+
+        It 'fails a unit that got worse than its record' {
+            $bl = New-Baseline @((Entry 'Invoke-Hot' ($script:blHot.Cyclomatic - 1) $script:blHot.Cognitive),
+                (Entry 'Alpha-Hot' $script:blAlpha.Cyclomatic $script:blAlpha.Cognitive))
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -WarningAction SilentlyContinue | Should-BeFalse
+        }
+
+        It 'holds BOTH metrics, so trading one against the other is not staying the same' {
+            # Cyclomatic at the recorded number, cognitive above it. A check written with -or
+            # instead of -and passes this, and a unit that grew nesting while shedding a branch
+            # would ratchet the wrong way.
+            $bl = New-Baseline @((Entry 'Invoke-Hot' $script:blHot.Cyclomatic ($script:blHot.Cognitive - 1)),
+                (Entry 'Alpha-Hot' $script:blAlpha.Cyclomatic $script:blAlpha.Cognitive))
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -WarningAction SilentlyContinue | Should-BeFalse
+        }
+    }
+
+    Context 'when an entry stops describing the run' {
+        It 'throws when an entry names a unit that was not measured' {
+            $bl = New-Baseline @(Entry 'Invoke-Ghost' 9 9)
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*no such unit was measured*ageing quietly*'
+        }
+
+        It 'throws when a recorded unit is now within both ceilings' {
+            # The entry permits nothing the real bar does not already allow, so it is fiction that
+            # would sit in the file forever.
+            $bl = New-Baseline @(Entry 'Invoke-Hot' $script:blHot.Cyclomatic $script:blHot.Cognitive)
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 99 -MaxCognitive 99 -BaselineFile $bl `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*within both ceilings*the real bar covers it*'
+        }
+
+        It 'throws when a recorded unit improved, and says how to fix it' {
+            # The ratchet tightening. Keeping the old number would leave room the code no longer
+            # needs, which is how a baseline stops being one.
+            $bl = New-Baseline @(Entry 'Invoke-Hot' ($script:blHot.Cyclomatic + 3) ($script:blHot.Cognitive + 3))
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*improved to cyclomatic*UpdateBaseline*'
+        }
+
+        It 'throws when a recorded unit improved on cyclomatic ALONE' {
+            # Split from the case above deliberately. Improving both metrics is caught by either
+            # half of the check, so it passes against a version where one half is broken -- and a
+            # mutation that disabled exactly that half did survive the both-metrics test.
+            $bl = New-Baseline @((Entry 'Invoke-Hot' ($script:blHot.Cyclomatic + 3) $script:blHot.Cognitive),
+                (Entry 'Alpha-Hot' $script:blAlpha.Cyclomatic $script:blAlpha.Cognitive))
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*improved to cyclomatic*UpdateBaseline*'
+        }
+
+        It 'throws when a recorded unit improved on cognitive ALONE' {
+            $bl = New-Baseline @((Entry 'Invoke-Hot' $script:blHot.Cyclomatic ($script:blHot.Cognitive + 3)),
+                (Entry 'Alpha-Hot' $script:blAlpha.Cyclomatic $script:blAlpha.Cognitive))
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*improved to cyclomatic*UpdateBaseline*'
+        }
+
+        It 'reports a REGRESSION, not an improvement, when a unit traded one metric for the other' {
+            # Recorded cyclomatic below reality and cognitive above it, so the unit is both worse
+            # and better than its entry. Those two facts do not weigh the same: the regression is
+            # what the gate exists to catch, and an "it improved" message would send somebody to
+            # lower an entry for a unit that just got worse.
+            $bl = New-Baseline @((Entry 'Invoke-Hot' ($script:blHot.Cyclomatic - 1) ($script:blHot.Cognitive + 3)),
+                (Entry 'Alpha-Hot' $script:blAlpha.Cyclomatic $script:blAlpha.Cognitive))
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -WarningAction SilentlyContinue | Should-BeFalse
+        }
+
+        It 'throws when a unit is both accepted and recorded' {
+            $bl = New-Baseline @(Entry 'Invoke-Hot' $script:blHot.Cyclomatic $script:blHot.Cognitive)
+            $acc = @(@{ File = $script:blFile; Unit = 'Invoke-Hot'; Reason = 'a deliberately nested fixture' })
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -Accept $acc -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*both accepted and recorded*'
+        }
+
+        It 'refuses an entry whose unit name carries an ordinal' {
+            # An ordinal renumbers when a duplicate is inserted above it, so the entry would begin
+            # capping a function nobody recorded. Refused rather than approximated.
+            $dupeUnit = Measure-PSComplexity -Path $script:dupePath | Where-Object Unit -like 'Invoke-Twice#*' | Select-Object -First 1
+            $bl = New-Baseline @(Entry $dupeUnit.Unit $dupeUnit.Cyclomatic $dupeUnit.Cognitive $dupeUnit.File)
+            { Test-PSComplexity -Path $script:dupePath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*renumbers when a duplicate*'
+        }
+
+        It 'refuses a baseline naming one unit twice' {
+            # Whichever entry wins decides what the gate permits and the other silently does
+            # nothing, so the file cannot say which one was meant.
+            $e = Entry 'Invoke-Hot' $script:blHot.Cyclomatic $script:blHot.Cognitive
+            $bl = New-Baseline @($e, $e)
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*twice*cannot be read off the file*'
+        }
+    }
+
+    Context 'when the file itself cannot be compared' {
+        It 'refuses a baseline recorded against another metric version' {
+            # Not smaller or larger numbers -- answers to a different question. Comparing across
+            # that would make every entry a guess in whichever direction flattered the run.
+            $bl = New-Baseline @(Entry 'Invoke-Hot' $script:blHot.Cyclomatic $script:blHot.Cognitive) -MetricVersion 99
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*metric version 99*not comparable*'
+        }
+
+        It 'refuses a baseline written by another schema version' {
+            $bl = New-Baseline @() -SchemaVersion 2
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*schemaVersion 2*regenerate it with -UpdateBaseline*'
+        }
+
+        It 'names the path when the baseline is missing' {
+            $missing = Join-Path $script:blDir 'nope.json'
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $missing `
+                    -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage "*nope.json*"
+        }
+
+        It 'refuses an empty baseline file rather than reading it as permitting nothing' {
+            # An empty file parses to $null, and $null read as a document is a baseline with no
+            # entries -- a silent change of verdict where an error belongs.
+            $empty = Join-Path $script:blDir 'empty.json'
+            Set-Content -LiteralPath $empty -Value '' -Encoding utf8
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $empty `
+                    -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*is empty*'
+        }
+
+        It 'refuses an entry that names no unit' {
+            # A half-written entry is the one shape that cannot be judged against anything: with
+            # no unit there is nothing to look up, and treating it as "matches nothing" would make
+            # it a silent no-op sitting in a committed file.
+            $bl = New-Baseline @([pscustomobject]@{ file = $script:blFile; cyclomatic = 9; cognitive = 9 })
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*needs both file and unit*'
+        }
+
+        It 'refuses a file that is valid JSON but holds no document' {
+            # 'null' is valid JSON and parses to $null. Passed on as a document it would read as a
+            # baseline with no entries -- a verdict change dressed as a successful read.
+            $nul = Join-Path $script:blDir 'null.json'
+            Set-Content -LiteralPath $nul -Value 'null' -Encoding utf8
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $nul `
+                    -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*held no document*'
+        }
+
+        It 'refuses a document with no units array' {
+            # Absent and empty are different answers. An absent array is a file somebody started
+            # and did not finish; an empty one is a deliberate "nothing is recorded".
+            $noUnits = Join-Path $script:blDir 'nounits.json'
+            Set-Content -LiteralPath $noUnits -Value '{ "schemaVersion": 1, "metricVersion": 1 }' -Encoding utf8
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $noUnits `
+                    -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*no units array*'
+        }
+
+        It 'refuses a baseline that is not JSON' {
+            $bad = Join-Path $script:blDir 'bad.json'
+            Set-Content -LiteralPath $bad -Value 'this is not json {' -Encoding utf8
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bad `
+                    -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*not valid JSON*'
+        }
+    }
+
+    Context '-UpdateBaseline' {
+        It 'seeds a file that then lets the gate pass' {
+            $bl = Join-Path $script:blDir "seed-$([System.Guid]::NewGuid().ToString('N')).json"
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -UpdateBaseline -WarningAction SilentlyContinue | Should-BeTrue
+            Test-Path -LiteralPath $bl | Should-BeTrue
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -WarningAction SilentlyContinue | Should-BeTrue
+        }
+
+        It 'records the breaching units and leaves the compliant one out' {
+            # Get-Cool is under every ceiling, so an entry for it would permit nothing and would
+            # then fail the run it was written by.
+            $bl = Join-Path $script:blDir "only-$([System.Guid]::NewGuid().ToString('N')).json"
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -UpdateBaseline -WarningAction SilentlyContinue | Out-Null
+            $doc = Get-Content -LiteralPath $bl -Raw | ConvertFrom-Json
+            @($doc.units).Count | Should-Be 2
+            ($doc.units.unit -join ',') | Should-Be 'Alpha-Hot,Invoke-Hot'
+        }
+
+        It 'orders entries so a regenerated file has a readable diff' {
+            # Asserted as a JOINED string, not a collection. Should-BeCollection ignores order and
+            # would pass against the reshuffle this exists to prevent.
+            $bl = Join-Path $script:blDir "order-$([System.Guid]::NewGuid().ToString('N')).json"
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -UpdateBaseline -WarningAction SilentlyContinue | Out-Null
+            $doc = Get-Content -LiteralPath $bl -Raw | ConvertFrom-Json
+            ($doc.units | ForEach-Object { "$($_.file):$($_.unit)" }) -join ' ' |
+                Should-Be "$($script:blFile):Alpha-Hot $($script:blFile):Invoke-Hot"
+        }
+
+        It 'refuses to record a unit worse than the file already does' {
+            # The whole ratchet. Without this refusal, re-running the tool absorbs whatever
+            # regression the gate had just caught.
+            $bl = New-Baseline @((Entry 'Invoke-Hot' ($script:blHot.Cyclomatic - 1) $script:blHot.Cognitive),
+                (Entry 'Alpha-Hot' $script:blAlpha.Cyclomatic $script:blAlpha.Cognitive))
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                    -UpdateBaseline -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage '*worse than recorded*only ever ratchets down*'
+        }
+
+        It 'lowers an entry whose unit improved' {
+            # The paired half of the refusal above: down is allowed, up is not, and a rule that
+            # only ever refused would make the switch useless.
+            $bl = New-Baseline @((Entry 'Invoke-Hot' ($script:blHot.Cyclomatic + 5) ($script:blHot.Cognitive + 5)),
+                (Entry 'Alpha-Hot' ($script:blAlpha.Cyclomatic + 5) ($script:blAlpha.Cognitive + 5)))
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -UpdateBaseline -WarningAction SilentlyContinue | Out-Null
+            $doc = Get-Content -LiteralPath $bl -Raw | ConvertFrom-Json
+            $rewritten = @($doc.units | Where-Object unit -eq 'Invoke-Hot')[0]
+            $rewritten.cyclomatic | Should-Be $script:blHot.Cyclomatic
+            $rewritten.cognitive | Should-Be $script:blHot.Cognitive
+        }
+
+        It 'regenerates wholesale across a metric version change' {
+            # The one case where the ratchet cannot be enforced, because the recorded numbers
+            # answer a different question. Refusing instead would leave no way forward at all.
+            $bl = New-Baseline @(Entry 'Invoke-Hot' 1 1) -MetricVersion 99
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -UpdateBaseline -WarningAction SilentlyContinue | Should-BeTrue
+            $doc = Get-Content -LiteralPath $bl -Raw | ConvertFrom-Json
+            $doc.metricVersion | Should-Be 1
+            @($doc.units | Where-Object unit -eq 'Invoke-Hot')[0].cyclomatic | Should-Be $script:blHot.Cyclomatic
+        }
+
+        It 'needs a path to write to' {
+            { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -UpdateBaseline `
+                    -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*needs -BaselineFile*'
+        }
+
+        It 'writes no report, because the verdict would be one it just manufactured' {
+            $bl = Join-Path $script:blDir "noreport-$([System.Guid]::NewGuid().ToString('N')).json"
+            $rp = Join-Path $script:blDir "noreport-$([System.Guid]::NewGuid().ToString('N')).report.json"
+            Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
+                -UpdateBaseline -ReportPath $rp -WarningAction SilentlyContinue | Out-Null
+            Should-BeFalse -Actual (Test-Path -LiteralPath $rp)
+        }
     }
 }

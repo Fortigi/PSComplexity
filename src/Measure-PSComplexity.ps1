@@ -409,87 +409,6 @@ function Measure-PSComplexity {
     }
 }
 
-function Get-PSCxAcceptanceKey {
-    # The identity an acceptance is written against. Two fields, never one joined string: a
-    # File outside the measured root keeps its full path, and on Windows that starts "C:", so
-    # any single-separator key is ambiguous the first time somebody gates outside their repo.
-    [OutputType([string])]
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)] [AllowEmptyString()] [string]$File,
-        [Parameter(Mandatory)] [AllowEmptyString()] [string]$Unit
-    )
-    return "$File`u{241F}$Unit"
-}
-
-function Get-PSCxAcceptanceFault {
-    # Why ONE acceptance fails to describe this run, as text. Nothing when it holds.
-    #
-    # An acceptance is a CHECKABLE CLAIM and not a mute button. It carries a written argument,
-    # and the run fails when the claim stops being true -- the unit was renamed away, or it came
-    # back under the ceilings and nobody deleted the note. A declaration that silently stops
-    # applying is indistinguishable from one nobody has read in a year, and a gate full of those
-    # is the thing this module exists to find in other people's code.
-    #
-    # One acceptance at a time, over the pipeline, so the four rules sit at the top level of a
-    # process block rather than inside a loop. Written as a foreach over the list they cost
-    # their nesting depth each and the function scored 14 against a ceiling of 15 -- passing,
-    # and one rule away from not passing, in the function most likely to grow another rule.
-    #
-    # There is deliberately NO ambiguity arm. A unit identity is unique within a file, so an
-    # exact File+Unit match is one or none by construction -- and a rule that cannot fire looks
-    # exactly like a rule that passes. If unit identity ever stops being unique, this is the
-    # comment that has to change with it.
-    [OutputType([string])]
-    [CmdletBinding()]
-    param(
-        [Parameter(ValueFromPipeline)] [AllowNull()] $Acceptance,
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unit,
-        [Parameter(Mandatory)] [int]$MaxCyclomatic,
-        [Parameter(Mandatory)] [int]$MaxCognitive
-    )
-    process {
-        $file = [string]$Acceptance.File
-        $name = [string]$Acceptance.Unit
-        $reason = [string]$Acceptance.Reason
-        if (-not $file -or -not $name) {
-            return "an acceptance needs both File and Unit, got File='$file' Unit='$name'"
-        }
-        if (-not $reason.Trim()) {
-            return "$file $name is accepted with no reason -- an acceptance carries the argument for it, or it is a mute button"
-        }
-        $found = @($Unit | Where-Object { $_.File -eq $file -and $_.Unit -eq $name })
-        if ($found.Count -eq 0) {
-            return "$file $name is accepted but no such unit was measured -- it was renamed, moved, or is outside the path being gated"
-        }
-        if ($found[0].Cyclomatic -le $MaxCyclomatic -and $found[0].Cognitive -le $MaxCognitive) {
-            return "$file $name is accepted but is within both ceilings -- delete the acceptance, it is no longer an argument about anything"
-        }
-    }
-}
-
-function Get-PSCxUnacceptedUnit {
-    # The units that breach a ceiling and that nobody has argued for. Separate from the gate
-    # because the gate is a thin predicate and this is the whole of what it decides.
-    [OutputType([pscustomobject])]
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unit,
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Accept,
-        [Parameter(Mandatory)] [int]$MaxCyclomatic,
-        [Parameter(Mandatory)] [int]$MaxCognitive
-    )
-    $accepted = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($a in $Accept) { [void]$accepted.Add((Get-PSCxAcceptanceKey -File ([string]$a.File) -Unit ([string]$a.Unit))) }
-    # Emitted rather than returned as an array, so the declared OutputType describes what a
-    # caller actually receives -- one record at a time. The gate wraps the result in @() and
-    # gets an empty array when nothing breaches, which is the same answer either way.
-    $Unit | Where-Object {
-        ($_.Cyclomatic -gt $MaxCyclomatic -or $_.Cognitive -gt $MaxCognitive) -and
-        -not $accepted.Contains((Get-PSCxAcceptanceKey -File $_.File -Unit $_.Unit))
-    }
-}
-
 function Test-PSComplexity {
     <#
     .SYNOPSIS
@@ -528,9 +447,10 @@ function Test-PSComplexity {
         of its own.
 
         One result per breached ceiling, so a unit over both produces two, under two rule ids
-        (PSCxCyclomatic, PSCxCognitive) that can be suppressed independently. An accepted unit
-        produces no result at all: the gate excused it, and the argument for it lives in the JSON
-        report rather than being repeated as a finding nobody should act on.
+        (PSCxCyclomatic, PSCxCognitive) that can be suppressed independently. An accepted or
+        baselined unit produces no result at all: the gate excused it, and what it excused lives
+        in the JSON report -- under `accepted` with its argument, or under `baselined` with the
+        score it was held to -- rather than being repeated as a finding nobody should act on.
 
         Only the gate writes SARIF. Without ceilings there is no such thing as a finding, so a
         SARIF file from Measure-PSComplexity would be an empty results array claiming a clean
@@ -550,6 +470,42 @@ function Test-PSComplexity {
         File must match the record's File exactly -- relative to the working directory with
         forward slashes, or the full path for a file outside it.
 
+    .PARAMETER BaselineFile
+        A committed JSON file recording what each already-over-the-limit unit scored, so the gate
+        is adoptable on a codebase that is already red. A unit in the baseline may not exceed its
+        recorded score; a unit NOT in it must be under the ceilings, so new and touched code meets
+        the real bar from day one.
+
+        The answer to "we have forty violations" stops being "raise the threshold" -- which gates
+        nothing -- and becomes "record them, then never add a forty-first".
+
+        It is a ratchet rather than a suppression list, so the run THROWS when an entry stops
+        describing it: the unit was renamed away, it came back under both ceilings, it is also in
+        -Accept, or it IMPROVED and the recorded number is now larger than reality. That last one
+        is the ratchet tightening; -UpdateBaseline is the one-command fix.
+
+        An entry is keyed by file and unit, never by line, because a line number moves whenever
+        anything above it is edited. A unit whose name carries an ordinal -- Get-Thing#2, how
+        duplicate definitions in one file are told apart -- is refused outright: the ordinal
+        renumbers when a duplicate is inserted above it, so the entry would silently begin capping
+        a different function.
+
+    .PARAMETER UpdateBaseline
+        Write the file named by -BaselineFile, recording every breaching unaccepted unit at the
+        score it has now, then return without gating.
+
+        It only ever ratchets DOWN. When a unit is worse than the file already records, the write
+        is refused and the units are named -- otherwise re-running the tool would absorb whatever
+        regression the gate had just caught, and the baseline would become a suppression list that
+        updates itself. Fix the regression, or accept the unit with an argument for it.
+
+        The one exception is a baseline recorded against a different metric version, where the old
+        numbers are answers to a different question rather than smaller or larger ones. That file
+        is regenerated wholesale, and the diff is where it gets reviewed.
+
+        No report and no SARIF are written by an update: the verdict they would record is one the
+        call just manufactured.
+
     .OUTPUTS
         [bool]
 
@@ -566,7 +522,9 @@ function Test-PSComplexity {
         [string]$ReportPath,
         [string]$SarifPath,
         # Empty is the normal case, and an empty array must bind rather than be rejected.
-        [AllowEmptyCollection()] [object[]]$Accept = @()
+        [AllowEmptyCollection()] [object[]]$Accept = @(),
+        [string]$BaselineFile,
+        [switch]$UpdateBaseline
     )
     # ValueFromPipeline needs begin/process/end, not a bare body. A bare body IS the `end`
     # block, so it would run once with $Path holding only the LAST item piped in -- and the
@@ -580,6 +538,12 @@ function Test-PSComplexity {
         $collected.AddRange([string[]]$Path)
     }
     end {
+        # Before the scan, because the answer does not depend on it and a measurement run is the
+        # expensive part. A -UpdateBaseline with nowhere to write would otherwise measure the
+        # whole tree and then say it had no path.
+        if ($UpdateBaseline -and -not $BaselineFile) {
+            throw '-UpdateBaseline needs -BaselineFile: there is no default path for a baseline, because a file the gate reads without being told to is one nobody reviews.'
+        }
         $paths = $collected.ToArray()
         # The scan, not the record stream. What was skipped is a fact the measurement already
         # holds; reading it back off the error stream required -ErrorAction SilentlyContinue,
@@ -616,15 +580,33 @@ function Test-PSComplexity {
                 ". An acceptance that no longer applies is a mute button, so it fails here rather than ageing quietly.")
         }
 
+        if ($UpdateBaseline) {
+            Write-PSCxBaselineFile -Path $BaselineFile -Unit $units -Accept $Accept `
+                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
+                -MetricVersion $script:PSCxMetricVersion
+            # No report and no SARIF from an update. The verdict they would record is one this
+            # call just manufactured by recording every breach, and an artefact saying "passed"
+            # about that is the mute button the whole policy layer exists instead of.
+            return $true
+        }
+
+        $baselineMap = Get-PSCxBaselineState -Path $BaselineFile -Unit $units -Accept $Accept `
+            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
+            -MetricVersion $script:PSCxMetricVersion
+
         $violations = @(Get-PSCxUnacceptedUnit -Unit $units -Accept $Accept `
-                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive)
+                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -BaselineMap $baselineMap)
         foreach ($v in $violations) {
             Write-Warning ("{0}:{1} {2} -- cyclomatic {3} (max {4}), cognitive {5} (max {6})" -f `
                     $v.File, $v.Line, $v.Unit, $v.Cyclomatic, $MaxCyclomatic, $v.Cognitive, $MaxCognitive)
         }
+        # Recomputed from the same two inputs the verdict used, rather than collected as a side
+        # effect while deciding. A second pass is cheap; a list built inside the decision drifts
+        # from it the first time either changes.
+        $baselined = @($units | Where-Object { Test-PSCxWithinBaseline -Unit $_ -Map $baselineMap })
         $passed = $violations.Count -eq 0
         Write-PSCxGateArtifact -Scan $scan -Passed $passed -Violation $violations -Accept $Accept `
-            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
+            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -Baselined $baselined `
             -ReportPath $ReportPath -SarifPath $SarifPath
         return $passed
     }

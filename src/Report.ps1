@@ -125,6 +125,19 @@ function Get-PSCxReportDocument {
         $document['accepted'] = @($Gate.Accepted | ForEach-Object {
                 [ordered]@{ file = [string]$_.File; unit = [string]$_.Unit; reason = [string]$_.Reason }
             })
+        # And what the BASELINE excused, by the same argument. A baseline routinely excuses far
+        # more units than an acceptance ever will, so a report that recorded one and not the other
+        # would say "passed" over a set it never named -- the shape of aggregate this project
+        # exists to distrust. Each carries the score it was held to, not just its name, because
+        # "excused" without a number does not say how much room was left.
+        $document['baselined'] = @($Gate.Baselined | ForEach-Object {
+                [ordered]@{
+                    file       = [string]$_.File
+                    unit       = [string]$_.Unit
+                    cyclomatic = [int]$_.Cyclomatic
+                    cognitive  = [int]$_.Cognitive
+                }
+            })
     }
     return $document
 }
@@ -258,6 +271,10 @@ function Write-PSCxGateArtifact {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Accept,
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive,
+        # Optional so a run with no baseline records an empty list rather than nothing: absent and
+        # empty are different answers, and a consumer iterating this should not have to tell them
+        # apart.
+        [AllowEmptyCollection()] [object[]]$Baselined = @(),
         [AllowEmptyString()] [string]$ReportPath,
         [AllowEmptyString()] [string]$SarifPath
     )
@@ -268,6 +285,7 @@ function Write-PSCxGateArtifact {
             Passed        = $Passed
             Violations    = $Violation
             Accepted      = $Accept
+            Baselined     = $Baselined
         }
         Save-PSCxDocument -Path $ReportPath -Document (Get-PSCxReportDocument -Scan $Scan `
                 -ModuleVersion (Get-PSCxModuleVersion) -GeneratedAt (Get-Date) -Gate $gate)
@@ -312,4 +330,38 @@ function Save-PSCxDocument {
     # ErrorAction Stop because Set-Content fails non-terminatingly by default: an unwritable
     # path would otherwise leave the run green and the artefact absent.
     $json | Set-Content -LiteralPath $Path -Encoding utf8 -ErrorAction Stop
+}
+
+function Read-PSCxDocument {
+    # A JSON document off disk, or a throw naming the path and what was wrong with it.
+    #
+    # The counterpart to Save-PSCxDocument, and here for the same reason: this file owns document
+    # I/O so that everything deciding what a document MEANS stays testable without a disk.
+    #
+    # Three distinct failures, named separately, because a baseline path is the one thing a
+    # consumer types by hand and a single "could not read" sends them to check the wrong one. A
+    # missing file is usually a wrong path; a parse failure is usually a hand edit.
+    [OutputType([object])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [ValidateNotNullOrEmpty()] [string]$Path
+    )
+    # LiteralPath throughout: a baseline living under a directory with [ or ] in its name is
+    # ordinary on Windows, and the wildcard form would report it as missing.
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "No such file: $Path"
+    }
+    $text = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+    # An empty file parses to $null rather than failing, and $null would then be read as a
+    # document with no entries -- a baseline permitting nothing, which is a silent verdict
+    # change rather than an error.
+    if (-not $text -or -not $text.Trim()) {
+        throw "$Path is empty. An empty baseline is a document with an empty units array, not an empty file."
+    }
+    try {
+        return $text | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        throw "$Path is not valid JSON: $($_.Exception.Message)"
+    }
 }

@@ -7,9 +7,12 @@
 
 BeforeAll {
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
-    foreach ($f in 'Ast.ps1', 'Cyclomatic.ps1', 'Cognitive.ps1', 'Measure-PSComplexity.ps1', 'Report.ps1') {
-        . (Join-Path $src $f)
-    }
+    # Every src file, discovered rather than listed. A hand-kept list here is a second copy
+    # of the one in PSComplexity.psm1, and this is the copy that goes stale -- a file
+    # missing from it fails with 'term not recognized' in whichever test happens to call
+    # into it, which reads as a broken test rather than an unloaded file. Order does not
+    # matter: every cross-file reference sits in a function body and resolves at call time.
+    foreach ($f in Get-ChildItem $src -Filter *.ps1) { . $f.FullName }
 
     $script:repo = Split-Path -Parent $PSScriptRoot
     $script:schemaText = Get-Content (Join-Path $script:repo 'schemas/v1/report.schema.json') -Raw
@@ -197,7 +200,7 @@ function Get-R2 { param($a, $b, $c) if ($a) { if ($b) { if ($c) { 1 } } } }
     It 'adds exactly the gate fields to a gate report' {
         $d = Get-Content $script:gatePath -Raw | ConvertFrom-Json
         ($d.PSObject.Properties.Name -join ',') |
-            Should-Be 'generatedFrom,schemaVersion,producedBy,generatedAt,mode,metricVersion,scope,skipped,summary,units,thresholds,passed,violations,accepted'
+            Should-Be 'generatedFrom,schemaVersion,producedBy,generatedAt,mode,metricVersion,scope,skipped,summary,units,thresholds,passed,violations,accepted,baselined'
     }
 
     It 'reconciles its summary against the units it carries' {
@@ -247,6 +250,50 @@ function Get-R2 { param($a, $b, $c) if ($a) { if ($b) { if ($c) { 1 } } } }
         $d.accepted[0].reason | Should-Be 'a deliberately nested fixture'
         # And the excused unit is NOT reported as a violation, which is the pair to the above.
         $d.violations.Count | Should-Be 0
+    }
+
+    It 'carries every unit the baseline excused, with the score it was held to' {
+        # Same argument as the acceptance above, and it matters more here: a baseline routinely
+        # excuses far more units than an acceptance ever will, so a report recording one and not
+        # the other would say "passed" over a set it never named. The SCORE is carried, not just
+        # the name -- "excused" without a number does not say how much room was left.
+        $p = Join-Path $script:out 'baselined.json'
+        $src = Join-Path $script:work 'hot.ps1'
+        $hot = Measure-PSComplexity -Path $src | Where-Object Unit -eq 'Invoke-Hot'
+        $bl = Join-Path $script:out 'bl.json'
+        [pscustomobject]@{
+            schemaVersion = 1
+            metricVersion = 1
+            generatedAt   = '2026-01-01T00:00:00Z'
+            units         = @([pscustomobject]@{
+                    file = $hot.File; unit = 'Invoke-Hot'
+                    cyclomatic = $hot.Cyclomatic; cognitive = $hot.Cognitive
+                })
+        } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $bl -Encoding utf8
+
+        Test-PSComplexity -Path $src -MaxCyclomatic 1 -MaxCognitive 1 `
+            -BaselineFile $bl -ReportPath $p -WarningAction SilentlyContinue | Out-Null
+        $d = Get-Content $p -Raw | ConvertFrom-Json
+        $d.passed | Should-BeTrue
+        $d.baselined.Count | Should-Be 1
+        $d.baselined[0].unit | Should-Be 'Invoke-Hot'
+        $d.baselined[0].cyclomatic | Should-Be $hot.Cyclomatic
+        $d.baselined[0].cognitive | Should-Be $hot.Cognitive
+        # The pair: the excused unit is not also reported as a violation.
+        $d.violations.Count | Should-Be 0
+        Should-BeTrue -Actual (Test-AgainstSchema -Json ([System.IO.File]::ReadAllText($p)))
+    }
+
+    It 'records an EMPTY baselined list when no baseline was used' {
+        # Absent and empty are different answers, and the schema requires the key on every gate
+        # report. A consumer iterating it should not have to tell a run with no baseline from a
+        # release that stopped recording one.
+        $p = Join-Path $script:out 'nobaseline.json'
+        Test-PSComplexity -Path (Join-Path $script:work 'hot.ps1') -MaxCyclomatic 99 -MaxCognitive 99 `
+            -ReportPath $p -WarningAction SilentlyContinue | Out-Null
+        $d = Get-Content $p -Raw | ConvertFrom-Json
+        ($d.PSObject.Properties.Name -contains 'baselined') | Should-BeTrue
+        @($d.baselined).Count | Should-Be 0
     }
 
     It 'reports zero rather than nothing when it measured no units' {
@@ -473,5 +520,74 @@ Describe 'writing a document' {
         # one this writer uses.
         { Save-PSCxDocument -Path (Join-Path $script:out 'deep.json') -Document (Get-NestedDocument -Levels 13) } |
             Should-Throw -ExceptionMessage '*truncated*'
+    }
+}
+
+Describe 'Read-PSCxDocument' {
+    # The counterpart to Save-PSCxDocument, and the only place a baseline enters the process. A
+    # path is the one thing a consumer types by hand, so each way it can be wrong is named
+    # separately: a missing file is usually a wrong path, a parse failure usually a hand edit.
+    #
+    # Tested HERE rather than only through Test-PSComplexity -BaselineFile, which also exercises
+    # it. Report.ps1's covering suite is this file, so a test in the other one covers these lines
+    # without being able to kill their mutants -- and three of them survived exactly that way.
+
+    BeforeAll {
+        $script:docDir = Join-Path ([System.IO.Path]::GetTempPath()) "cxdoc-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:docDir -Force | Out-Null
+    }
+    AfterAll { Remove-Item $script:docDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'reads a document back' {
+        # The kept half. Without it every refusal below passes just as well against a function
+        # that refused everything.
+        $p = Join-Path $script:docDir 'good.json'
+        Set-Content -LiteralPath $p -Value '{ "schemaVersion": 1, "units": [] }' -Encoding utf8
+        (Read-PSCxDocument -Path $p).schemaVersion | Should-Be 1
+    }
+
+    It 'names the path when there is no such file' {
+        # Asserted on OUR wording, not just the filename. Drop the Test-Path guard and
+        # Get-Content raises its own 'Cannot find path ...' quoting the same file, so an
+        # assertion on the name alone matches the very failure it exists to detect -- which is
+        # how that mutant survived a round.
+        { Read-PSCxDocument -Path (Join-Path $script:docDir 'absent.json') } |
+            Should-Throw -ExceptionMessage '*No such file*absent.json*'
+    }
+
+    It 'refuses an empty file rather than reading it as an empty document' {
+        # Get-Content -Raw on an empty file yields $null, which ConvertFrom-Json turns into $null
+        # -- and a $null passed on as a document reads as a baseline with no entries. That is a
+        # changed verdict wearing the clothes of a successful read.
+        $p = Join-Path $script:docDir 'empty.json'
+        Set-Content -LiteralPath $p -Value '' -Encoding utf8
+        { Read-PSCxDocument -Path $p } | Should-Throw -ExceptionMessage '*is empty*'
+    }
+
+    It 'refuses a file of nothing but whitespace' {
+        # Not the same case as the one above, and the difference is the -or. For an empty file
+        # both halves of that guard are true, so -and answers identically; for whitespace the
+        # first half is FALSE and only -or still fires. This is the input that tells the two
+        # operators apart, and the mutant survived until it existed.
+        $p = Join-Path $script:docDir 'blank.json'
+        Set-Content -LiteralPath $p -Value "   `n  " -Encoding utf8
+        { Read-PSCxDocument -Path $p } | Should-Throw -ExceptionMessage '*is empty*'
+    }
+
+    It 'refuses a file that is not JSON, and says so' {
+        $p = Join-Path $script:docDir 'bad.json'
+        Set-Content -LiteralPath $p -Value 'not json {' -Encoding utf8
+        { Read-PSCxDocument -Path $p } | Should-Throw -ExceptionMessage '*not valid JSON*'
+    }
+
+    It 'reads a path containing wildcard characters literally' {
+        # LiteralPath throughout. A baseline under a directory named 'my[1]proj' is ordinary on
+        # Windows, and the wildcard form reports it as missing -- the same class of bug as
+        # Get-PSCxSourceFile's, which shipped.
+        $odd = Join-Path $script:docDir 'my[1]proj'
+        New-Item -ItemType Directory -Path $odd -Force | Out-Null
+        $p = Join-Path $odd 'b.json'
+        Set-Content -LiteralPath $p -Value '{ "schemaVersion": 1 }' -Encoding utf8
+        (Read-PSCxDocument -Path $p).schemaVersion | Should-Be 1
     }
 }
