@@ -106,6 +106,15 @@ keys it holds could not distinguish units the tool could.
 
 ### Internal
 
+- **The scan moved to `src/Scan.ps1`, with its own covering suite.** `Measure-PSComplexity.ps1` is
+  now the two public projections and nothing else, which is the seam its own docstring already
+  described. 37 mutants stopped paying for the 18-second measuring suite and now run against one
+  that measures a single fixture.
+
+  Profiling picked the lever: of that suite's 19 seconds, **16.7 lives in test bodies and 2.3 in
+  setup**, so making the fixtures cheaper would have bought two seconds. The cost is 134 tests each
+  measuring real source, which is what they are for.
+
 - **`src/Ast.ps1` has its own covering suite, taking about ten minutes off the self-mutation gate.**
   It was mapped to two suites and paid for both on each of its 57 mutants -- 39% of the whole gate,
   for a file that only parses and walks and never touches a disk. `tests/Ast.Tests.ps1` runs in two

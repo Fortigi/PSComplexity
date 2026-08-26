@@ -31,11 +31,17 @@ BeforeAll {
         'Cognitive.ps1 -> Ast.ps1'
         'Cyclomatic.ps1 -> Ast.ps1'
 
+        # The scan turns paths into measured units, so it is the one thing that talks to all
+        # three metric files. It used to be part of the composition root; splitting it out moved
+        # these three edges down a level, which is the shape the layout always described.
+        'Scan.ps1 -> Ast.ps1'
+        'Scan.ps1 -> Cognitive.ps1'
+        'Scan.ps1 -> Cyclomatic.ps1'
+
         # The composition root. It owns most of the graph on purpose: it is wiring, so it is
-        # allowed to know about everything, and nothing is allowed to know about it.
-        'Measure-PSComplexity.ps1 -> Ast.ps1'
-        'Measure-PSComplexity.ps1 -> Cognitive.ps1'
-        'Measure-PSComplexity.ps1 -> Cyclomatic.ps1'
+        # allowed to know about everything, and nothing is allowed to know about it. It no longer
+        # reaches a metric directly -- it asks the scan.
+        'Measure-PSComplexity.ps1 -> Scan.ps1'
 
         # Serialisation is downstream of measurement and must stay a sink. A report layer that
         # reached back into Ast.ps1 or a metric would be deciding what a number MEANS while
