@@ -8,12 +8,16 @@ This file records **ordering rationale only**. Status lives in the issues. Do no
 progress here: a second status list drifts from the first, which is the exact failure this
 project exists to find in other people's code.
 
-Snapshot 2026-08-25, with **0.4.0 prepared and unreleased**. 6 issues open.
+Snapshot 2026-08-26, with **0.4.0 prepared and unreleased**. 5 issues open.
 
-Since the last snapshot the whole **Guards** section closed. A new dependency edge in `src/` now
-has to be declared, and the suite has to give the same answer in a different order. Removed rather
-than ticked, per the rule below -- what is worth keeping from them is recorded in `CLAUDE.md`,
-where somebody about to add an edge or a test file will actually meet it. The snapshot
+Since the last snapshot the whole **Guards** section closed, and **#2** with it -- the committed
+baseline, which was the first thing here to persist a key. Removed rather than ticked, per the rule
+below; what is worth keeping is in `CLAUDE.md`, where somebody about to add an edge, a test file or
+a mutated source file will actually meet it.
+
+**#2 changed what this file says about cost, and the numbers below are now measured rather than
+estimated.** Building it took the self-mutation gate from 14.5 to 34 minutes, past a job budget of
+40, and finding out why produced a better answer than the one queued here. The snapshot
 reflects what has **merged**; work with a pull request open still holds its ordering entry
 below, because an entry removed on the strength of an open PR is a status claim in disguise.
 
@@ -94,12 +98,17 @@ red suite rather than a quiet re-attribution.
 
 | Order | Issue | What it needs that now exists | What it still decides |
 |---|---|---|---|
-| 1 | **#2** committed baseline | identity, MetricVersion, the scan, a published report format | the file's shape, and what a ratchet does when the metric version moves |
-| 2 | **#7** diff-scoped | `Scope` on the scan, and #2's comparison | how "changed" is determined, and by whom |
+| 1 | **#7** diff-scoped | `Scope` on the scan, #2's comparison, and its key | how "changed" is determined, and by whom |
 
-#5 has landed and took the deferred decision from the scan with it: the report format is a
-contract, `schemas/v1/report.schema.json` ships with the module, and `Get-PSCxScan` itself stays
-internal until something needs it exported.
+**#2 has landed and settled the expensive half of #7's decision.** The key is `file` + `unit`, never
+a line, and a unit whose name carries an ordinal is refused outright -- ordinals renumber when a
+duplicate definition is inserted above them, so an entry keyed that way silently begins describing a
+different function. #7 compares runs; it inherits that identity rather than choosing one.
+
+What #7 still owns is narrower than it looks: how "changed" is determined, and by whom. A diff is
+not a fact this module can compute -- it needs a base to compare against, and the honest options
+(a committed baseline, a git ref, a caller-supplied list) differ in who is responsible when the base
+is wrong.
 
 ---
 
@@ -129,21 +138,41 @@ What is left:
 
 ## Cost
 
-  - **#96** -- `src/Ast.ps1` is mapped to two covering suites and pays for both on every one of
-    its 57 mutants: 29% of the set, an estimated 45% of the run. It is why this repo costs 4.3s
-    per mutant against the sibling's 1.8s. It stopped being theoretical the day the self-mutation
-    step walked through a 20-minute job timeout; the budget is now 40, which is the stopgap and
-    not the answer.
+  - **#96** -- `src/Ast.ps1` is mapped to two covering suites and pays for both on all 57 of its
+    mutants. Still true, and **no longer the largest term**. Measured while building #2:
+
+    | | |
+    |---|---|
+    | `tests/Measure.Tests.ps1` | **18s** -- it measures real source |
+    | `tests/Report.Tests.ps1` | 2.1s |
+    | `tests/Cognitive.Tests.ps1` | 4.6s |
+    | `tests/Policy.Tests.ps1`, `tests/BaselineFile.Tests.ps1` | ~1s each |
+
+    The gate costs *mutants x suite*, so the dominant term is that one 18-second suite and every
+    file pointing at it -- `Measure-PSComplexity.ps1` alone, not `Ast.ps1`, is the bigger half.
+    Proven by the lever rather than argued: moving `Policy.ps1`'s 125 mutants off it took them from
+    **19 minutes to 59 seconds**, and moving two more functions out took another eight minutes off
+    the whole run.
+
+    So the cheapest real fix is not per-mutant test selection but **a covering suite that does not
+    measure real source**, which is a refactor of `Measure.Tests.ps1` and of what
+    `Measure-PSComplexity.ps1` still contains. Test selection (the sibling's #141) remains the
+    general answer and is still worth having; it is no longer the first thing to try.
+
+    The budget went 20 -> 40 when this first walked through a timeout, and 40 -> 60 when #2 landed.
+    Measured on the runner afterwards: the Linux leg takes **24m34s**. Raising a timeout is not a
+    speed fix -- it stops a slow gate reading as a wedged runner, which holds a required check
+    pending and blocks every merge behind it.
 
   - **#36**, **#37** -- `Get-PSCxUnitTable` rebuilt three times per file, two of them waste; and
     analysis is O(nodes x depth), so a deeply nested file costs orders of magnitude more per byte
     than ordinary code. Neither matters at current scale -- measured, 37 KB and 401 units in
     1.65s. Do them when #7 makes per-file cost matter.
 
-The general fix for the first is the sibling's per-mutant test selection, which runs only the
-test files that execute the mutated line. That is verdict-preserving by construction, unlike
-dropping operators or sampling -- both of which shorten a run and leave the score reading 100%
-over less.
+Test selection is verdict-preserving **by construction** -- a test that never runs the mutated line
+cannot tell the mutant from the original -- unlike dropping operators or sampling, which shorten a
+run by making the score mean less. That distinction is why the two cheap-looking levers stay
+refused however long the gate gets.
 
 ## Deliberately not doing
 
