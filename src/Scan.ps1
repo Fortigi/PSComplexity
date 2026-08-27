@@ -24,8 +24,16 @@ function Get-PSCxSourceFile {
     # Take an existing path literally, and as a wildcard only when nothing is there. -Path
     # glob-parses '[', so a real directory named 'my[1]proj' matches nothing and the scan
     # reports a clean zero over code it never opened.
+    #
+    # A path that is neither returns an empty list HERE rather than reaching Get-ChildItem, which
+    # would write a PathNotFound error of its own. That error was worse than useless: it named
+    # this file and this line, it was attributed to Get-ChildItem rather than to the module, and
+    # it did not reach the caller's -ErrorVariable -- so the only thing a consumer saw was zero
+    # units. Get-PSCxPathScan records the empty result as a fact instead, and the gate refuses it.
     $gci = @{ File = $true; Recurse = [bool]$Recurse }
-    if (Test-Path -LiteralPath $Path) { $gci.LiteralPath = $Path } else { $gci.Path = $Path }
+    if (Test-Path -LiteralPath $Path) { $gci.LiteralPath = $Path }
+    elseif (Test-Path -Path $Path) { $gci.Path = $Path }
+    else { return [string[]]@() }
 
     # Filter on the extension rather than with -Include, which a directory ignores unless
     # -Recurse is also present: a flat folder would resolve to zero files and every number
@@ -124,6 +132,55 @@ function Get-PSCxChangedSet {
     Write-Output -InputObject $set -NoEnumerate
 }
 
+function Get-PSCxUnmatchedPath {
+    # One record for a requested path that produced no source file: what was asked for, why it
+    # produced nothing, and whether the path is THERE at all.
+    #
+    # Both facts, because the two consumers need different ones. They are different situations:
+    # a path that is not there is a typo or a wrong working directory, and nothing downstream can
+    # be right; a path that IS there and holds no PowerShell is an ordinary outcome -- a docs
+    # directory, a tree filtered down to nothing -- and a measurement command that treated it as
+    # a fault would fail every legitimately empty run. The gate refuses both, because a ceiling
+    # applied to nothing is not a gate; Measure-PSComplexity reports only the first.
+    #
+    # Its own function rather than a conditional inside the walk: Get-PSCxPathScan already carries
+    # its loop's nesting against the ceiling this module gates itself on.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string]$Path)
+    # Both spellings, matching Get-PSCxSourceFile: a directory named 'my[1]proj' is real and only
+    # -LiteralPath sees it, while a wildcard is real and only -Path resolves it.
+    $exists = (Test-Path -LiteralPath $Path) -or (Test-Path -Path $Path)
+    $reason = 'no such path'
+    if ($exists) { $reason = 'holds no .ps1 or .psm1 file' }
+    return [pscustomobject]@{ Path = $Path; Reason = $reason; Exists = $exists }
+}
+
+function Get-PSCxUnmatchedPathFault {
+    # Why the paths this run was asked for do not describe it, as text. Nothing when they all
+    # matched something.
+    #
+    # The mixed case is the one this exists for, and it is the failure the whole module is about
+    # aimed inward: Get-PSCxEmptyScanFault below fires only when the run measured NOTHING, so a
+    # single valid path masked any number of mistyped ones. Measured, before this existed:
+    # Test-PSComplexity @('./src/Ast.ps1', '/nope') returned $true -- a green gate over a path
+    # that does not exist.
+    #
+    # Separate from the empty-scan fault rather than folded into it, because both are reachable
+    # and they say different things: every path wrong is "you measured nothing", some paths wrong
+    # is "you measured less than you asked for". A run where every path is wrong measures nothing
+    # and is refused by the other rule first.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unmatched)
+    if ($Unmatched.Count -eq 0) { return $null }
+    return ('Refusing to vouch for a run that could not read ' + $Unmatched.Count +
+        ' of the path(s) it was given: ' +
+        (($Unmatched | ForEach-Object { "$($_.Path) -- $($_.Reason)" }) -join '; ') +
+        '. A gate that skips what it cannot find reports a pass over the part it did reach, ' +
+        'which reads as a stronger claim than it is. Fix the path, or stop naming it.')
+}
+
 function Get-PSCxEmptyScanFault {
     # Why a run that measured nothing cannot be believed, or $null when it can.
     #
@@ -170,6 +227,33 @@ function Get-PSCxSubsetNotice {
         'covers only what -ChangedFile named; it is not a statement about the rest of the code.')
 }
 
+function Get-PSCxScanFault {
+    # Why this measurement cannot be gated on at all, as text. Nothing when it can.
+    #
+    # Both scan-level refusals in ONE place, in the order they have to fire, because that order is
+    # a decision rather than a detail. Every path wrong measures nothing and is answered by the
+    # count rule, which carries the -Recurse hint; SOME paths wrong measures plenty and is
+    # answered by the path rule. Reversed, the count rule could never fire -- and a rule that
+    # cannot fire looks exactly like a rule that keeps passing.
+    #
+    # Written here rather than as two consecutive ifs in Test-PSComplexity for the reason that
+    # command keeps every other decision out of itself: it is a thin predicate, and the ordering
+    # is now something a test can hold rather than something a reader has to infer from statement
+    # order.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Scan,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$Path,
+        [Parameter(Mandatory)] [bool]$Filtered,
+        [switch]$Recurse
+    )
+    $empty = Get-PSCxEmptyScanFault -UnitCount @($Scan.Units).Count -Path $Path `
+        -Recurse:$Recurse -Filtered $Filtered
+    if ($empty) { return $empty }
+    return Get-PSCxUnmatchedPathFault -Unmatched @($Scan.Unmatched)
+}
+
 function Assert-PSCxChangedFile {
     # Refuse a changed-file list that is empty, naming why.
     #
@@ -195,6 +279,29 @@ function Assert-PSCxChangedFile {
         'is what a diff command prints when it fails, matches nothing, or runs against a shallow ' +
         'clone whose base ref is missing. If nothing changed, skip the gate rather than asking it ' +
         'to measure an empty set.')
+}
+
+function Write-PSCxUnmatchedPath {
+    # Render each path that produced no source file to the error stream.
+    #
+    # Write-Error, matching how a skipped file is reported, and for the same reason: this is the
+    # module admitting it did not measure something it was asked to, and CI logs routinely swallow
+    # warnings. It is a RENDERING of a fact the scan already holds, never the only place that fact
+    # exists -- which is what lets the gate refuse the same paths as data.
+    #
+    # Its own function because both of Measure-PSComplexity's routes need it and neither owns it.
+    [OutputType([void])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unmatched)
+    foreach ($u in $Unmatched) {
+        # A path that exists and holds no PowerShell is an ordinary empty measurement, not a
+        # fault: this command applies no thresholds and reaches no verdict, so refusing one would
+        # turn measurement into judgement -- and under ErrorActionPreference = Stop it would
+        # terminate a run over a directory the caller knows is empty. The gate refuses it there,
+        # where a ceiling applied to nothing genuinely is a broken gate.
+        if ($u.Exists) { continue }
+        Write-Error "Measured nothing under '$($u.Path)' -- $($u.Reason)"
+    }
 }
 
 function Get-PSCxUnitRecord {
@@ -234,6 +341,23 @@ function Get-PSCxUnitRecord {
     return $record
 }
 
+function Get-PSCxSkipReason {
+    # Why a file produced no units, as text, told apart by what actually went wrong.
+    #
+    # Parser::ParseFile reports an I/O failure through the SAME out-parameter as a syntax error --
+    # a missing file, a directory, a permission denial and a deleted-mid-scan file all arrive as a
+    # ParseError. Calling every one of them a "parse error" sent the reader to inspect syntax that
+    # was perfectly correct, and the gate's own advice compounded it by saying "fix the syntax".
+    #
+    # Discriminated on ErrorId rather than on the message text, which is prose and may be
+    # localised. FileReadError is what the parser raises when it could not read the bytes at all.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $ParseError)
+    if ($ParseError.ErrorId -eq 'FileReadError') { return "could not be read: $($ParseError.Message)" }
+    return "parse error: $($ParseError.Message)"
+}
+
 function Get-PSCxFileScan {
     # One file's measurement AS DATA: the units it produced, or the reason it produced none.
     #
@@ -263,7 +387,7 @@ function Get-PSCxFileScan {
         return [pscustomobject]@{
             File       = $relative
             Units      = @()
-            SkipReason = "parse error: $($errors[0].Message)"
+            SkipReason = Get-PSCxSkipReason -ParseError $errors[0]
         }
     }
 
@@ -271,8 +395,13 @@ function Get-PSCxFileScan {
     # predicate for every node, and it used to run three times against the same AST in a single
     # pass -- once here for the line numbers, and once inside each metric map.
     $lines = Get-PSCxUnitTable -Ast $ast
-    $cyc = Get-PSCxCyclomaticMap -Ast $ast -UnitTable $lines
-    $cog = Get-PSCxCognitiveMap -Ast $ast -UnitTable $lines
+    # Each row set collected ONCE, here, and projected into whatever the run needs. The cognitive
+    # rows are needed twice -- summed into the map, and grouped per unit for -Detailed -- and
+    # collecting them inside each map meant -Detailed walked the tree a second time for rows that
+    # already existed.
+    $cyc = Get-PSCxCyclomaticMap -Row @(Get-PSCxCyclomaticRow -Ast $ast) -UnitTable $lines
+    $cogRows = @(Get-PSCxCognitiveRow -Ast $ast)
+    $cog = Get-PSCxCognitiveMap -Row $cogRows -UnitTable $lines
     # Source order, not hashtable order. .NET enumerates a hashtable by bucket layout, which is
     # neither insertion nor line order and is not required to be stable -- so two runs over one
     # unchanged file could emit the same rows in different sequences. Nothing here noticed,
@@ -290,7 +419,7 @@ function Get-PSCxFileScan {
     # Once per file rather than per unit: the rows are one walk, and asking for them per unit
     # would re-walk the tree for every function in the file.
     $byUnit = @{}
-    if ($Detailed) { $byUnit = Get-PSCxContributionMap -Ast $ast }
+    if ($Detailed) { $byUnit = Get-PSCxContributionMap -Row $cogRows }
     $units = foreach ($k in $ordered) {
         # Two traps stacked here, and the empty list has to survive BOTH.
         #
@@ -329,6 +458,10 @@ function Get-PSCxPathScan {
         # caller happens to report errors -- the gate described it as a file that did not
         # parse, which is the same class of misdiagnosis this scan exists to end.
         [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.HashSet[string]]$Seen,
+        # Paths that resolved to no source file at all. Caller-owned for the same reason -Seen is:
+        # paths arrive one invocation at a time down the pipeline, and a list created here would
+        # forget the previous one -- so the run could not say afterwards what it never read.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.List[object]]$Unmatched,
         # $null means no filter. An EMPTY set would be ambiguous -- "nothing changed" and "no
         # filter was asked for" are different answers -- so the public commands refuse an empty
         # list rather than passing one down.
@@ -338,7 +471,14 @@ function Get-PSCxPathScan {
     )
     $root = (Get-Location).Path
     foreach ($p in $Path) {
-        foreach ($file in (Get-PSCxSourceFile -Path $p -Recurse:$Recurse)) {
+        $files = @(Get-PSCxSourceFile -Path $p -Recurse:$Recurse)
+        # Recorded BEFORE the changed-file filter, because "this path is not there" and "nothing in
+        # this path changed" are different answers and only the first one is a mistake.
+        if ($files.Count -eq 0) {
+            $Unmatched.Add((Get-PSCxUnmatchedPath -Path $p))
+            continue
+        }
+        foreach ($file in $files) {
             # OrdinalIgnoreCase: Windows and macOS resolve the same file under different
             # casing, and a case-sensitive check would let those through as two files.
             if (-not $Seen.Add($file)) { continue }
@@ -385,6 +525,7 @@ function Get-PSCxScan {
     )
     $units = [System.Collections.Generic.List[object]]::new()
     $skipped = [System.Collections.Generic.List[object]]::new()
+    $unmatched = [System.Collections.Generic.List[object]]::new()
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $root = (Get-Location).Path
     # $null when no filter was asked for, which is what tells the walk to read everything. Built
@@ -394,7 +535,7 @@ function Get-PSCxScan {
     if ($PSBoundParameters.ContainsKey('ChangedFile')) {
         $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root $root
     }
-    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -ChangedSet $changedSet -Recurse:$Recurse -Detailed:$Detailed)) {
+    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -Recurse:$Recurse -Detailed:$Detailed)) {
         if ($fileScan.SkipReason) {
             $skipped.Add([pscustomobject]@{ File = $fileScan.File; Reason = $fileScan.SkipReason })
             continue
@@ -410,6 +551,10 @@ function Get-PSCxScan {
     return [pscustomobject]@{
         Units         = @($units)
         Skipped       = @($skipped)
+        # Paths that produced no source file. Beside Skipped rather than folded into it: a file
+        # found and not measured and a path never found at all are answered by different fixes,
+        # and an aggregate that cannot say which it hit is the shape this project distrusts.
+        Unmatched     = @($unmatched)
         Scope         = [pscustomobject]@{
             Path        = @($Path)
             Recurse     = [bool]$Recurse

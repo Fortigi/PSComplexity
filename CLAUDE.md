@@ -55,8 +55,25 @@ reports a plausible near-zero. Measured here both ways on the same suite, the tw
 exactly, because nothing in `tests/` starts a nested run. The setting costs a little speed
 and means a future test that does start one cannot quietly halve the number.
 
-**Pester version split**: CI pins 5.8.0, development happens on 6.1.0. This suite passes
-under both. Tracked in **#10**.
+**Pester version split**: the suite is written for and tested against **6.1.0**, which is what
+`.github/pins.env` sets as `PESTER_VERSION` and what CI and `publish.yml` both run. It uses the
+`Should-Be` assertion family, so it does not run on Pester 5 at all.
+
+That is a statement about this repo's OWN suite, not about what a consumer needs. **PSComplexity
+is usable from Pester >= 5.0.0**: it is an ordinary module with two commands, and a consumer
+gating on it does so from inside their own Pester run, which is not this one.
+`tools/Test-PSCxPesterCompatibility.ps1` proves that separately against
+`PESTER_COMPAT_VERSION` (5.7.1), which is why a second Pester is installed in CI -- it separates
+"this Pester cannot run OUR suite" from "this module is broken for a Pester 5 consumer".
+
+**The supported range is wider than the tested point**, and that is worth saying plainly rather
+than leaving for someone to discover: 5.0.0 is the floor we support, 5.7.1 is the only Pester 5
+anything actually runs on. Same shape as the PowerShell floor above -- a declared minimum nothing
+executes against. If a consumer reports a Pester 5.0-5.6 problem, that gap is where to look
+first.
+
+This entry read "CI pins 5.8.0, development happens on 6.1.0" -- the two the wrong way round,
+and a version that is pinned nowhere. Tracked in **#10**.
 
 ---
 
@@ -187,6 +204,36 @@ traversal that invokes a PowerShell predicate for every node, and it used to run
 against the same AST in one pass -- once for the line numbers and once inside each metric map. The
 maps now take it as a **mandatory** parameter: an optional one with a fallback would be a branch
 whose two arms produce identical output, which no test could distinguish from its own absence.
+
+**That same pass also buckets every node by TYPE, and the metrics read the buckets.** Each
+collector used to call `Ast.FindAll(scriptblock, $true)`, which walks every node and invokes a
+PowerShell predicate for each one -- and the per-type loops did it once per type name, so
+`Get-PSCxCogBlockRow` alone walked the whole tree eight times. Measured on a 1,159-node file:
+**34 full traversals per file, 52 with `-Detailed`**, about 39,400 predicate invocations. The
+index pass already visited every node and already knew each one's type; it simply did not write
+it down. Recording it costs one dictionary write per node and takes the count to **2**.
+
+Three things about it are easy to undo and were each paid for:
+
+- **Exact-type and assignable lookups are spelled separately.** `Get-PSCxNodeByTypeName` answers
+  `GetType().Name -eq`; `Get-PSCxNodeByKind` answers `-is`. They agree today for every type in the
+  vocabulary -- the only Ast subclass, `BaseCtorInvokeMemberExpressionAst`, is not reachable
+  through `FindAll` in PowerShell 7.6, which the suite pins -- and they stop agreeing the day that
+  changes. One spelling for both would pick a winner nobody decided on.
+- **`Initialize-` rebuilds; `Confirm-` is the idempotent entry point.** The bucket readers ask on
+  every query and need the guard; `Get-PSCxUnitBoundary` and `Get-PSCxNesting` ask only on a miss
+  and need the rebuild, because their memo tests plant a value and prove a rebuild would overwrite
+  it. Guarding the rebuild itself turned that into an early return and **resurrected two mutants
+  that used to die**.
+- **The type-keyed tables are CLEARED when a second tree is indexed.** Boundary, nesting and name
+  are keyed by node reference, so two trees can share them harmlessly. A bucket keyed by type
+  cannot: appended to rather than replaced, it hands back the previous file's nodes. The suite
+  caught exactly that -- a fixture reporting an `if` from the file before it.
+
+The union path sorts on the recorded walk position rather than on an extent offset, because a node
+and the node it CONTAINS can start at the same offset and pre-order puts the container first. There
+is no single-bucket shortcut: a PowerShell function unrolls a returned list into a fresh array
+anyway, so the shortcut was a branch nothing could observe.
 
 **A node's unit and nesting depth come from ONE pre-order pass, not from walking up.** Both are
 defined against a node's parent -- `boundary(n)` is the parent's boundary unless the parent is a
@@ -389,6 +436,50 @@ and expensive to rebuild, and because each one has already earned its keep.
   none by construction, and a rule that cannot fire looks exactly like a rule that passes. If
   unit identity ever stops being unique, that is the moment to add one.
 
+- **A gate must refuse a path it could not read, not just a run that measured nothing** (#15).
+  These are two rules and both are reachable, which is why they are sequenced in one place --
+  `Get-PSCxScanFault`. Every path wrong measures nothing and is answered by the COUNT rule, which
+  carries the `-Recurse` hint; SOME paths wrong measures plenty and is answered by the PATH rule.
+  Reversed, the count rule could never fire, and a rule that cannot fire looks exactly like a rule
+  that keeps passing.
+
+  The second one closed a real hole, and it was this project's own failure aimed inward:
+  `Test-PSComplexity @('./src/Ast.ps1', '/nope')` returned **`$true`**. A unit count cannot see a
+  mistyped path standing next to a good one, and the underlying `Get-ChildItem` error was
+  attributed to `Get-ChildItem`, named a line inside `src/Scan.ps1`, and never reached the
+  caller's `-ErrorVariable` -- so all a consumer saw was a green gate.
+
+  `Get-PSCxSourceFile` now returns empty for a path that is neither a literal nor a wildcard match
+  rather than letting `Get-ChildItem` raise, and the walk records the fact. **The two reasons are
+  kept apart because the two consumers differ**: a path that is not there is a mistake and
+  `Measure-PSComplexity` reports it; a path that IS there and holds no PowerShell is an ordinary
+  empty outcome, and a measurement command that refused one would fail every legitimately empty
+  run -- terminally, under `ErrorActionPreference = Stop`, which is what `Measure-PSCxCoverage.ps1`
+  sets. The gate refuses both, because a ceiling applied to nothing is not a gate.
+
+- **An I/O failure is not a parse error, and `ParseFile` will tell you which it was.**
+  `Parser::ParseFile` reports a missing file, a directory, a permission denial and a file deleted
+  mid-scan through the SAME `[ref]$errors` out-parameter as a syntax error -- it does not throw, so
+  no `try` is needed and none was added. What it does carry is `ErrorId`, and `FileReadError`
+  separates the two cleanly. Discriminate on that, never on the message text, which is prose and
+  may be localised.
+
+  Calling every skip a "parse error" sent the reader to inspect syntax that was perfectly correct,
+  and the gate's own advice compounded it -- *"Fix the syntax"* for a file that was merely gone. It
+  now says *"could not measure"* and *"Fix the fault named"*, and each skip says which it was. This
+  is the same misdiagnosis the scan was built to end, one layer further down.
+
+- **The two public commands take a path by VALUE and by PROPERTY NAME, with `FullName` aliased.**
+  `Get-ChildItem | Measure-PSComplexity` appeared to work all along, but bound by coercion -- a
+  `FileInfo` has no `Path` property, so it reached the parameter through `ToString()`. Anything
+  carrying its path as a property, which is the ordinary shape for an object a caller builds,
+  selects or filters, bound to nothing and measured **nothing, silently**.
+
+  `PSPath` is deliberately NOT aliased. It is provider-qualified
+  (`Microsoft.PowerShell.Core\FileSystem::/x`), and `[System.IO.Path]::GetFullPath` in
+  `Get-PSCxRelativePath` would turn that into a path no other run could match against -- which is
+  the identity bug 0.4.0 existed to fix, reintroduced through a different door.
+
 - **The scan is the measurement; the published output is a projection of it.** `Get-PSCxScan`
   returns what was asked for, which units were found, and which files were skipped and why.
   `Measure-PSComplexity` renders the units to the pipeline and each skip to the error stream;
@@ -427,21 +518,44 @@ and expensive to rebuild, and because each one has already earned its keep.
   landed in `Measure.Tests.ps1` and left a mutant alive. Check the mapping before choosing
   where a test goes.
 
+- **The metric maps take ROWS, not an Ast.** "The map is a projection of the rows" is then
+  structural rather than a claim about a private local, and it is what lets one row set feed two
+  projections: `-Detailed` used to collect the cognitive rows a second time for the contributions,
+  which was eighteen more traversals of a tree that had just produced them. `Get-PSCxFileScan`
+  collects each row set once and hands it on.
+
 - **`Test-PSComplexity` is a thin predicate over `Measure-PSComplexity`, and should stay one.**
   It duplicates no measurement and re-parses nothing. The temptation is to make it return
   violation objects instead of a bool; resist it. Nothing in the backlog routes through it --
   the queued features all build over `Measure-PSComplexity`'s records. What is missing is a
   scan noun, not a richer verdict.
 
+- **The construct vocabulary is closed against the parser, in both directions** (#32, #18).
+  `tests/Vocabulary.Tests.ps1` asserts that every Ast type the parser can emit is either scored or
+  excluded with a written reason, so PowerShell gaining syntax turns the suite red rather than
+  quietly lowering everyone's scores. The direction is what makes it matter: an unrecognised
+  construct can only LOWER a score, so without it the gate passes most easily on the code it
+  understands least.
+
+  This was listed as a gap here long after it was closed, with the measurement that motivated it
+  -- "5 of 7 cyclomatic types and 4 of 8 cognitive types can be deleted with the suite still
+  green". Re-measured: **15 of 15** deletions are now caught, 1 to 9 failing tests each. Delete a
+  type from a collector list and run the mapped suite; that is the whole check, and it takes a
+  minute.
+
 - **`Ast.ps1` is a layer, not a shared-helpers bucket.** Every function in it answers one
   question: what the parent chain looks like relative to a unit boundary. That is why
   `Get-PSCxNesting` belongs there even though only `Cognitive.ps1` calls it -- placement
   follows what a function consults, not who calls it.
 
-- **Nothing in `src/` swallows an error.** There is no `try`, and no
-  `-ErrorAction SilentlyContinue`. Keep it that way: the failure this project exists to catch
-  is a number that was never measured being reported as a number that was, and a swallowed
-  error is how that happens.
+- **Nothing in `src/` swallows an error.** There is no `-ErrorAction SilentlyContinue`, and the
+  single `try` -- in `Read-PSCxDocument` -- re-throws with the path attached rather than
+  continuing. Keep it that way: the failure this project exists to catch is a number that was
+  never measured being reported as a number that was, and a swallowed error is how that happens.
+
+  This entry used to say "there is no `try`", which was false and in a way that mattered: read as
+  a ban on the keyword it argues against catching-and-rethrowing, which is the one shape that
+  makes an error MORE specific. The rule is about swallowing, not about syntax.
 
 - **`.GetNewClosure()` on a predicate that reads a `$script:` variable breaks it silently.**
   A closure built inside a function loses module scope and the variable comes back empty --
@@ -505,11 +619,6 @@ list above in the PR that closes it.
   `Unit` + `Line` is unique and moves whenever anything above it is edited; `File` is absolute
   and platform-separated while CI runs two OSes. Any feature that persists or compares records
   needs an identity with neither property.
-
-- **The construct vocabulary must be pinned from both directions** (#32, #18). Nothing notices
-  when PowerShell gains syntax the metric cannot see, and 5 of 7 cyclomatic types and 4 of 8
-  cognitive types can be **deleted** with the suite still green. An unrecognised construct can
-  only lower a score, so the gate passes most easily on the code it understands least.
 
 - **Every gate is a committed script, not a snippet in a document** (#27). Coverage is claimed
   at 100% in this file and measured by nobody -- the recipe lives in prose, so measuring by

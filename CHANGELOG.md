@@ -37,6 +37,69 @@ from it means nothing at all.
   `tests/Ast.Tests.ps1` keeps two structurally identical trees apart, which is what fails if `Ast`
   ever gains value equality.
 
+### The gate no longer passes over a path it could not read
+
+`Test-PSComplexity @('./src', '/typo')` returned **`$true`**. The empty-scan guard counts UNITS,
+so one valid path masked any number of missing ones, and the underlying `Get-ChildItem` error was
+attributed to `Get-ChildItem`, named a line inside `src/Scan.ps1`, and never reached the caller's
+`-ErrorVariable`. All a consumer saw was a green gate. This is the failure the module exists to
+find in other people's code, and it was in the module.
+
+The scan now records every requested path that produced no source file, with the reason and
+whether the path exists at all, and both scan-level refusals are sequenced in one place:
+a run that measured nothing is answered by the count rule (which keeps the `-Recurse` hint), and a
+run that measured something while missing a path is answered by the new path rule.
+
+`Measure-PSComplexity` reports a path that is **not there** on the error stream. A path that IS
+there and simply holds no PowerShell is an ordinary empty measurement and is not an error -- that
+command applies no thresholds and reaches no verdict. The gate refuses both, because a ceiling
+applied to nothing is not a gate. The JSON report gains an `unmatched` array beside `skipped`; it
+is not `required` in the schema, so a v1 report written before this field existed is still valid
+v1.
+
+### An unreadable file is no longer called a parse error
+
+`Parser::ParseFile` reports a missing file, a directory, a permission denial and a file deleted
+mid-scan through the same out-parameter as a syntax error. Every one of them was labelled
+`parse error:`, and the gate then advised *"Fix the syntax"* for a file that was merely gone.
+Skips are now discriminated on `ErrorId` -- never on message text, which is prose and may be
+localised -- and read `could not be read:` or `parse error:`. The gate says *"could not measure"*
+and *"Fix the fault named"*.
+
+### Paths bind by property name, not only by value
+
+`Get-ChildItem | Measure-PSComplexity` appeared to work but bound by coercion: a `FileInfo` has no
+`Path` property, so it reached the parameter through `ToString()`. Anything carrying its path as a
+property -- the ordinary shape for an object a caller builds, selects or filters -- measured
+**nothing, silently**. Both commands now declare `ValueFromPipelineByPropertyName` with `FullName`
+aliased onto `-Path`. `PSPath` is deliberately not aliased: it is provider-qualified, and
+normalising one would reintroduce the identity bug 0.4.0 fixed.
+
+### Measurement is 2.6x faster, with byte-identical output
+
+Each metric collector called `Ast.FindAll(scriptblock, $true)`, which walks every node and invokes
+a PowerShell predicate for each -- **34 full traversals per file, 52 with `-Detailed`**. The
+pre-order pass that already computes each node's unit and nesting depth now records its type and
+walk position too, and the collectors read buckets: **2 traversals**, about 94% fewer predicate
+invocations. `-Detailed` no longer collects the cognitive rows twice; the maps take rows rather
+than an Ast, so one row set feeds both the sum and the contributions. Unit names are memoised on
+the boundary node, which on a 200-function file turned 4,200 rebuilds into 200.
+
+Interleaved A/B over three pairs against 0.5.0, same corpus: **1.73s -> 0.70s** CPU and
+**1.35s -> 0.59s** wall, and with `-Detailed` **1.95s -> 0.69s** CPU. `-Detailed` now costs
+essentially nothing over a plain run, where it used to add about 12%. Output is byte-identical
+over 384 unit records including the `-Detailed` contributions, and no score moves --
+`metricVersion` stays **1**.
+
+### Documentation
+
+`Test-PSComplexity` gained the `.DESCRIPTION` it never had, both commands gained `.INPUTS`,
+`.LINK` and further examples, and three claims in `CLAUDE.md` that were no longer true are
+corrected: the Pester versions were recorded the wrong way round (the suite is tested against
+**6.1.0**; consumers can gate with **Pester >= 5.0.0**), `src/` does contain one `try` and the rule
+was always about swallowing rather than syntax, and the construct-vocabulary gap was listed as open
+long after it closed -- re-measured, 15 of 15 type deletions are caught.
+
 ## [0.4.0] - 2026-08-23
 
 ### For consumers

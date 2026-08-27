@@ -57,6 +57,15 @@ function Measure-PSComplexity {
         A unit with no increments gets an empty list, not a missing property. Without the
         switch the record is exactly as documented below.
 
+    .INPUTS
+        [string[]] -- one or more file or directory paths, by value or by property name.
+
+        A path may be piped as a string, or taken from a Path or FullName property, so
+        `Get-ChildItem ./src -Filter *.ps1 | Measure-PSComplexity` and
+        `$paths | Measure-PSComplexity` both work. Script blocks and AST objects are NOT
+        accepted: this command measures files on disk, and anything else is reported as a path
+        that matched nothing.
+
     .OUTPUTS
         [pscustomobject] with File, Unit, Line, Cyclomatic, Cognitive, MetricVersion -- one
         per unit, plus Contributions when -Detailed is given.
@@ -88,11 +97,36 @@ function Measure-PSComplexity {
     .EXAMPLE
         # Fail a build if anything is too complex:
         if (-not (Test-PSComplexity ./src -Recurse)) { exit 1 }
+
+    .EXAMPLE
+        # Measure only what a pull request touched, and keep the machine-readable record:
+        $changed = git diff --name-only origin/main...HEAD
+        Measure-PSComplexity ./src -Recurse -ChangedFile $changed -ReportPath ./reports/complexity.json
+
+    .LINK
+        https://github.com/Fortigi/PSComplexity
+
+    .LINK
+        Test-PSComplexity
     #>
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory, ValueFromPipeline, Position = 0)] [ValidateNotNullOrEmpty()] [string[]]$Path,
+        # ValueFromPipelineByPropertyName as well as ByValue, with FullName aliased onto it.
+        #
+        # `Get-ChildItem | Measure-PSComplexity` already appeared to work, but only by coercion: a
+        # FileInfo has no Path property, so it bound ByValue through ToString(). Anything carrying
+        # its path as a PROPERTY -- the ordinary shape for an object a caller builds, selects or
+        # filters -- bound to nothing and measured NOTHING, silently. This makes the working case
+        # work by contract and the failing case work at all.
+        #
+        # FullName only, deliberately, and NOT PSPath: PSPath is provider-qualified
+        # (Microsoft.PowerShell.Core\FileSystem::/x), which [System.IO.Path]::GetFullPath in
+        # Get-PSCxRelativePath would turn into a path no other run could match against.
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        [Alias('FullName')]
+        [string[]]$Path,
         [switch]$Recurse,
         [string]$ReportPath,
         # Files a caller says changed, restricting the run to units in them. Omit it for a
@@ -110,6 +144,9 @@ function Measure-PSComplexity {
         # counts. In `begin` rather than `process` so it also spans pipeline input, where
         # each item arrives as its own invocation of the block below.
         $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        # Paths that produced no source file, collected across the whole run for the same reason
+        # $seen is: each piped path arrives as its own invocation of the process block.
+        $unmatched = [System.Collections.Generic.List[object]]::new()
         # Always collected, unguarded, because these are strings the caller already holds: the
         # cost is nil, and a guard here would be a branch nothing could observe. The report has
         # to say what the WHOLE run was asked for, and paths arrive one invocation at a time.
@@ -132,7 +169,7 @@ function Measure-PSComplexity {
         # Accumulating per file here would need three guards that only save memory -- and a
         # branch that changes no output cannot be told from its own absence by any test.
         if ($ReportPath) { return }
-        foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -ChangedSet $changedSet -Recurse:$Recurse -Detailed:$Detailed)) {
+        foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -Recurse:$Recurse -Detailed:$Detailed)) {
             # The projection: units to the output stream, a skip to the error stream.
             #
             # Write-Error rather than a warning: CI logs routinely swallow warnings, and this
@@ -147,7 +184,13 @@ function Measure-PSComplexity {
         }
     }
     end {
-        if (-not $ReportPath) { return }
+        if (-not $ReportPath) {
+            # The streaming route's own projection of the discovery faults. Written here rather
+            # than in `process` because a path is only known to have matched nothing once its
+            # invocation is done, and because this command reports a fact per path, not per item.
+            Write-PSCxUnmatchedPath -Unmatched $unmatched
+            return
+        }
         # One scan over everything the run was asked for, walking each file once exactly as the
         # streaming path does. What it gives up is emitting as it goes, which is the price of a
         # report that has to describe the whole run at once.
@@ -163,6 +206,7 @@ function Measure-PSComplexity {
         foreach ($skip in $scan.Skipped) {
             Write-Error "Skipped '$($skip.File)' -- $($skip.Reason)"
         }
+        Write-PSCxUnmatchedPath -Unmatched $scan.Unmatched
         $scan.Units
         Save-PSCxDocument -Path $ReportPath -Document (Get-PSCxReportDocument -Scan $scan `
                 -ModuleVersion (Get-PSCxModuleVersion) -GeneratedAt (Get-Date))
@@ -174,6 +218,33 @@ function Test-PSComplexity {
     .SYNOPSIS
         Return $true if every unit is at or under the cyclomatic and cognitive ceilings;
         otherwise $false, writing a warning per offending unit. Intended as a CI gate.
+
+    .DESCRIPTION
+        Measures every unit under Path -- each function and filter, each class method,
+        constructor and initialised property, plus one <script-body> per file -- and compares
+        both scores against the ceilings. Returns $true when every unit is within them, and
+        $false after writing one warning per unit that is not.
+
+        The verdict is about the whole selection, so every path is collected before any of them
+        is judged; piping paths in is safe.
+
+        It REFUSES rather than answering, and the refusals are the point: a gate that quietly
+        measures less than it was asked to is worse than no gate, because a pass reads as a
+        stronger claim than it is. The run throws -- rather than returning $false -- when
+
+          * a path matched no PowerShell file, even if other paths did;
+          * nothing at all was measured;
+          * a file could not be read or did not parse;
+          * an acceptance or a baseline entry no longer describes the run.
+
+        The last of those is a fault in the policy rather than a complaint about the code, so
+        reporting it as a failing gate would send somebody to refactor a unit that is fine.
+
+        Two mechanisms let an already-red codebase adopt the gate without weakening it.
+        -Accept excuses a named unit outright and carries the written argument for it;
+        -BaselineFile caps each already-breaching unit at what it already scored, so old code
+        cannot get worse and new code meets the real bar. Neither is a suppression list: both
+        fail the build when they stop describing the run.
 
     .PARAMETER Path
         One or more files or directories to check.
@@ -266,16 +337,43 @@ function Test-PSComplexity {
         No report and no SARIF are written by an update: the verdict they would record is one the
         call just manufactured.
 
+    .INPUTS
+        [string[]] -- one or more file or directory paths, by value or by property name, the
+        same shapes Measure-PSComplexity accepts. Every piped path is collected before the
+        verdict is reached, because the verdict is about the whole selection.
+
     .OUTPUTS
         [bool]
 
     .EXAMPLE
         if (-not (Test-PSComplexity ./src -Recurse)) { throw 'Complexity gate failed' }
+
+    .EXAMPLE
+        # Adopt the gate on a codebase that is already over the line, then hold the ratchet:
+        Test-PSComplexity ./src -Recurse -BaselineFile ./complexity-baseline.json -UpdateBaseline
+        Test-PSComplexity ./src -Recurse -BaselineFile ./complexity-baseline.json
+
+    .EXAMPLE
+        # Gate a pull request on what it changed, and render findings inline:
+        $changed = git diff --name-only origin/main...HEAD
+        Test-PSComplexity ./src -Recurse -ChangedFile $changed -SarifPath ./reports/complexity.sarif
+
+    .LINK
+        https://github.com/Fortigi/PSComplexity
+
+    .LINK
+        Measure-PSComplexity
     #>
     [OutputType([bool])]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory, ValueFromPipeline, Position = 0)] [ValidateNotNullOrEmpty()] [string[]]$Path,
+        # Bound exactly as Measure-PSComplexity's is, and for the reason recorded there. The gate
+        # and the measurement must accept the same input, or a pipeline that measures cleanly
+        # fails to gate.
+        [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        [Alias('FullName')]
+        [string[]]$Path,
         [int]$MaxCyclomatic = 15,
         [int]$MaxCognitive = 15,
         [switch]$Recurse,
@@ -324,9 +422,13 @@ function Test-PSComplexity {
         # is a file it cannot vouch for, and "no unit exceeded a ceiling" is trivially true of
         # a file that produced no units -- the same shape as passing over an empty selection.
         if ($scan.Skipped.Count -gt 0) {
-            throw ("Refusing to vouch for $($scan.Skipped.Count) file(s) that did not parse: " +
+            # "could not measure", not "did not parse", and the advice no longer names syntax. A
+            # file that was deleted mid-scan or cannot be read arrives here too, and telling
+            # somebody to fix the syntax of a file that is merely gone is the same misdiagnosis
+            # this command's own scan was built to end. Each reason says which it was.
+            throw ("Refusing to vouch for $($scan.Skipped.Count) file(s) it could not measure: " +
                 (($scan.Skipped | ForEach-Object { "$($_.File) -- $($_.Reason)" }) -join '; ') +
-                ". Fix the syntax, or exclude the file from the path you gate on.")
+                ". Fix the fault named, or exclude the file from the path you gate on.")
         }
         $units = $scan.Units
 
@@ -336,10 +438,12 @@ function Test-PSComplexity {
         if ($notice) { Write-Warning $notice }
 
         # The decision lives in Scan.ps1 beside the scan it judges: it is a rule about what a
-        # measurement is worth, and this command is meant to stay a thin predicate.
-        $emptyFault = Get-PSCxEmptyScanFault -UnitCount $units.Count -Path $paths `
+        # measurement is worth, and this command is meant to stay a thin predicate. Both
+        # scan-level refusals are sequenced there, because which one fires first is itself a
+        # decision -- see Get-PSCxScanFault.
+        $scanFault = Get-PSCxScanFault -Scan $scan -Path $paths `
             -Recurse:$Recurse -Filtered $PSBoundParameters.ContainsKey('ChangedFile')
-        if ($emptyFault) { throw $emptyFault }
+        if ($scanFault) { throw $scanFault }
 
         # Checked BEFORE the verdict, and thrown rather than returned as $false. A stale
         # acceptance is a fault in the policy, not a complaint about the code -- reporting it

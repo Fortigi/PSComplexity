@@ -118,6 +118,12 @@ function Get-PSCxReportDocument {
         # Beside the summary, never instead of it: an aggregate that cannot say what it excluded
         # is the failure this project exists to find in other people's code.
         skipped       = @($Scan.Skipped | ForEach-Object { [ordered]@{ file = $_.File; reason = $_.Reason } })
+        # What was asked for and never found, by the same argument as skipped: a report that
+        # cannot say a path was missing describes a subset while reading as a whole measurement.
+        # Always written, even empty, so a consumer need not tell absent from empty.
+        unmatched     = @($Scan.Unmatched | ForEach-Object {
+                [ordered]@{ path = [string]$_.Path; reason = [string]$_.Reason; exists = [bool]$_.Exists }
+            })
         summary       = Get-PSCxReportSummary -Unit @($Scan.Units)
         units         = @($Scan.Units)
     }

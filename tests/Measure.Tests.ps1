@@ -555,12 +555,16 @@ Describe 'Test-PSComplexity' {
         # a real $false rather than throwing.
         # Asserted on the TAIL of the message, not the head. Break the concatenation that
         # builds it and PowerShell raises a conversion error that QUOTES its left operand --
-        # so "Cannot convert value "Refusing to vouch for 1 file(s) that did not parse: "
-        # to type System.Int32" still matches a '*did not parse*' pattern. The assertion
+        # so "Cannot convert value "Refusing to vouch for 1 file(s) it could not measure: "
+        # to type System.Int32" still matches a '*could not measure*' pattern. The assertion
         # matched the very failure it existed to detect. Only text from after the break
         # distinguishes them.
+        #
+        # The advice no longer names SYNTAX, and that is the point of the change it pins: an
+        # unreadable file arrives through the same channel as an unparseable one, and telling
+        # somebody to fix the syntax of a file that is merely gone is a misdiagnosis.
         { Test-PSComplexity -Path $script:broken -Recurse } |
-            Should-Throw -ExceptionMessage '*Fix the syntax*'
+            Should-Throw -ExceptionMessage '*Fix the fault named*'
     }
     It 'throws rather than passing when it measured nothing' {
         # A directory with no PowerShell in it. Returning $true here is the same answer
@@ -937,7 +941,7 @@ Describe 'the scan is the measurement; the record stream is a projection of it' 
         # wherever the caller reports errors -- the gate announced it as a file that did not
         # parse. A test because the fix is one attribute that reads like decoration.
         $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-        $scans = @(Get-PSCxPathScan -Path (Join-Path $script:scanDir 'good.ps1') -Seen $seen)
+        $scans = @(Get-PSCxPathScan -Path (Join-Path $script:scanDir 'good.ps1') -Seen $seen -Unmatched ([System.Collections.Generic.List[object]]::new()))
         $scans.Count | Should-Be 1
         $scans[0].SkipReason | Should-BeNull
     }
@@ -1614,5 +1618,140 @@ Describe 'the gate, measuring only what changed' {
     It 'refuses an empty list' {
         { Test-PSComplexity -Path $script:work -Recurse -ChangedFile @() `
                 -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*measure an empty set*'
+    }
+}
+
+Describe 'a path the gate cannot read is refused, not skipped' {
+    # The failure this whole module exists to name, aimed inward. Get-PSCxEmptyScanFault counts
+    # UNITS, so it can only see a run that measured nothing at all -- and a single valid path
+    # alongside a mistyped one measures plenty. Verified before the fix: this returned $true.
+
+    It 'refuses a verdict when ONE of several paths does not exist' {
+        $missing = Join-Path $script:work 'no-such-directory'
+        { Test-PSComplexity -Path @((Join-Path $script:work 'a.ps1'), $missing) } |
+            Should-Throw -ExceptionMessage '*could not read*'
+    }
+
+    It 'names the offending path and leaves the good one out of the complaint' {
+        # A refusal that cannot say WHICH argument was wrong is a refusal somebody has to
+        # bisect by hand.
+        $missing = Join-Path $script:work 'no-such-directory'
+        $message = $null
+        try { $null = Test-PSComplexity -Path @((Join-Path $script:work 'a.ps1'), $missing) }
+        catch { $message = $_.Exception.Message }
+        $message | Should-BeLikeString "*$missing -- no such path*"
+        $message | Should-NotBeLikeString '*a.ps1 --*'
+    }
+
+    It 'still passes when every path is real' {
+        # The other half of the same call, so the refusal above cannot be satisfied by a gate
+        # that refuses everything.
+        Test-PSComplexity -Path @((Join-Path $script:work 'a.ps1'), (Join-Path $script:work 'nested')) |
+            Should-BeTrue
+    }
+
+    It 'refuses a directory that is there but holds no PowerShell, beside one that does' {
+        # A ceiling applied to nothing is not a gate. Measure-PSComplexity treats this as an
+        # ordinary empty measurement; the gate does not, and the two differ on purpose.
+        $empty = Join-Path $script:work 'nosourcegate'
+        New-Item -ItemType Directory -Path $empty -Force | Out-Null
+        { Test-PSComplexity -Path @((Join-Path $script:work 'a.ps1'), $empty) } |
+            Should-Throw -ExceptionMessage '*holds no .ps1 or .psm1 file*'
+    }
+
+    It 'reaches the empty-scan rule when EVERY path is wrong' {
+        # Both refusals stay reachable, and each says the true thing: every path wrong measures
+        # nothing and is answered by the count rule, some paths wrong by the path rule. Were the
+        # order reversed, one of the two could never fire and would look exactly like a rule
+        # that keeps passing.
+        { Test-PSComplexity -Path (Join-Path $script:work 'no-such-directory') } |
+            Should-Throw -ExceptionMessage '*Measured no units under*'
+    }
+}
+
+Describe 'paths arrive by property as well as by value' {
+    # `Get-ChildItem | Measure-PSComplexity` already appeared to work, but bound by coercion --
+    # a FileInfo has no Path property, so it reached the parameter through ToString(). Anything
+    # carrying its path as a PROPERTY measured NOTHING, silently.
+
+    It 'binds a FullName property' {
+        $file = Join-Path $script:work 'a.ps1'
+        @([pscustomobject]@{ FullName = $file } | Measure-PSComplexity).Count | Should-BeGreaterThan 0
+    }
+
+    It 'binds a Path property' {
+        $file = Join-Path $script:work 'a.ps1'
+        @([pscustomobject]@{ Path = $file } | Measure-PSComplexity).Count | Should-BeGreaterThan 0
+    }
+
+    It 'still binds a bare string by value' {
+        # The route that already worked. Widening the binding must not cost it.
+        @((Join-Path $script:work 'a.ps1') | Measure-PSComplexity).Count | Should-BeGreaterThan 0
+    }
+
+    It 'measures piped file objects exactly as it measures their directory' {
+        # The real claim: the new route is the SAME measurement, not merely a route that returns
+        # something. Counts alone would pass for any two runs that both found units.
+        # -File matters: this fixture set contains a DIRECTORY named weird.ps1, and piping that in
+        # would scan its contents while the directory run does not descend into it. A difference
+        # about what was asked for, not about how the answer was reached.
+        $viaObjects = @(Get-ChildItem $script:work -Filter *.ps1 -File | Measure-PSComplexity |
+                Sort-Object File, Unit | ForEach-Object { "$($_.File)|$($_.Unit)|$($_.Cyclomatic)|$($_.Cognitive)" })
+        $viaPath = @(Measure-PSComplexity -Path $script:work |
+                Sort-Object File, Unit | ForEach-Object { "$($_.File)|$($_.Unit)|$($_.Cyclomatic)|$($_.Cognitive)" })
+        $viaObjects.Count | Should-BeGreaterThan 0
+        ($viaObjects -join ';') | Should-Be ($viaPath -join ';')
+    }
+
+    It 'spells File the same way whichever route the path took' {
+        # FullName is absolute and a caller's own string usually is not. File is the identity two
+        # machines have to agree on, so it must not start depending on how the path was bound.
+        #
+        # Asserted as EQUALITY between the two routes rather than as "is relative": these fixtures
+        # live outside the working directory, where a full path is the correct answer, so a
+        # relativeness assertion would pin the fixture's location rather than the behaviour.
+        $abs = (Resolve-Path (Join-Path $script:work 'a.ps1')).Path
+        $viaProperty = @([pscustomobject]@{ FullName = $abs } | Measure-PSComplexity)[0].File
+        $viaString = @($abs | Measure-PSComplexity)[0].File
+        $viaProperty | Should-Be $viaString
+    }
+
+    It 'binds the gate the same way' {
+        # The gate and the measurement must accept the same input, or a pipeline that measures
+        # cleanly fails to gate.
+        Get-ChildItem $script:work -Filter *.ps1 | Test-PSComplexity -MaxCyclomatic 99 -MaxCognitive 99 |
+            Should-BeTrue
+    }
+}
+
+Describe 'a path that produced nothing is reported, not swallowed' {
+    It 'writes an error naming the missing path' {
+        # It used to write nothing the caller could catch: the Get-ChildItem PathNotFound was
+        # attributed to Get-ChildItem, named this module's own source line, and did not reach
+        # -ErrorVariable at all. All a consumer saw was zero units.
+        $err = @()
+        $null = Measure-PSComplexity -Path (Join-Path $script:work 'no-such-directory') `
+            -ErrorVariable err -ErrorAction SilentlyContinue
+        @($err).Count | Should-Be 1
+        "$($err[0])" | Should-BeLikeString '*no such path*'
+    }
+
+    It 'still emits the units of the paths that DID match' {
+        # A run is not all-or-nothing: the error is about one argument, and the measurement of
+        # the others is still worth having.
+        $err = @()
+        $rows = @(Measure-PSComplexity -Path @((Join-Path $script:work 'a.ps1'), (Join-Path $script:work 'no-such-directory')) `
+                -ErrorVariable err -ErrorAction SilentlyContinue)
+        $rows.Count | Should-BeGreaterThan 0
+        @($err).Count | Should-Be 1
+    }
+
+    It 'says nothing about a real directory that simply holds no PowerShell' {
+        $empty = Join-Path $script:work 'nosourcemeasure'
+        New-Item -ItemType Directory -Path $empty -Force | Out-Null
+        $err = @()
+        $rows = @(Measure-PSComplexity -Path $empty -ErrorVariable err -ErrorAction SilentlyContinue)
+        $rows.Count | Should-Be 0
+        @($err).Count | Should-Be 0
     }
 }

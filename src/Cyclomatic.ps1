@@ -16,10 +16,10 @@ function Get-PSCxCycClauseRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.IfStatementAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.IfStatementAst]))) {
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'clause'; Line = $n.Extent.StartLineNumber; Amount = $n.Clauses.Count }
     }
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.SwitchStatementAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.SwitchStatementAst]))) {
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'clause'; Line = $n.Extent.StartLineNumber; Amount = $n.Clauses.Count }
     }
 }
@@ -29,10 +29,11 @@ function Get-PSCxCycBlockRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
+    # One bucket read per type instead of one full traversal per type -- this loop alone walked
+    # the whole tree seven times. The closure the predicate needed is gone with the predicate: a
+    # bucket name is a value, not a variable resolved at call time.
     foreach ($tn in 'ForEachStatementAst', 'ForStatementAst', 'WhileStatementAst', 'DoWhileStatementAst', 'DoUntilStatementAst', 'CatchClauseAst', 'TrapStatementAst') {
-        # The closure is required: without it $tn resolves at CALL time, when the loop has
-        # already finished, and every type matches the last name in the list.
-        foreach ($n in $Ast.FindAll({ param($x) $x.GetType().Name -eq $tn }.GetNewClosure(), $true)) {
+        foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName $tn)) {
             [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'block'; Line = $n.Extent.StartLineNumber; Amount = 1 }
         }
     }
@@ -44,7 +45,11 @@ function Get-PSCxCycFlowCommandRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) Test-PSCxFlowCommand -Node $x }, $true)) {
+    # Test-PSCxFlowCommand answers False for anything that is not a CommandAst, so asking the
+    # index for the CommandAst nodes and testing those is the same set in the same order -- at the
+    # cost of the commands in the file rather than every node in it.
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst]))) {
+        if (-not (Test-PSCxFlowCommand -Node $n)) { continue }
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'flow-command'; Line = $n.Extent.StartLineNumber; Amount = 1 }
     }
 }
@@ -58,16 +63,16 @@ function Get-PSCxCycOperatorRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.PipelineChainAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.PipelineChainAst]))) {
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 }
     }
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.TernaryExpressionAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.TernaryExpressionAst]))) {
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 }
     }
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.BinaryExpressionAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.BinaryExpressionAst]))) {
         if ($n.Operator -in 'And', 'Or', 'QuestionQuestion') { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.AssignmentStatementAst]))) {
         if ($n.Operator -eq 'QuestionQuestionEquals') { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
 }
@@ -88,7 +93,12 @@ function Get-PSCxCyclomaticMap {
     [OutputType([hashtable])]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] $Ast,
+        # The ROWS, collected once per file by the caller, rather than the Ast to collect them
+        # from. "The map is a projection of the rows" is then structural rather than a claim
+        # about a private local -- and the cognitive side needs the same rows twice, once for
+        # the sum and once for the -Detailed contributions, which it cannot do while each map
+        # collects its own.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Row,
         # The unit table, built ONCE per file by the caller. Mandatory rather than optional with
         # a fallback: Get-PSCxUnitTable is a full FindAll traversal invoking a PowerShell
         # predicate per node, and it was run three times against the same AST in one pass. A
@@ -97,7 +107,7 @@ function Get-PSCxCyclomaticMap {
         [Parameter(Mandatory)] [hashtable]$UnitTable
     )
     $map = @{}
-    foreach ($row in Get-PSCxCyclomaticRow -Ast $Ast) {
+    foreach ($row in $Row) {
         $map[$row.Key] = [int]$map[$row.Key] + $row.Amount
     }
     $out = @{}
