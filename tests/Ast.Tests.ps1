@@ -334,3 +334,118 @@ Describe 'Test-PSCxFlowCommand' {
         Test-PSCxFlowCommand -Node (FirstNode (Tree '& $cmd 1') 'CommandAst') | Should-BeFalse
     }
 }
+
+Describe 'the AST index' {
+    # Get-PSCxUnitBoundary and Get-PSCxNesting used to walk up from every node they were asked
+    # about, and twelve call sites ask once per matched node -- quadratic where node count and
+    # depth grow together. One pre-order pass now computes both for every node, because each is
+    # defined against the node's PARENT.
+
+    It 'finds the root from a node buried deep in the tree' {
+        $t = Tree 'function F { if ($a) { if ($b) { if ($c) { 1 } } } }'
+        $inner = @(Nodes $t 'IfStatementAst')[-1]
+        [object]::ReferenceEquals((Get-PSCxAstRoot -Node $inner), $t) | Should-BeTrue
+    }
+
+    It 'returns the root itself when given the root' {
+        $t = Tree '$x = 1'
+        [object]::ReferenceEquals((Get-PSCxAstRoot -Node $t), $t) | Should-BeTrue
+    }
+
+    It 'gives the same answers after the tables are cleared' {
+        # Clearing is about memory, not correctness: the index rebuilds on the next miss, and the
+        # answer must not depend on whether it happened to be warm.
+        $t = Tree 'function F { if ($a) { if ($b) { 1 } } }'
+        $inner = @(Nodes $t 'IfStatementAst')[-1]
+        $warm = Get-PSCxNesting -Node $inner
+        Clear-PSCxAstCache
+        Get-PSCxNesting -Node $inner | Should-Be $warm
+        $warm | Should-Be 1
+    }
+
+    It 'keeps two structurally identical trees apart' {
+        # The tables are keyed by node REFERENCE. Value equality would conflate two nodes with the
+        # same content, and these two trees are character-for-character identical -- so an index
+        # built for one would silently answer for the other.
+        $code = 'function F { if ($a) { if ($b) { 1 } } }'
+        $t1 = Tree $code
+        $t2 = Tree $code
+        $n1 = @(Nodes $t1 'IfStatementAst')[-1]
+        $n2 = @(Nodes $t2 'IfStatementAst')[-1]
+        Get-PSCxNesting -Node $n1 | Should-Be 1
+        # Answered from t2's own index, built on its own miss.
+        Get-PSCxNesting -Node $n2 | Should-Be 1
+        [object]::ReferenceEquals((Get-PSCxUnitBoundary -Node $n1), (Get-PSCxUnitBoundary -Node $n2)) |
+            Should-BeFalse
+    }
+
+    It 'indexes every node of a tree from one node in it' {
+        # The descent runs from the ROOT, not from the node asked about, so a single query warms
+        # the whole tree. Asking about a sibling afterwards must not need a second pass -- and
+        # must not answer wrongly if it does.
+        $t = Tree 'function Outer { if ($a) { 1 } } function Other { if ($b) { if ($c) { 2 } } }'
+        Clear-PSCxAstCache
+        $first = @(Nodes $t 'IfStatementAst')[0]
+        Get-PSCxNesting -Node $first | Should-Be 0
+        $deepest = @(Nodes $t 'IfStatementAst')[-1]
+        Get-PSCxNesting -Node $deepest | Should-Be 1
+        (Get-PSCxUnitBoundary -Node $deepest).Name | Should-Be 'Other'
+    }
+
+    It 'restarts the nesting count at every unit boundary' {
+        # A function declared three ifs deep starts its own count at zero. Carrying the enclosing
+        # nesting across the boundary would charge a nested helper for the code around it.
+        $t = Tree 'if ($a) { if ($b) { function F { if ($c) { 1 } } } }'
+        $inner = @(Nodes $t 'IfStatementAst')[-1]
+        Get-PSCxNesting -Node $inner | Should-Be 0
+    }
+
+    It 'counts only ancestors that RAISE nesting' {
+        # A unit's own body owner does not, and neither does an ordinary statement -- otherwise
+        # every increment is inflated by the structure that merely contains it.
+        $t = Tree 'function F { if ($a) { 1 } }'
+        Get-PSCxNesting -Node (FirstNode $t 'IfStatementAst') | Should-Be 0
+    }
+}
+
+Describe 'the AST index, where it can be got wrong invisibly' {
+    It 'gives a TOP-LEVEL node a nesting of zero' {
+        # The root is seeded at zero and every top-level node inherits from it, so seeding it at
+        # one shifts every script-body increment up by one. A fixture whose decisions all sit
+        # INSIDE a function cannot see that: their chain stops at the function boundary, where the
+        # count restarts. This one has no function at all.
+        $t = Tree 'if ($x) { 1 }'
+        Get-PSCxNesting -Node (FirstNode $t 'IfStatementAst') | Should-Be 0
+    }
+
+    It 'gives the root itself a nesting of zero' {
+        $t = Tree '$x = 1'
+        Get-PSCxNesting -Node $t | Should-Be 0
+    }
+
+    It 'READS the boundary index rather than recomputing it' {
+        # The cache hit is invisible in the output: rebuilding the index on every query returns
+        # exactly the same answers, just slower -- so nothing but this distinguishes a working
+        # memo from one that never hits, and the whole point of the change is that it hits.
+        #
+        # Poisoning the entry is what makes it observable. A read returns the planted value; a
+        # rebuild returns the true one.
+        $t = Tree 'function F { if ($a) { 1 } }'
+        $n = FirstNode $t 'IfStatementAst'
+        Get-PSCxUnitBoundary -Node $n | Out-Null
+        $script:PSCxBoundaryCache[$n] = 'planted'
+        Get-PSCxUnitBoundary -Node $n | Should-Be 'planted'
+        Clear-PSCxAstCache
+        (Get-PSCxUnitBoundary -Node $n).Name | Should-Be 'F'
+    }
+
+    It 'READS the nesting index rather than recomputing it' {
+        $t = Tree 'function F { if ($a) { if ($b) { 1 } } }'
+        $n = @(Nodes $t 'IfStatementAst')[-1]
+        Get-PSCxNesting -Node $n | Out-Null
+        $script:PSCxNestingCache[$n] = 42
+        Get-PSCxNesting -Node $n | Should-Be 42
+        Clear-PSCxAstCache
+        Get-PSCxNesting -Node $n | Should-Be 1
+    }
+}

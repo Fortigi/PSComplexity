@@ -79,6 +79,57 @@ $script:PSCxUnitBoundaryTypes = @(
 # Cleared per file by Clear-PSCxAstCache. Without that the tables grow for the life of the process,
 # which for a gate over a large tree is every node of every file.
 $script:PSCxBoundaryCache = [System.Collections.Generic.Dictionary[object, object]]::new([System.Collections.Generic.ReferenceEqualityComparer]::Instance)
+$script:PSCxNestingCache = [System.Collections.Generic.Dictionary[object, object]]::new([System.Collections.Generic.ReferenceEqualityComparer]::Instance)
+
+function Get-PSCxAstRoot {
+    # The top of the tree a node belongs to.
+    #
+    # This is the one upward walk left, and it runs ONCE per file rather than once per node --
+    # which is the whole difference between linear and quadratic here.
+    [OutputType([System.Management.Automation.Language.Ast])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Node)
+    $r = $Node
+    while ($r.Parent) { $r = $r.Parent }
+    return $r
+}
+
+function Initialize-PSCxAstIndex {
+    # Compute every node's enclosing unit and nesting depth in ONE pre-order pass.
+    #
+    # Both answers are defined against a node's PARENT:
+    #
+    #   boundary(n) = parent is a body owner ? resolve(parent) : boundary(parent)
+    #   nesting(n)  = parent is a body owner ? 0 : nesting(parent) + (parent raises nesting ? 1 : 0)
+    #
+    # so knowing the parent's answers is enough to know the child's. FindAll walks in document
+    # order and a parent always precedes its children, which is what lets this be a flat loop
+    # rather than a recursion -- and a flat loop cannot exhaust the stack on a deeply nested file,
+    # which is exactly the shape this exists for.
+    #
+    # It replaces walking up from every node. Twelve call sites asked for one or both of these
+    # once per matched node, and where node count and depth grow together that is quadratic: a
+    # file nested 200 deep cost 1.84s of CPU for 3 KB of source.
+    [OutputType([void])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Root)
+    $script:PSCxBoundaryCache[$Root] = $null
+    $script:PSCxNestingCache[$Root] = 0
+    foreach ($n in $Root.FindAll({ $true }, $true)) {
+        $p = $n.Parent
+        # The root itself comes back from FindAll and is already seeded; anything with no parent
+        # is a root by definition.
+        if ($null -eq $p) { continue }
+        if ($p.GetType().Name -in $script:PSCxUnitBoundaryTypes) {
+            $script:PSCxBoundaryCache[$n] = Resolve-PSCxUnitBoundary -Boundary $p
+            $script:PSCxNestingCache[$n] = 0
+            continue
+        }
+        $script:PSCxBoundaryCache[$n] = $script:PSCxBoundaryCache[$p]
+        $raises = if ($p.GetType().Name -in $script:PSCxNestingTypes) { 1 } else { 0 }
+        $script:PSCxNestingCache[$n] = [int]$script:PSCxNestingCache[$p] + $raises
+    }
+}
 
 function Clear-PSCxAstCache {
     # Forget the per-node answers. Called once per file, before it is walked.
@@ -94,6 +145,7 @@ function Clear-PSCxAstCache {
     [CmdletBinding()]
     param()
     $script:PSCxBoundaryCache.Clear()
+    $script:PSCxNestingCache.Clear()
 }
 
 function Resolve-PSCxUnitBoundary {
@@ -114,31 +166,17 @@ function Resolve-PSCxUnitBoundary {
 function Get-PSCxUnitBoundary {
     # Nearest enclosing body-owner, or $null for top-level code.
     #
-    # The walk remembers its answer for EVERY node it passed on the way up, not just the one it was
-    # asked about: each of them has the same enclosing unit by definition, so one walk answers the
-    # whole chain. That is what turns repeated queries over a deep tree from quadratic into one
-    # pass, and it is why the loop collects a path rather than returning as soon as it knows.
+    # A read of the index, which is built on the first miss for a tree. There is deliberately no
+    # second implementation that walks up: two ways to answer one question is how they come to
+    # disagree, and the walk was the quadratic half.
     [OutputType([System.Management.Automation.Language.Ast])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Node)
     $found = $null
     if ($script:PSCxBoundaryCache.TryGetValue($Node, [ref]$found)) { return $found }
-
-    $path = [System.Collections.Generic.List[object]]::new()
-    $path.Add($Node)
-    $p = $Node.Parent
-    $answer = $null
-    while ($p) {
-        if ($script:PSCxBoundaryCache.TryGetValue($p, [ref]$found)) { $answer = $found; break }
-        if ($p.GetType().Name -in $script:PSCxUnitBoundaryTypes) {
-            $answer = Resolve-PSCxUnitBoundary -Boundary $p
-            break
-        }
-        $path.Add($p)
-        $p = $p.Parent
-    }
-    foreach ($n in $path) { $script:PSCxBoundaryCache[$n] = $answer }
-    return $answer
+    Initialize-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Node)
+    [void]$script:PSCxBoundaryCache.TryGetValue($Node, [ref]$found)
+    return $found
 }
 
 function Get-PSCxDisplayName {
@@ -235,16 +273,20 @@ function Get-PSCxUnitKey {
 
 function Get-PSCxNesting {
     # Count of nesting-raising ancestors up to (not crossing) the enclosing unit.
+    #
+    # The same index, built by the same descent. Memoising the upward walk instead was tried and
+    # is wrong in a way worth remembering: nesting answers along a chain are not equal the way
+    # boundary answers are -- they decrease going up -- so caching them on the way up returns the
+    # right number for the node asked about and the wrong one for every node cached en route. It
+    # reported cognitive 200 where the answer was 20100, and all 558 tests passed.
     [OutputType([int])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Node)
-    $depth = 0
-    $p = $Node.Parent
-    while ($p -and $p.GetType().Name -notin $script:PSCxUnitBoundaryTypes) {
-        if ($p.GetType().Name -in $script:PSCxNestingTypes) { $depth++ }
-        $p = $p.Parent
-    }
-    return $depth
+    $found = $null
+    if ($script:PSCxNestingCache.TryGetValue($Node, [ref]$found)) { return [int]$found }
+    Initialize-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Node)
+    [void]$script:PSCxNestingCache.TryGetValue($Node, [ref]$found)
+    return [int]$found
 }
 
 function Get-PSCxUnitTable {

@@ -187,6 +187,25 @@ against the same AST in one pass -- once for the line numbers and once inside ea
 maps now take it as a **mandatory** parameter: an optional one with a fallback would be a branch
 whose two arms produce identical output, which no test could distinguish from its own absence.
 
+**A node's unit and nesting depth come from ONE pre-order pass, not from walking up.** Both are
+defined against a node's parent -- `boundary(n)` is the parent's boundary unless the parent is a
+body owner, `nesting(n)` is the parent's nesting plus one if the parent raises it -- so a single
+descent computes them for every node. `FindAll` walks in document order and a parent always
+precedes its children, which is what lets it be a flat loop rather than a recursion; a recursion
+would risk the stack on exactly the deeply nested file this exists for.
+
+The upward walk is gone rather than kept as a second path. Two ways to answer one question is how
+they come to disagree, and the walk was the quadratic half: twelve call sites asked once per matched
+node.
+
+**The nesting half of that is easy to get wrong in a way tests do not catch.** Memoising the upward
+walk was tried first: boundary answers along a chain are all equal, so caching them on the way up is
+correct, but nesting answers *decrease* going up. Cached on the way up they come out one too high
+for every node except the one asked about -- which reported cognitive **200 where the answer was
+20100**, with all 558 tests passing, because the suite pins shapes and small fixtures rather than
+totals over a deep one. Anything touching this needs a before/after comparison of real totals, not
+a green suite.
+
 **Measure a performance claim by interleaving, and check the direction before believing it.** The
 issue behind this reported ~18%. Two wall-clock A/B attempts here disagreed about the SIGN -- the
 change looked 32% slower when its process ran second and 6% faster when it ran first -- because
