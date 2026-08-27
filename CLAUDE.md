@@ -181,6 +181,19 @@ A filtered run emits a notice because a passing gate is otherwise silent, and `s
 in the report is `null` for a whole-tree run rather than `[]`: absent and empty are different
 answers, and only absent may be read as a measurement of everything under `path`.
 
+**The unit table is built once per file and passed down.** `Get-PSCxUnitTable` is a full `FindAll`
+traversal that invokes a PowerShell predicate for every node, and it used to run three times
+against the same AST in one pass -- once for the line numbers and once inside each metric map. The
+maps now take it as a **mandatory** parameter: an optional one with a fallback would be a branch
+whose two arms produce identical output, which no test could distinguish from its own absence.
+
+**Measure a performance claim by interleaving, and check the direction before believing it.** The
+issue behind this reported ~18%. Two wall-clock A/B attempts here disagreed about the SIGN -- the
+change looked 32% slower when its process ran second and 6% faster when it ran first -- because
+whichever side ran later paid for whatever else the machine was doing. Interleaved CPU time over
+three pairs gave a consistent **~8%**, with byte-identical output every run. The lesson is not the
+number; it is that a single ordered A/B can report the opposite of the truth.
+
 ## What a "unit" is
 
 A unit is anything with a body that gets gated on its own: a function/filter, a class
