@@ -16,13 +16,63 @@ arrived with the operators themselves in 7.0, and their type names are reference
 unresolvable type literal is a parse-time failure, so an older host cannot load the module at all
 rather than degrading quietly.
 
-Nothing else changes. If you are already on 7.2 or newer, this release is identical to 0.4.0 in
-behaviour.
-
 **The floor is still a claim rather than a checked fact**, and that is worth saying plainly: no CI
 leg runs on 7.0. `PSUseCompatibleTypes` was tried as a proof and rejected -- against a 7.0 profile
 it reports clean on `[System.DateOnly]`, `[System.Half]` and `Get-Error` alike, so a clean result
 from it means nothing at all.
+
+**BEHAVIOUR CHANGE -- the gate now refuses a path it could not read.** `Test-PSComplexity` given a
+good path and a mistyped one used to return `$true`: the empty-scan guard counts UNITS, so one
+valid path masked any number of missing ones, and the error behind it never reached your
+`-ErrorVariable`. A green gate over a path that does not exist is the failure this module exists
+to find in other people's code. It now throws, naming each path and whether it is missing or
+simply holds no PowerShell. If a build of yours goes red on upgrading, the gate was measuring less
+than you thought it was.
+
+`Measure-PSComplexity` reports a path that is NOT THERE on the error stream; a path that is there
+and simply holds no PowerShell stays an ordinary empty measurement, because that command applies
+no thresholds. The JSON report gains an `unmatched` array beside `skipped`; it is not required by
+the schema, so a v1 report written before this field existed is still valid v1.
+
+**A file that could not be READ is no longer called a parse error.** A missing file, a directory,
+a permission denial and a file deleted mid-scan all arrived labelled `parse error:`, and the gate
+advised "Fix the syntax" for a file that was merely gone. Skips now read `could not be read:` or
+`parse error:`, and the gate says "could not measure" and "Fix the fault named".
+
+**Paths now bind by property name.** `Get-ChildItem | Measure-PSComplexity` worked only by
+coercion; anything carrying its path as a property -- what `Select-Object` and `Where-Object`
+hand you -- measured NOTHING, silently. Both commands accept `-Path` by value and by property
+name, with `FullName` aliased onto it. `PSPath` is deliberately not aliased: it is
+provider-qualified, and normalising one would undo the portable `File` identity 0.4.0 introduced.
+
+**Measurement is about 2.6x faster and no score moves.** The metrics made 34 full AST traversals
+per file, 52 with `-Detailed`; the pass that already computes each unit and its nesting now
+records the type of each node, and the collectors read that index instead -- 2 traversals.
+`-Detailed` now costs essentially nothing over a plain run, where it used to add about 12%.
+Output is byte-identical over 384 unit records including the `-Detailed` contributions, and
+`metricVersion` stays 1.
+
+### Fixed
+
+- **A gate given one good path and one bad path returned `$true`.** `Get-PSCxEmptyScanFault` counts
+  units, so a single valid path masked any number of missing ones, and the `Get-ChildItem` error
+  behind it was attributed to `Get-ChildItem`, named a line inside `src/Scan.ps1`, and never
+  reached the caller's `-ErrorVariable`.
+
+  `Get-PSCxSourceFile` now returns empty for a path that is neither a literal nor a wildcard match
+  rather than letting `Get-ChildItem` raise, the walk records the fact, and `Get-PSCxScanFault`
+  sequences the two refusals. The order is the decision: every path wrong measures nothing and is
+  answered by the count rule, which keeps the `-Recurse` hint; some paths wrong is answered by the
+  path rule. Reversed, the count rule could never fire -- and a rule that cannot fire looks exactly
+  like a rule that keeps passing.
+
+- **An I/O failure was reported as a parse error.** `Parser::ParseFile` reports a missing file, a
+  directory, a permission denial and a file deleted mid-scan through the *same* out-parameter as a
+  syntax error -- it does not throw, so no `try` was needed and none was added. Discriminated on
+  `ErrorId` (`FileReadError`), never on message text, which is prose and may be localised.
+
+- **Paths carried on a property bound to nothing.** Both commands now declare
+  `ValueFromPipelineByPropertyName` with `FullName` aliased onto `-Path`.
 
 ### Internal
 
@@ -36,6 +86,33 @@ from it means nothing at all.
   The assumption it was trying to state is now a comment plus the test that enforces it:
   `tests/Ast.Tests.ps1` keeps two structurally identical trees apart, which is what fails if `Ast`
   ever gains value equality.
+
+- **The pre-order pass now indexes every node by TYPE, and the metrics read the index.** Each
+  collector called `Ast.FindAll(scriptblock, $true)`, which walks the whole tree and invokes a
+  PowerShell predicate per node; the per-type loops did it once per type name, so
+  `Get-PSCxCogBlockRow` alone walked eight times. The pass that already computes each node's unit
+  and nesting depth now records its type and walk position too, which costs one dictionary write
+  per node.
+
+  Three parts of it are easy to undo. Exact-type and assignable lookups are spelled *separately*,
+  because `GetType().Name -eq` and `-is` stop agreeing the day a construct gains a subclass, and
+  one already has. `Initialize-` rebuilds while `Confirm-` is idempotent, because the bucket
+  readers ask on every query and the boundary readers ask once and want the rebuild -- guarding
+  the rebuild itself resurrected two mutants that used to die. And the type-keyed tables are
+  cleared when a second tree is indexed: appended to rather than replaced, a bucket hands back the
+  previous file's nodes, which the suite caught.
+
+- **The metric maps take rows rather than an Ast**, so "the map is a projection of the rows" is
+  structural and one row set feeds both the cognitive sum and the `-Detailed` contributions.
+  Unit names are memoised on the boundary node -- 4,200 rebuilds became 200 on a 200-function file.
+
+- **Documentation.** `Test-PSComplexity` gained the `.DESCRIPTION` it never had; both commands
+  gained `.INPUTS`, `.LINK` and further examples. Three claims in `CLAUDE.md` are corrected: the
+  Pester versions were recorded the wrong way round -- the suite is written for and tested against
+  **6.1.0** and cannot run on Pester 5 at all, while consumers gate with **Pester >= 5.0.0**, of
+  which only 5.7.1 is actually exercised -- `src/` does contain one `try` and the rule was always
+  about swallowing rather than syntax, and the construct-vocabulary gap was listed as open long
+  after it closed. Re-measured: 15 of 15 type deletions are caught.
 
 ## [0.4.0] - 2026-08-23
 

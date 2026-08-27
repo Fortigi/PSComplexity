@@ -73,6 +73,19 @@
         }
       }
     },
+    "unmatched": {
+      "type": "array",
+      "description": "Paths that were asked for and produced no source file, with the reason and whether the path exists at all. Beside skipped rather than folded into it: a file that was found and not measured, and a path that was never found, are answered by different fixes. NOT required, unlike skipped, because a v1 report written before this field existed is still a valid v1 report -- schemaVersion moves when a field changes meaning or disappears, and neither has happened. Every report this module writes carries it, empty when every path matched, and a test pins that.",
+      "items": {
+        "type": "object",
+        "required": ["path", "reason", "exists"],
+        "properties": {
+          "path": { "type": "string", "description": "The path as the caller gave it, never a resolved form -- a resolved path they did not type is a worse answer to \"which of my arguments was wrong\"." },
+          "reason": { "type": "string" },
+          "exists": { "type": "boolean", "description": "Whether the path is there at all. A path that is not there is a mistake and Measure-PSComplexity reports it; a path that IS there and holds no PowerShell is an ordinary empty outcome. The gate refuses both, because a ceiling applied to nothing is not a gate." }
+        }
+      }
+    },
     "baselined": {
       "type": "array",
       "description": "Units the baseline excused, each with the score it was held to. A baseline routinely excuses far more units than an acceptance ever will, so a report carrying one and not the other would report a pass over a set it never named. The score, not just the name: 'excused' without a number does not say how much room was left.",

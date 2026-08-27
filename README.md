@@ -79,6 +79,39 @@ nested loop-in-loop-in-`if` grows fast — mirroring how hard it is to follow.
 | `Measure-PSComplexity -Path <files/dirs> [-Recurse] [-Detailed] [-ReportPath <file>]` | per-unit records | inspect / report |
 | `Test-PSComplexity -Path <files/dirs> [-Recurse] [-MaxCyclomatic 15] [-MaxCognitive 15] [-Accept <declarations>] [-ReportPath <file>] [-SarifPath <file>]` | `[bool]` | CI gate (warns per offender) |
 
+### Paths in, by value or by property
+
+Both commands take `-Path` positionally, by value down the pipeline, and **by property name**, with
+`FullName` aliased onto it. All four of these bind correctly:
+
+```powershell
+Measure-PSComplexity ./src -Recurse
+'./src/A.ps1', './src/B.ps1' | Measure-PSComplexity
+Get-ChildItem ./src -Filter *.ps1 -Recurse | Measure-PSComplexity
+Get-ChildItem ./src -Recurse | Where-Object Length -gt 4kb | Measure-PSComplexity
+```
+
+The third worked before only by coercion -- a `FileInfo` has no `Path` property, so it reached the
+parameter through `ToString()`. Anything carrying its path as a property, which is what the fourth
+produces, bound to nothing and measured **nothing, silently**. `PSPath` is deliberately *not*
+aliased: it is provider-qualified, and normalising one would undo the portable `File` identity.
+
+Script blocks and AST objects are not accepted. This measures files on disk, and anything else is
+reported as a path that matched nothing.
+
+**A path that produced no PowerShell is a fact, not a silence.** `Measure-PSComplexity` writes an
+error naming any path that is not there; a path that *is* there and simply holds no `.ps1` or
+`.psm1` is an ordinary empty measurement and is not an error, because this command applies no
+thresholds. `Test-PSComplexity` refuses both, because a ceiling applied to nothing is not a gate:
+
+```powershell
+Test-PSComplexity @('./src', './scr')   # throws, naming ./scr -- it used to return $true
+```
+
+That last line is the reason this exists. The empty-scan guard counted *units*, so one valid path
+masked any number of mistyped ones, and the underlying `Get-ChildItem` error never reached the
+caller. A green gate over a path that does not exist is the exact failure this module is for.
+
 ### The record is the API
 
 `Measure-PSComplexity` emits one object per unit with exactly these fields, in this order:

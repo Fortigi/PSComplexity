@@ -194,13 +194,55 @@ function Get-R2 { param($a, $b, $c) if ($a) { if ($b) { if ($c) { 1 } } } }
         # assertions, two different claims.
         $d = Get-Content $script:measurePath -Raw | ConvertFrom-Json
         ($d.PSObject.Properties.Name -join ',') |
-            Should-Be 'generatedFrom,schemaVersion,producedBy,generatedAt,mode,metricVersion,scope,skipped,summary,units'
+            Should-Be 'generatedFrom,schemaVersion,producedBy,generatedAt,mode,metricVersion,scope,skipped,unmatched,summary,units'
+    }
+
+    It 'records the paths that produced nothing, with the reason and whether they exist' {
+        # A report that cannot say a path was missing describes a subset while reading as a whole
+        # measurement -- the same argument that put `skipped` in the document. Both facts are
+        # carried because the two consumers of them differ: the gate refuses either, while a
+        # measurement run reports only a path that is not there.
+        $scan = [pscustomobject]@{
+            Units         = @()
+            Skipped       = @()
+            Unmatched     = @(
+                [pscustomobject]@{ Path = './nope'; Reason = 'no such path'; Exists = $false }
+                [pscustomobject]@{ Path = './docs'; Reason = 'holds no .ps1 or .psm1 file'; Exists = $true }
+            )
+            Scope         = [pscustomobject]@{ Path = @('./nope', './docs'); Recurse = $false; Root = '/r'; ChangedFile = $null }
+            MetricVersion = 1
+        }
+        $d = Get-PSCxReportDocument -Scan $scan -ModuleVersion '1.2.3' -GeneratedAt ([datetime]'2026-01-01Z')
+        @($d.unmatched).Count | Should-Be 2
+        $d.unmatched[0].path | Should-Be './nope'
+        $d.unmatched[0].reason | Should-Be 'no such path'
+        $d.unmatched[0].exists | Should-BeFalse
+        $d.unmatched[1].exists | Should-BeTrue
+    }
+
+    It 'writes an EMPTY unmatched array when every path matched' {
+        # Absent and empty are different answers, and a consumer iterating this should not have to
+        # tell them apart to know whether everything it asked for was read.
+        $scan = [pscustomobject]@{
+            Units         = @()
+            Skipped       = @()
+            Unmatched     = @()
+            Scope         = [pscustomobject]@{ Path = @('./src'); Recurse = $true; Root = '/r'; ChangedFile = $null }
+            MetricVersion = 1
+        }
+        $d = Get-PSCxReportDocument -Scan $scan -ModuleVersion '1.2.3' -GeneratedAt ([datetime]'2026-01-01Z')
+        # .Keys, not PSObject.Properties: the document is an OrderedDictionary while it is still
+        # in memory, and PSObject.Properties on one lists the DICTIONARY's members -- Count, Keys,
+        # Values -- rather than the entries. The field-list tests above read a parsed file, where
+        # the same expression is the right one.
+        ($d.Keys -contains 'unmatched') | Should-BeTrue
+        @($d['unmatched']).Count | Should-Be 0
     }
 
     It 'adds exactly the gate fields to a gate report' {
         $d = Get-Content $script:gatePath -Raw | ConvertFrom-Json
         ($d.PSObject.Properties.Name -join ',') |
-            Should-Be 'generatedFrom,schemaVersion,producedBy,generatedAt,mode,metricVersion,scope,skipped,summary,units,thresholds,passed,violations,accepted,baselined'
+            Should-Be 'generatedFrom,schemaVersion,producedBy,generatedAt,mode,metricVersion,scope,skipped,unmatched,summary,units,thresholds,passed,violations,accepted,baselined'
     }
 
     It 'reconciles its summary against the units it carries' {

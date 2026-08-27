@@ -39,7 +39,7 @@ function Get-PSCxCogIfRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.IfStatementAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.IfStatementAst]))) {
         $extra = ($n.Clauses.Count - 1) + [int][bool]$n.ElseClause
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'if'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) + $extra }
     }
@@ -50,8 +50,10 @@ function Get-PSCxCogBlockRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
+    # Eight bucket reads where there were eight whole-tree traversals -- the single largest
+    # repeated walk in the module.
     foreach ($tn in 'SwitchStatementAst', 'ForEachStatementAst', 'ForStatementAst', 'WhileStatementAst', 'DoWhileStatementAst', 'DoUntilStatementAst', 'CatchClauseAst', 'TrapStatementAst') {
-        foreach ($n in $Ast.FindAll({ param($x) $x.GetType().Name -eq $tn }.GetNewClosure(), $true)) {
+        foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName $tn)) {
             [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'block'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
         }
     }
@@ -61,7 +63,7 @@ function Get-PSCxCogTernaryRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.TernaryExpressionAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.TernaryExpressionAst]))) {
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'ternary'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
     }
 }
@@ -74,7 +76,8 @@ function Get-PSCxCogFlowCommandRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) Test-PSCxFlowCommand -Node $x }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst]))) {
+        if (-not (Test-PSCxFlowCommand -Node $n)) { continue }
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'flow-command'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
     }
 }
@@ -85,12 +88,12 @@ function Get-PSCxCogNullCoalesceRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.BinaryExpressionAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.BinaryExpressionAst]))) {
         if ($n.Operator -eq 'QuestionQuestion') {
             [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'null-coalesce'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
         }
     }
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.AssignmentStatementAst]))) {
         if ($n.Operator -eq 'QuestionQuestionEquals') {
             [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'null-coalesce'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
         }
@@ -105,7 +108,7 @@ function Get-PSCxCogPipelineChainRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.PipelineChainAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.PipelineChainAst]))) {
         if ($n.Parent -isnot [System.Management.Automation.Language.PipelineChainAst] -or
             $n.Parent.Operator -ne $n.Operator) {
             [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'pipeline-chain'; Line = $n.Extent.StartLineNumber; Amount = 1 }
@@ -118,7 +121,7 @@ function Get-PSCxCogBooleanRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.BinaryExpressionAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.BinaryExpressionAst]))) {
         if (Test-PSCxLogicalRunStart -Node $n) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'boolean-run'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
 }
@@ -128,8 +131,10 @@ function Get-PSCxCogJumpRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    $isJump = { param($x) $x -is [System.Management.Automation.Language.BreakStatementAst] -or $x -is [System.Management.Automation.Language.ContinueStatementAst] }
-    foreach ($n in $Ast.FindAll($isJump, $true)) {
+    # ONE query over both types, not two loops: the original was a single FindAll and returned
+    # break and continue interleaved in document order. Two bucket reads end-to-end would group
+    # them by type, which -Detailed publishes and a reader reads top to bottom.
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.BreakStatementAst], [System.Management.Automation.Language.ContinueStatementAst]))) {
         if ($n.Label) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'labelled-jump'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
 }
@@ -139,7 +144,7 @@ function Get-PSCxCogRecursionRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst]))) {
         $fn = Get-PSCxEnclosingFunctionName -Node $n
         if ($fn -and $n.GetCommandName() -eq $fn) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
@@ -166,7 +171,9 @@ function Get-PSCxCogMethodRecursionRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in $Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true)) {
+    # ByKind, not an exact-name lookup: BaseCtorInvokeMemberExpressionAst derives from this type,
+    # so `: base()` chaining reaches the original -is test and must keep reaching this one.
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.InvokeMemberExpressionAst]))) {
         $method = Get-PSCxEnclosingMethod -Node $n
         if (-not $method) { continue }
         if ($n.Member.Value -ne $method.Name) { continue }
@@ -204,9 +211,14 @@ function Get-PSCxContributionMap {
     # number.
     [OutputType([hashtable])]
     [CmdletBinding()]
-    param([Parameter(Mandatory)] $Ast)
+    param(
+        # The same rows Get-PSCxCognitiveMap sums. Collected once per file by the caller and
+        # handed to both: -Detailed used to collect them a second time here, which was eighteen
+        # more traversals of the tree for rows the sum had just built.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Row
+    )
     $byUnit = @{}
-    foreach ($row in (Get-PSCxCognitiveRow -Ast $Ast)) {
+    foreach ($row in $Row) {
         if (-not $byUnit.ContainsKey($row.Key)) {
             $byUnit[$row.Key] = [System.Collections.Generic.List[object]]::new()
         }
@@ -224,7 +236,9 @@ function Get-PSCxCognitiveMap {
     [OutputType([hashtable])]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] $Ast,
+        # The rows, collected once per file by the caller -- see Get-PSCxCyclomaticMap for why
+        # the maps take rows rather than an Ast.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Row,
         # The unit table, built ONCE per file by the caller. Mandatory rather than optional with
         # a fallback: Get-PSCxUnitTable is a full FindAll traversal invoking a PowerShell
         # predicate per node, and it was run three times against the same AST in one pass. A
@@ -232,9 +246,8 @@ function Get-PSCxCognitiveMap {
         # both arms produce identical output, which is exactly the mutant this repo refuses.
         [Parameter(Mandatory)] [hashtable]$UnitTable
     )
-    $rows = @(Get-PSCxCognitiveRow -Ast $Ast)
     $map = @{}
-    foreach ($row in $rows) { $map[$row.Key] = [int]$map[$row.Key] + $row.Amount }
+    foreach ($row in $Row) { $map[$row.Key] = [int]$map[$row.Key] + $row.Amount }
     $out = @{}
     foreach ($k in $UnitTable.Keys) { $out[$k] = [int]$map[$k] }
     return $out

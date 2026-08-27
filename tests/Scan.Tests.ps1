@@ -48,6 +48,11 @@ BeforeAll {
     # it to nothing and the caller gets $null -- which then fails to bind to a mandatory
     # parameter, several lines away from the return that caused it.
     function script:NewSeen { return , [System.Collections.Generic.HashSet[string]]::new() }
+
+    # And the same for the unmatched-path list, which the caller owns for the same reason: paths
+    # arrive one invocation at a time, so a list created inside the walk would forget the last one.
+    # Comma-wrapped for the reason above -- an empty List unrolls to nothing on the way out.
+    function script:NewUnmatched { return , [System.Collections.Generic.List[object]]::new() }
 }
 
 AfterAll { Remove-Item $script:work -Recurse -Force -ErrorAction SilentlyContinue }
@@ -277,7 +282,7 @@ Describe 'Get-PSCxPathScan' {
     # what collects units and skips into one answer.
 
     It 'measures every source file under a path' {
-        $scans = @(Get-PSCxPathScan -Path $script:work -Seen (NewSeen) -Recurse)
+        $scans = @(Get-PSCxPathScan -Path $script:work -Seen (NewSeen) -Unmatched (NewUnmatched) -Recurse)
         $units = @($scans | ForEach-Object { $_.Units } | ForEach-Object Unit)
         $units | Should-ContainCollection 'Get-Deep'
         $units | Should-ContainCollection 'Get-Flat'
@@ -291,7 +296,7 @@ Describe 'Get-PSCxPathScan' {
         New-Item -ItemType Directory -Path $mixed -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $mixed 'ok.ps1') -Value 'function Get-Ok { 1 }' -Encoding utf8
         Set-Content -LiteralPath (Join-Path $mixed 'bad.ps1') -Value 'function Get-Bad { if (' -Encoding utf8
-        $scans = @(Get-PSCxPathScan -Path $mixed -Seen (NewSeen))
+        $scans = @(Get-PSCxPathScan -Path $mixed -Seen (NewSeen) -Unmatched (NewUnmatched))
         $scans.Count | Should-Be 2
         @($scans | Where-Object { $_.SkipReason }).Count | Should-Be 1
         @($scans | ForEach-Object { $_.Units } | ForEach-Object Unit) | Should-ContainCollection 'Get-Ok'
@@ -301,7 +306,7 @@ Describe 'Get-PSCxPathScan' {
         # The seen-set is the whole reason this takes one: gate ./src and ./src/A.ps1 together and
         # the file would otherwise be measured twice and counted twice in any per-file total.
         $seen = NewSeen
-        $scans = @(Get-PSCxPathScan -Path @($script:flat, $script:flat) -Seen $seen)
+        $scans = @(Get-PSCxPathScan -Path @($script:flat, $script:flat) -Seen $seen -Unmatched (NewUnmatched))
         $scans.Count | Should-Be 1
     }
 }
@@ -505,5 +510,199 @@ Describe 'Get-PSCxEmptyScanFault' {
             Should-BeNull
         Get-PSCxEmptyScanFault -UnitCount 0 -Filtered $false -Path @('./src') -Recurse $true |
             Should-NotBeNull
+    }
+}
+
+Describe 'Get-PSCxUnmatchedPath' {
+    # A path that produced no source file is a FACT the scan carries, not a stray Get-ChildItem
+    # error. It used to be neither: the error was attributed to Get-ChildItem, named this module's
+    # own source line, and did not reach the caller's -ErrorVariable -- so all a consumer saw was
+    # zero units.
+
+    It 'says a path is not there when it is not there' {
+        $r = Get-PSCxUnmatchedPath -Path (Join-Path $script:work 'no-such-directory')
+        $r.Reason | Should-Be 'no such path'
+        $r.Exists | Should-BeFalse
+    }
+
+    It 'says a real directory holds no PowerShell, which is a different mistake' {
+        # Two situations, told apart because they send the reader to different places: a typo, or
+        # a missing -Recurse. Collapsing them makes the commonest gate misconfiguration
+        # indistinguishable from the second commonest.
+        $empty = Join-Path $script:work 'nosource'
+        New-Item -ItemType Directory -Path $empty -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $empty 'readme.md') -Value '# not powershell' -Encoding utf8
+        $r = Get-PSCxUnmatchedPath -Path $empty
+        $r.Reason | Should-Be 'holds no .ps1 or .psm1 file'
+        $r.Exists | Should-BeTrue
+    }
+
+    It 'sees a directory whose name contains a wildcard character' {
+        # -Path glob-parses '[', so only the LiteralPath spelling finds 'my[1]proj'. Reported as
+        # "no such path" it would send somebody looking for a directory that is plainly there.
+        $lit = Join-Path $script:work 'my[1]proj'
+        [System.IO.Directory]::CreateDirectory($lit) | Out-Null
+        (Get-PSCxUnmatchedPath -Path $lit).Exists | Should-BeTrue
+    }
+
+    It 'reports the path it was given, not a resolved one' {
+        # The message has to name what the CALLER typed. A resolved path they never wrote is a
+        # worse answer to "which of my arguments was wrong".
+        (Get-PSCxUnmatchedPath -Path './definitely-not-here').Path | Should-Be './definitely-not-here'
+    }
+}
+
+Describe 'Get-PSCxSourceFile, for a path that resolves to nothing' {
+    It 'returns an empty list rather than letting Get-ChildItem raise' {
+        # The old form handed a non-existent path to Get-ChildItem, which wrote a PathNotFound
+        # error naming this module's own source line. Returning empty is what lets the walk record
+        # the fact instead.
+        #
+        # The COUNT alone cannot see the difference: Get-ChildItem over a missing path also
+        # returns nothing, so an empty result is true either way and the guard survived every
+        # mutant. Silence on the error stream is the observable half, and the only half that says
+        # the guard fired rather than the command failing quietly behind it.
+        #
+        # REDIRECTED with 2>&1, not captured with -ErrorVariable, and that distinction is the
+        # whole bug in miniature: -ErrorVariable on this function does NOT see an error raised by
+        # a cmdlet it calls -- the record is attributed to Get-ChildItem and reaches only $Error.
+        # An assertion written with -ErrorVariable passes under the mutant, which is exactly how
+        # a consumer saw nothing but zero units.
+        $records = @(Get-PSCxSourceFile -Path (Join-Path $script:work 'no-such-directory') 2>&1)
+        @($records | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }).Count |
+            Should-Be 0
+        @($records | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }).Count |
+            Should-Be 0
+    }
+
+    It 'still finds files under a path that IS there' {
+        # The other half, in the same file. A test that only pins the absence would pass just as
+        # well if discovery had stopped working altogether.
+        @(Get-PSCxSourceFile -Path $script:work -Recurse).Count | Should-BeGreaterThan 0
+    }
+}
+
+Describe 'Get-PSCxUnmatchedPathFault' {
+    It 'is silent when every path matched something' {
+        Get-PSCxUnmatchedPathFault -Unmatched @() | Should-BeNull
+    }
+
+    It 'names every unmatched path and why' {
+        # THE hole this closes. Get-PSCxEmptyScanFault fires only when the run measured nothing,
+        # so one valid path masked any number of mistyped ones -- measured, the gate returned
+        # $true over a path that did not exist.
+        $fault = Get-PSCxUnmatchedPathFault -Unmatched @(
+            [pscustomobject]@{ Path = '/nope'; Reason = 'no such path'; Exists = $false }
+            [pscustomobject]@{ Path = './docs'; Reason = 'holds no .ps1 or .psm1 file'; Exists = $true }
+        )
+        $fault | Should-BeLikeString '*/nope -- no such path*'
+        $fault | Should-BeLikeString '*./docs -- holds no .ps1 or .psm1 file*'
+        $fault | Should-BeLikeString '*2 of the path(s)*'
+    }
+}
+
+Describe 'Write-PSCxUnmatchedPath' {
+    It 'reports a path that is not there' {
+        $err = @()
+        Write-PSCxUnmatchedPath -Unmatched @(
+            [pscustomobject]@{ Path = '/nope'; Reason = 'no such path'; Exists = $false }
+        ) -ErrorVariable err -ErrorAction SilentlyContinue
+        @($err).Count | Should-Be 1
+        "$($err[0])" | Should-BeLikeString "*Measured nothing under '/nope' -- no such path*"
+    }
+
+    It 'stays silent for a real directory that holds no PowerShell' {
+        # Measure-PSComplexity applies no thresholds and reaches no verdict, so an empty directory
+        # is an outcome rather than a fault -- and under ErrorActionPreference = Stop an error here
+        # would terminate a run over a directory the caller knows is empty. The GATE refuses it,
+        # where a ceiling applied to nothing genuinely is a broken gate.
+        $err = @()
+        Write-PSCxUnmatchedPath -Unmatched @(
+            [pscustomobject]@{ Path = './docs'; Reason = 'holds no .ps1 or .psm1 file'; Exists = $true }
+        ) -ErrorVariable err -ErrorAction SilentlyContinue
+        @($err).Count | Should-Be 0
+    }
+}
+
+Describe 'Get-PSCxSkipReason' {
+    It 'calls a file it could not read what it is' {
+        # Parser::ParseFile reports an I/O failure through the SAME out-parameter as a syntax
+        # error. Calling every one of them a parse error sent the reader to inspect syntax that
+        # was perfectly correct -- and the gate then advised fixing it.
+        $e = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $script:work 'no-such-file.ps1'), [ref]$null, [ref]$e)
+        @($e)[0].ErrorId | Should-Be 'FileReadError'
+        Get-PSCxSkipReason -ParseError @($e)[0] | Should-BeLikeString 'could not be read: *'
+    }
+
+    It 'still calls a syntax error a parse error' {
+        $e = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $script:broken 'bad.ps1'), [ref]$null, [ref]$e)
+        Get-PSCxSkipReason -ParseError @($e)[0] | Should-BeLikeString 'parse error: *'
+    }
+}
+
+Describe 'the scan records what it could not read' {
+    It 'carries the unmatched paths beside the units' {
+        $scan = Get-PSCxScan -Path @($script:work, (Join-Path $script:work 'no-such-directory')) -Recurse
+        @($scan.Units).Count | Should-BeGreaterThan 0
+        @($scan.Unmatched).Count | Should-Be 1
+        $scan.Unmatched[0].Reason | Should-Be 'no such path'
+    }
+
+    It 'records nothing when every path matched' {
+        @((Get-PSCxScan -Path $script:work -Recurse).Unmatched).Count | Should-Be 0
+    }
+
+    It 'records the path BEFORE the changed-file filter is applied' {
+        # "This path is not there" and "nothing in this path changed" are different answers, and
+        # only the first is a mistake. Filtered after, a diff-scoped run would report every path
+        # it filtered away as missing.
+        $scan = Get-PSCxScan -Path $script:work -Recurse -ChangedFile @('no-such-file.ps1')
+        @($scan.Unmatched).Count | Should-Be 0
+        @($scan.Units).Count | Should-Be 0
+    }
+}
+
+Describe 'Get-PSCxScanFault' {
+    # The ORDER of the two scan-level refusals, held as a decision rather than inferred from
+    # statement order in the gate. Reversed, the count rule could never fire -- and a rule that
+    # cannot fire looks exactly like a rule that keeps passing.
+
+    function script:FakeScan { param($Units, $Unmatched)
+        return [pscustomobject]@{ Units = @($Units); Unmatched = @($Unmatched) }
+    }
+
+    It 'is silent for a run that measured something and found every path' {
+        Get-PSCxScanFault -Scan (FakeScan @('u') @()) -Path @('./src') -Filtered $false -Recurse |
+            Should-BeNull
+    }
+
+    It 'answers a run that measured NOTHING with the count rule, which carries the -Recurse hint' {
+        $fault = Get-PSCxScanFault -Scan (FakeScan @() @(
+                [pscustomobject]@{ Path = '/nope'; Reason = 'no such path'; Exists = $false })) `
+            -Path @('/nope') -Filtered $false
+        $fault | Should-BeLikeString '*Measured no units under*'
+        $fault | Should-BeLikeString '*add -Recurse*'
+    }
+
+    It 'answers a run that measured SOMETHING but missed a path with the path rule' {
+        # The hole this closes. A unit count cannot see a mistyped path next to a good one.
+        Get-PSCxScanFault -Scan (FakeScan @('u') @(
+                [pscustomobject]@{ Path = '/nope'; Reason = 'no such path'; Exists = $false })) `
+            -Path @('./src', '/nope') -Filtered $false -Recurse |
+            Should-BeLikeString '*could not read*'
+    }
+
+    It 'still refuses a missed path on a DIFF-SCOPED run, where the count rule stands down' {
+        # A filtered run that measured nothing is ordinary -- a pull request touching only
+        # markdown -- so the count rule is silent. A path that is not there is a mistake either
+        # way, and must not become invisible just because -ChangedFile was given.
+        Get-PSCxScanFault -Scan (FakeScan @() @(
+                [pscustomobject]@{ Path = '/nope'; Reason = 'no such path'; Exists = $false })) `
+            -Path @('/nope') -Filtered $true -Recurse |
+            Should-BeLikeString '*could not read*'
     }
 }

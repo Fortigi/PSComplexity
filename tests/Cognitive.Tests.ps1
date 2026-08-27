@@ -333,7 +333,7 @@ function T {
         # only the LAST one, and a fixture whose unit has a single increment cannot tell the
         # two apart. The full breakdown is asserted rather than the count, so a row landing
         # under the wrong key fails here too.
-        $map = Get-PSCxContributionMap -Ast $script:AttrAst
+        $map = Get-PSCxContributionMap -Row @(Get-PSCxCognitiveRow -Ast $script:AttrAst)
         $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
         (@($map[$unit] | ForEach-Object { "$($_.Construct)@$($_.Line)+$($_.Amount)" }) -join ' ') |
             Should-Be 'block@3+1 boolean-run@4+1 if@4+2'
@@ -343,8 +343,8 @@ function T {
         # The two projections over the same rows have to agree. This is what a consumer relies
         # on when it reads a breakdown next to a score -- and it is the check that fails if the
         # grouping drops a row on the way, which the summed map would not notice.
-        $map = Get-PSCxContributionMap -Ast $script:AttrAst
-        $sums = Get-PSCxCognitiveMap -Ast $script:AttrAst -UnitTable (Get-PSCxUnitTable -Ast $script:AttrAst)
+        $map = Get-PSCxContributionMap -Row @(Get-PSCxCognitiveRow -Ast $script:AttrAst)
+        $sums = Get-PSCxCognitiveMap -Row @(Get-PSCxCognitiveRow -Ast $script:AttrAst) -UnitTable (Get-PSCxUnitTable -Ast $script:AttrAst)
         $unit = @($sums.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
         (($map[$unit] | Measure-Object Amount -Sum).Sum) | Should-Be $sums[$unit]
     }
@@ -353,14 +353,14 @@ function T {
         # The decision-free unit is absent HERE and empty at the published boundary. Two
         # different jobs: this map answers "which rows exist", and Measure-PSComplexity turns
         # a missing key into an empty list so a consumer never has to tell absent from empty.
-        $map = Get-PSCxContributionMap -Ast $script:AttrAst
+        $map = Get-PSCxContributionMap -Row @(Get-PSCxCognitiveRow -Ast $script:AttrAst)
         @($map.Keys | Where-Object { $_ -like '<script-body>*' }).Count | Should-Be 0
     }
 
     It 'leaves the summed map exactly as it was' {
         # The point of keeping the maps as projections: the published number must not move
         # because the intermediate representation grew a field.
-        $map = Get-PSCxCognitiveMap -Ast $script:AttrAst -UnitTable (Get-PSCxUnitTable -Ast $script:AttrAst)
+        $map = Get-PSCxCognitiveMap -Row @(Get-PSCxCognitiveRow -Ast $script:AttrAst) -UnitTable (Get-PSCxUnitTable -Ast $script:AttrAst)
         $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
         # foreach(1) + if(1 + 1 nesting) + boolean run(1) = 4
         $map[$unit] | Should-Be 4

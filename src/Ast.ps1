@@ -87,6 +87,39 @@ $script:PSCxUnitBoundaryTypes = @(
 $script:PSCxBoundaryCache = [System.Collections.Generic.Dictionary[object, object]]::new()
 $script:PSCxNestingCache = [System.Collections.Generic.Dictionary[object, object]]::new()
 
+# Nodes bucketed by their runtime type, and the pre-order position of each node.
+#
+# The same pass that computes boundary and nesting already visits every node and already knows
+# each one's type, so recording it costs one dictionary write. What it buys is every "find me the
+# nodes of type X" question the metrics ask -- and they asked it 32 times per file, each time
+# re-walking the whole tree and invoking a PowerShell predicate for every node. Measured on a
+# 21k-node file: 32 x 21ms of traversal, for answers this pass already had.
+#
+# Keyed by [type] rather than by name so an assignability query can be answered without
+# reconstructing types from strings; PSCxTypeNameCache holds the SAME lists under the exact type
+# name, for the callers that mean GetType().Name -eq rather than -is. Two spellings of one
+# question, kept apart on purpose: they differ the moment a construct gains a subclass, and
+# InvokeMemberExpressionAst already has one.
+#
+# PSCxOrderCache exists only so a query spanning more than one bucket can put the union back into
+# document order. FindAll returns pre-order, and the rows -Detailed publishes are read in that
+# order, so a union that merged buckets end-to-end would reorder two increments on one line.
+#
+# The two node-keyed tables take the DEFAULT comparer, for the reason the boundary and nesting
+# tables above do: Ast overrides neither Equals nor GetHashCode, so the default already is
+# identity, and naming ReferenceEqualityComparer to say so costs a .NET 5 type and the module's
+# floor. Every type named here predates .NET Core 3.1, which is what PowerShell 7.0 runs.
+$script:PSCxTypeCache = [System.Collections.Generic.Dictionary[type, object]]::new()
+$script:PSCxTypeNameCache = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
+$script:PSCxKindCache = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
+$script:PSCxOrderCache = [System.Collections.Generic.Dictionary[object, object]]::new()
+$script:PSCxNameCache = [System.Collections.Generic.Dictionary[object, object]]::new()
+
+# Which tree the caches describe, so the index is built once per file rather than once per ask.
+# A reference, never a value: two parses of one file are different trees and must not share an
+# index.
+$script:PSCxIndexedRoot = $null
+
 function Get-PSCxAstRoot {
     # The top of the tree a node belongs to.
     #
@@ -116,12 +149,39 @@ function Initialize-PSCxAstIndex {
     # It replaces walking up from every node. Twelve call sites asked for one or both of these
     # once per matched node, and where node count and depth grow together that is quadratic: a
     # file nested 200 deep cost 1.84s of CPU for 3 KB of source.
+    #
+    # It also records each node's TYPE and its position in the walk, which is what lets every
+    # "find the nodes of type X" question be a dictionary read instead of another traversal. The
+    # metrics asked that question 32 times per file, each time walking the whole tree and invoking
+    # a PowerShell predicate per node.
+    #
+    # Unconditional: it REBUILDS. Confirm-PSCxAstIndex below is the idempotent entry point, and
+    # the split is deliberate rather than tidy -- Get-PSCxUnitBoundary and Get-PSCxNesting call
+    # this one on a cache miss, and their tests prove the memo hits by planting a value and
+    # checking a rebuild would overwrite it. Guarding here made that rebuild an early return, so
+    # the planted value survived and two mutants that used to die started living. Measured, on
+    # the run that introduced it.
     [OutputType([void])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Root)
+    # The type-keyed tables describe ONE tree and must be emptied before another is walked.
+    # Boundary, nesting and name are keyed by node reference, so entries from two trees can sit
+    # side by side and neither can answer for the other; a bucket keyed by TYPE has no such
+    # protection, and appending a second tree's nodes to it hands back rows from a file the caller
+    # never asked about. The suite caught exactly that -- an `if` reported at line 1 of the
+    # previous fixture.
+    $script:PSCxTypeCache.Clear()
+    $script:PSCxTypeNameCache.Clear()
+    $script:PSCxKindCache.Clear()
+    $script:PSCxOrderCache.Clear()
     $script:PSCxBoundaryCache[$Root] = $null
     $script:PSCxNestingCache[$Root] = 0
+    $position = 0
     foreach ($n in $Root.FindAll({ $true }, $true)) {
+        # BEFORE the parent test below, which skips the root: FindAll returns the root itself, and
+        # a bucket that silently omitted it would be a whole-tree query that is not one.
+        Add-PSCxIndexedNode -Node $n -Position $position
+        $position++
         $p = $n.Parent
         # The root itself comes back from FindAll and is already seeded; anything with no parent
         # is a root by definition.
@@ -135,6 +195,51 @@ function Initialize-PSCxAstIndex {
         $raises = if ($p.GetType().Name -in $script:PSCxNestingTypes) { 1 } else { 0 }
         $script:PSCxNestingCache[$n] = [int]$script:PSCxNestingCache[$p] + $raises
     }
+    # LAST, so a walk that throws part-way leaves the root unmarked and the next ask rebuilds it
+    # rather than reading a half-filled index. Nothing in the loop throws today; the ordering costs
+    # nothing and removes the question.
+    $script:PSCxIndexedRoot = $Root
+}
+
+function Confirm-PSCxAstIndex {
+    # Build the index for this tree unless it is already the one indexed.
+    #
+    # The idempotent half, kept apart from the rebuild above because the two are asked for by
+    # different callers for different reasons. The bucket readers ask on EVERY query -- dozens per
+    # file -- and an unguarded rebuild there would cost more than the traversals the index
+    # replaced. The boundary and nesting readers ask only on a miss, which for one tree happens
+    # once, and they want the rebuild.
+    [OutputType([void])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Root)
+    if ([object]::ReferenceEquals($script:PSCxIndexedRoot, $Root)) { return }
+    Initialize-PSCxAstIndex -Root $Root
+}
+
+function Add-PSCxIndexedNode {
+    # File one node into its type bucket and record where it sat in the walk.
+    #
+    # Split out of the loop above rather than inlined: the loop is the hot path of the whole
+    # module and already carries two conditionals against the cognitive ceiling this module gates
+    # itself on. It is also the one piece of the index whose contract -- buckets hold nodes in
+    # document order -- is worth being able to test on its own.
+    [OutputType([void])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Node,
+        [Parameter(Mandatory)] [int]$Position
+    )
+    $script:PSCxOrderCache[$Node] = $Position
+    $type = $Node.GetType()
+    $bucket = $null
+    if (-not $script:PSCxTypeCache.TryGetValue($type, [ref]$bucket)) {
+        $bucket = [System.Collections.Generic.List[object]]::new()
+        $script:PSCxTypeCache[$type] = $bucket
+        # The same list under both keys, not a copy. An exact-name lookup and a type lookup are
+        # two ways of asking for one bucket, and two lists would be two things to keep in step.
+        $script:PSCxTypeNameCache[$type.Name] = $bucket
+    }
+    $bucket.Add($Node)
 }
 
 function Clear-PSCxAstCache {
@@ -152,6 +257,14 @@ function Clear-PSCxAstCache {
     param()
     $script:PSCxBoundaryCache.Clear()
     $script:PSCxNestingCache.Clear()
+    $script:PSCxTypeCache.Clear()
+    $script:PSCxTypeNameCache.Clear()
+    $script:PSCxKindCache.Clear()
+    $script:PSCxOrderCache.Clear()
+    $script:PSCxNameCache.Clear()
+    # The mark goes last and must go at all: leaving it set would let the next file read an index
+    # that has just been emptied, and every metric would come back zero with nothing raised.
+    $script:PSCxIndexedRoot = $null
 }
 
 function Resolve-PSCxUnitBoundary {
@@ -247,6 +360,16 @@ function Get-PSCxUnitName {
     [OutputType([string])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Boundary)
+    # Memoised on the boundary NODE, because this is a pure function of it and the metrics ask for
+    # the same handful of names thousands of times: measured on a 200-function file, 4200 calls
+    # produced 200 distinct names. Every collector calls Get-PSCxUnitKey once per matched node,
+    # and each of those rebuilds a list, walks to the root and formats a string to arrive back at
+    # a name the last node in the same unit already produced.
+    #
+    # Reference-keyed and cleared per file, exactly like the boundary and nesting tables, so an
+    # entry from one parse can never answer a question about another.
+    $cachedName = $null
+    if ($script:PSCxNameCache.TryGetValue($Boundary, [ref]$cachedName)) { return [string]$cachedName }
     $parts = [System.Collections.Generic.List[string]]::new()
     $parts.Add((Get-PSCxUnitOwnName -Boundary $Boundary))
     # Walk out through every enclosing unit. Resolve each one first: a class method's body is
@@ -264,7 +387,8 @@ function Get-PSCxUnitName {
         }
         $p = $p.Parent
     }
-    return '{0}@{1}' -f ($parts -join '/'), $Boundary.Extent.StartOffset
+    $script:PSCxNameCache[$Boundary] = '{0}@{1}' -f ($parts -join '/'), $Boundary.Extent.StartOffset
+    return [string]$script:PSCxNameCache[$Boundary]
 }
 
 function Get-PSCxUnitKey {
@@ -293,6 +417,108 @@ function Get-PSCxNesting {
     Initialize-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Node)
     [void]$script:PSCxNestingCache.TryGetValue($Node, [ref]$found)
     return [int]$found
+}
+
+function Get-PSCxNodeByTypeName {
+    # Every node whose runtime type is EXACTLY this, in document order.
+    #
+    # The bucket is returned as it is stored, not copied: these are the hot reads of the whole
+    # module and a copy per ask would give back the allocation the index exists to remove. No
+    # caller mutates a bucket, and none has any reason to.
+    #
+    # Exact, because the caller said exact. This replaces `GetType().Name -eq $tn`, which is a
+    # different question from `-is` the moment a construct gains a subclass -- and one already
+    # has. Get-PSCxNodeByKind below is the other question, spelled separately so neither can
+    # quietly answer for the other.
+    [OutputType([object[]])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Ast,
+        [Parameter(Mandatory)] [string]$TypeName
+    )
+    Confirm-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Ast)
+    $bucket = $null
+    if ($script:PSCxTypeNameCache.TryGetValue($TypeName, [ref]$bucket)) { return $bucket }
+    # A type the file contains no instance of. An empty result, never $null: every caller is a
+    # foreach, and the difference between the two is a run that measures nothing while looking
+    # like a run that found nothing.
+    return @()
+}
+
+function Get-PSCxNodeByKind {
+    # Every node ASSIGNABLE to one of these types -- the `-is` test -- in document order.
+    #
+    # Assignability is resolved against the types the file actually holds, not against a list
+    # written here, so a subclass this module has never heard of is still matched. That is not
+    # hypothetical: BaseCtorInvokeMemberExpressionAst derives from InvokeMemberExpressionAst, so
+    # `-is` and `GetType().Name -eq` already disagree on `: base()` chaining, and a bucket lookup
+    # that ignored the difference would silently drop a construct.
+    #
+    # Cached per tree by the set of types asked for, because the answer cannot change while the
+    # index stands and the metrics ask the same handful of questions once each.
+    [OutputType([object[]])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Ast,
+        [Parameter(Mandatory)] [type[]]$Type
+    )
+    Confirm-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Ast)
+    $key = ($Type.FullName -join '|')
+    $cached = $null
+    if ($script:PSCxKindCache.TryGetValue($key, [ref]$cached)) { return $cached }
+    $script:PSCxKindCache[$key] = Get-PSCxKindResult -Type $Type
+    return $script:PSCxKindCache[$key]
+}
+
+function Get-PSCxKindResult {
+    # The union of the buckets assignable to these types, in document order.
+    #
+    # Its own function so Get-PSCxNodeByKind stays a cache read, and so the ordering contract can
+    # be tested without going through a cache that would answer the second call from memory.
+    #
+    # There is no shortcut for the single-bucket case, and that is a decision the mutation gate
+    # forced. It looked free -- hand back the stored list untouched -- but a PowerShell function
+    # UNROLLS a returned list into a fresh array anyway, so the caller cannot tell the two apart
+    # by reference, by content or by order. A branch nothing can observe is one no test can
+    # distinguish from its own absence, which is the shape this module refuses in other people's
+    # code. The union is computed once per type per file and cached, so the copy costs a single
+    # pass over one bucket.
+    [OutputType([object[]])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [type[]]$Type)
+    $merged = [System.Collections.Generic.List[object]]::new()
+    foreach ($t in $script:PSCxTypeCache.Keys) {
+        if (Test-PSCxAssignable -Type $Type -Candidate $t) { $merged.AddRange([object[]]$script:PSCxTypeCache[$t]) }
+    }
+    # Back into document order. A dictionary enumerates its keys in no defined order, so a union
+    # spanning two buckets would otherwise group every node of one type before every node of the
+    # other -- reordering the rows -Detailed publishes, which a reader scans by line.
+    #
+    # Sorted on the recorded walk position rather than on an extent offset: a node and the node it
+    # CONTAINS can start at the same offset, and pre-order puts the container first, which an
+    # offset comparison has no way to know.
+    #
+    # [array]::Sort over a key array rather than Sort-Object, which invokes a PowerShell
+    # scriptblock per comparison -- the exact cost this index exists to stop paying. The keys are
+    # walk positions and so are unique, which is why an unstable sort is safe here.
+    $nodes = $merged.ToArray()
+    $keys = [int[]]@($nodes | ForEach-Object { $script:PSCxOrderCache[$_] })
+    [array]::Sort($keys, $nodes)
+    return $nodes
+}
+
+function Test-PSCxAssignable {
+    # Whether a candidate type satisfies any of the types asked for.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [type[]]$Type,
+        [Parameter(Mandatory)] [type]$Candidate
+    )
+    foreach ($t in $Type) {
+        if ($t.IsAssignableFrom($Candidate)) { return $true }
+    }
+    return $false
 }
 
 function Get-PSCxUnitTable {
