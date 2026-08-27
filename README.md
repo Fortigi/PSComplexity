@@ -18,7 +18,7 @@ the PowerShell AST, and ships a CI gate.
 ## Install
 
 ```powershell
-Install-Module PSComplexity -Scope CurrentUser   # PowerShell 7.2+
+Install-Module PSComplexity -Scope CurrentUser   # PowerShell 7.0+
 ```
 
 ## Use
@@ -484,7 +484,10 @@ the ones that do are attributed in the test suite.
 
 ## Notes / scope
 
-- **PowerShell 7.2+ only** (Core). Windows PowerShell 5.1 is not supported.
+- **PowerShell 7.0+ only** (Core). Windows PowerShell 5.1 is not supported -- the metric scores
+  `&&`, `||`, `??`, `??=` and the ternary, and the AST types for those arrived with the operators
+  themselves in 7.0. Their type names are referenced directly, and an unresolvable type literal is
+  a parse-time failure, so an older host cannot load the module at all rather than degrading.
 - Cognitive complexity is computed via ancestor-based nesting analysis; it reproduces the
   SonarSource reference scores. Mutual (indirect) recursion is not counted — only direct
   self-recursion, matching the common implementation.

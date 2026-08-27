@@ -349,6 +349,28 @@ and expensive to rebuild, and because each one has already earned its keep.
   classic `Should` syntax still legal while its `ci.yml` forbade it -- a publish-time gate weaker
   than the merge gate, which is the direction that matters.
 
+- **A claim about the framework is checkable in ten seconds, so check it before paying for it.**
+  The AST index passed `ReferenceEqualityComparer` explicitly, with a comment saying the default
+  comparer "would conflate" two structurally identical nodes. It would not: `Ast` overrides neither
+  `Equals` nor `GetHashCode`, so `EqualityComparer<object>.Default` is identity already. One probe
+  settles it -- `GetMethod('Equals').DeclaringType` is `System.Object`, and both comparers keep two
+  identical trees apart.
+
+  The cost of not checking was a **version of PowerShell**: that type is .NET 5, so the module's real
+  floor was 7.1 rather than 7.0, in exchange for nothing. The declared floor is what a consumer is
+  told; the real floor is whatever the newest API in `src/` needs, and they drift apart silently
+  because nothing runs on the declared one.
+
+  **The floor is still asserted rather than proven**, and the obvious proof was tried and rejected:
+  `PSUseCompatibleTypes` against a 7.0 profile reports clean on `[System.DateOnly]`, `[System.Half]`
+  and `Get-Error` alike, so a clean result from it says nothing. A real proof needs a CI leg that
+  runs on the oldest supported host. Until then, when you add a `[Type]` to `src/`, check what
+  framework version it arrived in.
+
+  What replaced the comparer is the guard that was always the real one: `tests/Ast.Tests.ps1` keeps
+  two structurally identical trees apart. Verified it can fail -- swap the caches for a comparer
+  that calls everything equal and the second tree answers with the first tree's unit.
+
 - **An acceptance is a checkable claim, and there must never be a plain suppression beside
   it.** `-Accept` names one unit by file AND unit, carries a written argument, and the gate
   THROWS when the claim stops describing the run: no such unit measured, the unit back within
