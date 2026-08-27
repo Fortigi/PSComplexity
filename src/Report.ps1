@@ -86,6 +86,11 @@ function Get-PSCxReportDocument {
     )
     $mode = 'Measure'
     if ($Gate) { $mode = 'Gate' }
+    # Assigned out of the document literal, and typed. A $( ) subexpression unrolls a one-element
+    # array to the element, so a run filtered to a single file wrote a bare string where the
+    # published schema promises a list.
+    $changedFile = $null
+    if ($null -ne $Scan.Scope.ChangedFile) { $changedFile = [string[]]@($Scan.Scope.ChangedFile) }
     $document = [ordered]@{
         # Provenance first, so a reader opening the file sees what produced it before what it says.
         generatedFrom = 'PSComplexity'
@@ -105,6 +110,10 @@ function Get-PSCxReportDocument {
             # Forward slashes, like every File in the same document. A published format that
             # spells one path two ways makes a consumer guess which one it is holding.
             root    = ([string]$Scan.Scope.Root).Replace([System.IO.Path]::DirectorySeparatorChar, '/')
+            # null for a whole-tree run, an array for a diff-scoped one. A consumer reading a
+            # score has to be able to tell which subset it describes, and absent is a different
+            # answer from empty: only one of them may be read as a full measurement.
+            changedFile = $changedFile
         }
         # Beside the summary, never instead of it: an aggregate that cannot say what it excluded
         # is the failure this project exists to find in other people's code.

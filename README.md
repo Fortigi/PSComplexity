@@ -286,6 +286,66 @@ reviewed.
 `-UpdateBaseline` writes no report and no SARIF: the verdict they would record is one the call
 just manufactured by recording every breach.
 
+### Gating a pull request on what it changed
+
+A whole-tree gate answers "is this codebase clean?" when the reviewer is asking "did this PR make
+things worse?". On a change touching two files, the verdict is dominated by code the author did not
+write -- which is how thresholds get raised until they stop meaning anything.
+
+`-ChangedFile` restricts the run to units in the files you name:
+
+```powershell
+$changed = git diff --name-only origin/main...HEAD
+if (-not (Test-PSComplexity ./src -Recurse -ChangedFile $changed)) {
+    throw 'Complexity gate failed'
+}
+```
+
+Together with `-BaselineFile` it covers both halves of the question: **the baseline stops old code
+degrading, the diff scope stops new code arriving over the line.**
+
+**You decide what changed, and that is deliberate.** There is no `-ChangedSince <ref>` that shells
+out to git, because a diff is not a fact this module can compute. It needs a base to compare
+against, and every way that goes wrong goes wrong in the *caller's* environment: a shallow clone
+where `origin/main` was never fetched, a detached HEAD, a ref that does not exist, a merge base
+that is not what the reviewer sees. Resolving it here would turn those into a complexity tool
+refusing to run, several layers from the shell where they can actually be fixed. Running the git
+command yourself keeps the failure where the fix is -- and works just as well with any other VCS,
+or with a CI provider that already hands you the changed-file list.
+
+**An empty list is refused**, and this is the guard that matters:
+
+```
+-ChangedFile was given no files. An empty list would restrict the run to nothing and report a pass
+over zero units, which is the failure this module exists to find -- and it is what a diff command
+prints when it fails, matches nothing, or runs against a shallow clone whose base ref is missing.
+If nothing changed, skip the gate rather than asking it to measure an empty set.
+```
+
+A `git diff` that fails prints nothing and exits 0. Taken at face value that is a confident pass
+over zero units. If your pipeline can genuinely produce "no changed files", skip the step -- that
+is a decision only you can make, and it should be visible in your workflow rather than inferred
+here.
+
+**A filtered run says so.** The gate prints nothing when it passes, so a diff-scoped pass and a
+whole-tree pass would otherwise look identical:
+
+```
+WARNING: Measured 14 unit(s) from 1 changed file(s), not the whole tree. This verdict covers only
+what -ChangedFile named; it is not a statement about the rest of the code.
+```
+
+The JSON report records it too, under `scope.changedFile` -- `null` for a whole-tree run, an array
+for a filtered one. Absent and empty are different answers there: only `null` may be read as a
+measurement of everything under `path`.
+
+**A pull request that changes no PowerShell passes.** Touching only markdown measures nothing, and
+that is an ordinary outcome rather than an error -- the refusal for a run that measured nothing
+applies to whole-tree runs, where it means the gate was pointed at the wrong place.
+
+**Files, not lines.** A file you touched is measured whole. Restricting to units whose own lines
+changed would be sharper and needs hunk data rather than filenames; it is not what this does.
+
 ### A report something else can read
 
 Objects are right for a shell and awkward for everything else. `-ReportPath` writes the same

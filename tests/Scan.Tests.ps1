@@ -352,3 +352,158 @@ Describe 'Get-PSCxMetricVersion' {
         Get-PSCxMetricVersion | Should-Be 1
     }
 }
+
+Describe 'Get-PSCxChangedSet' {
+    # Both sides of the filter have to be spelled the same way or it matches nothing and the run
+    # reports a confident pass over zero units. A list arrives from git as repo-relative with
+    # forward slashes; a record's File comes from Get-PSCxRelativePath.
+
+    It 'treats every spelling of one path as the same entry' {
+        $root = [System.IO.Path]::GetFullPath('/repo')
+        $set = Get-PSCxChangedSet -Root $root -ChangedFile @(
+            'src/A.ps1', './src/A.ps1', (Join-Path $root (Join-Path 'src' 'A.ps1')))
+        $set.Count | Should-Be 1
+        $set.Contains('src/A.ps1') | Should-BeTrue
+    }
+
+    It 'matches case-insensitively' {
+        $set = Get-PSCxChangedSet -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @('SRC/A.PS1')
+        $set.Contains('src/a.ps1') | Should-BeTrue
+    }
+
+    It 'ignores blank entries, which a diff can emit as a trailing line' {
+        $set = Get-PSCxChangedSet -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @('src/A.ps1', '', '   ')
+        $set.Count | Should-Be 1
+    }
+
+    It 'trims surrounding whitespace' {
+        $set = Get-PSCxChangedSet -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @("  src/A.ps1`t")
+        $set.Contains('src/A.ps1') | Should-BeTrue
+    }
+
+    It 'returns an empty SET, not a null, for a list of nothing but blanks' {
+        # A HashSet is enumerable, so returning an empty one unrolls it to nothing and the caller
+        # gets $null -- which then fails to bind several frames from the return that caused it.
+        $set = Get-PSCxChangedSet -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @('')
+        ($null -ne $set) | Should-BeTrue
+        $set.Count | Should-Be 0
+    }
+}
+
+Describe 'Assert-PSCxChangedFile' {
+    It 'accepts a list naming at least one file' {
+        Assert-PSCxChangedFile -ChangedFile @('src/A.ps1')
+        # No exception is the assertion; Pester fails the test on one. Paired with the refusals
+        # below, which is what stops a guard that refuses everything passing this file.
+        $true | Should-BeTrue
+    }
+
+    It 'refuses an empty list' {
+        # An empty list restricts the run to nothing and reports a pass over zero units -- and it
+        # is what a diff command prints when it fails, matches nothing, or runs against a shallow
+        # clone whose base ref is missing.
+        { Assert-PSCxChangedFile -ChangedFile @() } |
+            Should-Throw -ExceptionMessage '*skip the gate rather than asking it to measure an empty set*'
+    }
+
+    It 'refuses a list of nothing but blanks' {
+        # `git diff --name-only` piped through PowerShell can yield an empty trailing line, so a
+        # "non-empty" list is not the same as a list naming a file.
+        { Assert-PSCxChangedFile -ChangedFile @('', '   ') } |
+            Should-Throw -ExceptionMessage '*empty set*'
+    }
+}
+
+Describe 'Get-PSCxSubsetNotice' {
+    It 'says nothing about a whole-tree run' {
+        Get-PSCxSubsetNotice -Scan (Get-PSCxScan -Path @($script:flat)) | Should-BeNull
+    }
+
+    It 'names the counts for a diff-scoped run' {
+        # A filtered pass reported as a whole-tree pass reads as a stronger claim than it is, and
+        # the gate prints nothing at all when it passes.
+        $scan = Get-PSCxScan -Path @($script:work) -Recurse -ChangedFile @($script:flat)
+        $notice = Get-PSCxSubsetNotice -Scan $scan
+        $notice | Should-BeLikeString '*not the whole tree*'
+        $notice | Should-BeLikeString '*1 changed file(s)*'
+    }
+}
+
+Describe 'Get-PSCxScan -ChangedFile' {
+    It 'measures only the units in the files named' {
+        $scan = Get-PSCxScan -Path @($script:work) -Recurse -ChangedFile @($script:flat)
+        @($scan.Units | ForEach-Object Unit) | Should-ContainCollection 'Get-Flat'
+        @($scan.Units | ForEach-Object Unit) | Should-NotContainCollection 'Get-Deep'
+    }
+
+    It 'measures everything when the parameter is omitted' {
+        # The kept half. Without it a filter that excluded everything would pass the case above.
+        $scan = Get-PSCxScan -Path @($script:work) -Recurse
+        @($scan.Units | ForEach-Object Unit) | Should-ContainCollection 'Get-Deep'
+    }
+
+    It 'records the filter in Scope as an ARRAY, even for one file' {
+        # A $( ) subexpression unrolls a one-element array to the element, so a run filtered to a
+        # single file recorded a bare string where every consumer expects a list -- and the report
+        # then serialised it as one, which the published schema rejects.
+        $scan = Get-PSCxScan -Path @($script:work) -Recurse -ChangedFile @($script:flat)
+        $scan.Scope.ChangedFile -is [array] | Should-BeTrue
+        @($scan.Scope.ChangedFile).Count | Should-Be 1
+    }
+
+    It 'records NULL, not an empty list, for a whole-tree run' {
+        # Absent and empty are different answers: only one of them may be read as a measurement
+        # of everything under Path.
+        (Get-PSCxScan -Path @($script:flat)).Scope.ChangedFile | Should-BeNull
+    }
+
+    It 'measures nothing when the changed files hold no source' {
+        # An ordinary outcome -- a pull request that touches only markdown -- and not an error.
+        # What makes it safe is that Scope still says a filter was applied.
+        $scan = Get-PSCxScan -Path @($script:work) -Recurse -ChangedFile @('notes.txt')
+        @($scan.Units).Count | Should-Be 0
+        $scan.Scope.ChangedFile | Should-NotBeNull
+    }
+}
+
+Describe 'Get-PSCxEmptyScanFault' {
+    # "No unit breached a ceiling" and "no unit was measured" are the same $true, so a gate
+    # pointed at the wrong place reports clean. Tested HERE and not only through the gate:
+    # Scan.ps1's covering suite is this file, so a test in the other one covers these lines
+    # without being able to kill their mutants.
+
+    It 'says nothing when units were measured' {
+        Get-PSCxEmptyScanFault -UnitCount 3 -Filtered $false -Path @('./src') -Recurse $true |
+            Should-BeNull
+    }
+
+    It 'refuses a whole-tree run that measured nothing, naming the paths' {
+        Get-PSCxEmptyScanFault -UnitCount 0 -Filtered $false -Path @('./a', './b') -Recurse $true |
+            Should-BeLikeString '*./a, ./b*describe an empty set*'
+    }
+
+    It 'allows a DIFF-SCOPED run that measured nothing' {
+        # An ordinary pull request touching only markdown. Refusing it would fail every such
+        # build, and the subset notice is what keeps the pass honest instead.
+        Get-PSCxEmptyScanFault -UnitCount 0 -Filtered $true -Path @('./src') -Recurse $true |
+            Should-BeNull
+    }
+
+    It 'suggests -Recurse only when it was not given' {
+        # Both halves: the hint is useless noise on a run that already recursed, and the missing
+        # switch is the most common reason a flat scan finds nothing.
+        Get-PSCxEmptyScanFault -UnitCount 0 -Filtered $false -Path @('./src') -Recurse $false |
+            Should-BeLikeString '*add -Recurse*'
+        Get-PSCxEmptyScanFault -UnitCount 0 -Filtered $false -Path @('./src') -Recurse $true |
+            Should-NotBeLikeString '*add -Recurse*'
+    }
+
+    It 'is the COUNT that matters, not merely being filtered' {
+        # The guard is `UnitCount -gt 0 -or Filtered`. A filtered run that DID measure something
+        # is fine for both reasons, so it cannot tell the two halves apart -- these two can.
+        Get-PSCxEmptyScanFault -UnitCount 1 -Filtered $false -Path @('./src') -Recurse $true |
+            Should-BeNull
+        Get-PSCxEmptyScanFault -UnitCount 0 -Filtered $false -Path @('./src') -Recurse $true |
+            Should-NotBeNull
+    }
+}

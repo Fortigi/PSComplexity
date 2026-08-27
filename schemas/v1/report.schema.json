@@ -57,7 +57,8 @@
       "properties": {
         "path": { "type": "array", "items": { "type": "string" } },
         "recurse": { "type": "boolean" },
-        "root": { "type": "string", "description": "The working directory the File fields are relative to." }
+        "root": { "type": "string", "description": "The working directory the File fields are relative to." },
+        "changedFile": { "type": ["array", "null"], "items": { "type": "string" }, "description": "The files a diff-scoped run was restricted to, or null for a whole-tree run. Absent-versus-empty matters: only null may be read as a measurement of everything under `path`. A type union rather than oneOf, because oneOf reports a failure in every branch and drags a bogus complaint about this key along with any unrelated mistake elsewhere in the file." }
       }
     },
     "skipped": {

@@ -1518,3 +1518,101 @@ function Invoke-Twice { param($a, $b) if ($a) { if ($b) { 2 } } }
         }
     }
 }
+
+Describe 'measuring only what changed' {
+    # The gate is whole-tree, so on a pull request touching two files the verdict is dominated by
+    # code the author did not write -- which is why teams raise the threshold until it stops
+    # meaning anything. -ChangedFile restricts the run to units in the files a caller says changed.
+
+    BeforeAll {
+        $script:chgA = Join-Path $script:work 'a.ps1'
+        $script:chgDocs = Join-Path $script:work 'notes-for-changed.md'
+        Set-Content -LiteralPath $script:chgDocs -Value '# not powershell' -Encoding utf8
+    }
+
+    It 'restricts the record stream to the files named' {
+        $units = @(Measure-PSComplexity -Path $script:work -Recurse -ChangedFile @($script:chgA))
+        @($units | ForEach-Object Unit) | Should-ContainCollection 'Get-A'
+        @($units | ForEach-Object Unit) | Should-NotContainCollection 'Get-B'
+    }
+
+    It 'measures everything when the parameter is omitted' {
+        # The kept half: without it, a filter excluding everything would satisfy the case above.
+        @(Measure-PSComplexity -Path $script:work -Recurse | ForEach-Object Unit) |
+            Should-ContainCollection 'Get-B'
+    }
+
+    It 'filters the same way WITH -ReportPath as without it' {
+        # Two output paths reach the same files by different routes -- a streaming walk, and one
+        # scan in `end` -- and the filter was wired to only the second. The command then answered
+        # differently depending on whether a report was asked for, which is not a difference any
+        # caller would expect a report path to make.
+        $rp = Join-Path $script:work 'changed-report.json'
+        $streamed = @(Measure-PSComplexity -Path $script:work -Recurse -ChangedFile @($script:chgA))
+        $reported = @(Measure-PSComplexity -Path $script:work -Recurse -ChangedFile @($script:chgA) -ReportPath $rp)
+        (@($streamed | ForEach-Object Unit | Sort-Object) -join ',') |
+            Should-Be (@($reported | ForEach-Object Unit | Sort-Object) -join ',')
+    }
+
+    It 'refuses an empty list rather than measuring nothing' {
+        # An empty list is what a diff command prints when it fails, matches nothing, or runs
+        # against a shallow clone whose base ref is missing. Taken at face value it reports a
+        # confident pass over zero units.
+        { Measure-PSComplexity -Path $script:work -Recurse -ChangedFile @() } |
+            Should-Throw -ExceptionMessage '*measure an empty set*'
+    }
+}
+
+Describe 'the gate, measuring only what changed' {
+    BeforeAll {
+        $script:gateA = Join-Path $script:work 'a.ps1'
+        $script:gateDocs = Join-Path $script:work 'notes-for-gate.md'
+        Set-Content -LiteralPath $script:gateDocs -Value '# not powershell' -Encoding utf8
+    }
+
+    It 'judges only the units in the files named' {
+        # Ceilings low enough that the whole tree fails, so a filtered pass is a real difference
+        # rather than a run that would have passed anyway.
+        Test-PSComplexity -Path $script:work -Recurse -MaxCyclomatic 2 -MaxCognitive 1 `
+            -WarningAction SilentlyContinue | Should-BeFalse
+        Test-PSComplexity -Path $script:work -Recurse -MaxCyclomatic 2 -MaxCognitive 1 `
+            -ChangedFile @($script:gateA) -WarningAction SilentlyContinue | Should-BeTrue
+    }
+
+    It 'says out loud that it measured a subset' {
+        # A filtered pass reported as a whole-tree pass is worse than no gate: it reads as a
+        # stronger claim than it is, and a passing gate otherwise prints nothing at all.
+        $warnings = @()
+        Test-PSComplexity -Path $script:work -Recurse -ChangedFile @($script:gateA) `
+            -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        (@($warnings) -join ' ') | Should-BeLikeString '*not the whole tree*'
+    }
+
+    It 'says nothing of the sort about a whole-tree run' {
+        $warnings = @()
+        Test-PSComplexity -Path $script:work -Recurse `
+            -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+        (@($warnings) -join ' ') | Should-NotBeLikeString '*not the whole tree*'
+    }
+
+    It 'passes when the changed files hold no source at all' {
+        # An ordinary pull request touching only markdown. The unfiltered gate REFUSES a run that
+        # measured nothing, and that refusal must not fire here -- it would fail every docs-only
+        # build. What keeps it honest is the subset notice above, not a refusal.
+        Test-PSComplexity -Path $script:work -Recurse -ChangedFile @($script:gateDocs) `
+            -WarningAction SilentlyContinue | Should-BeTrue
+    }
+
+    It 'still refuses a whole-tree run that measured nothing' {
+        # The paired half, and the one that must not be weakened: with no filter, measuring
+        # nothing means the gate was pointed at the wrong place, and a pass would describe an
+        # empty set.
+        { Test-PSComplexity -Path (Join-Path $script:work 'no-such-dir') -Recurse `
+                -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*Measured no units*'
+    }
+
+    It 'refuses an empty list' {
+        { Test-PSComplexity -Path $script:work -Recurse -ChangedFile @() `
+                -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*measure an empty set*'
+    }
+}

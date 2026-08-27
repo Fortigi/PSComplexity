@@ -164,6 +164,23 @@ re-read by whoever edits the file; a baseline is committed once and reviewed rar
 entry with an ordinal in it is **refused** rather than approximated. A line number is no better
 and worse in the ordinary case, where it churns on every edit above the unit.
 
+**Who decides what "changed" is, is the decision #7 owned.** `-ChangedFile` takes a list; there
+is deliberately no `-ChangedSince <ref>`. A diff is not a fact this module can compute -- it needs
+a base, and every way that goes wrong goes wrong in the CALLER's environment: a shallow clone where
+the ref was never fetched, a detached HEAD, a merge base that is not what the reviewer sees.
+Resolving it here would turn those into a complexity tool refusing to run, several layers from the
+shell where they can be fixed. It also keeps this module free of an external process, which it has
+never had.
+
+The guard that earns its place is the **empty list**: a `git diff` that fails prints nothing and
+exits 0, and taken at face value that is a confident pass over zero units. So an empty
+`-ChangedFile` is refused, while a run whose changed files simply hold no PowerShell passes and
+says so -- those are different situations and only one of them indicates a broken pipeline.
+
+A filtered run emits a notice because a passing gate is otherwise silent, and `scope.changedFile`
+in the report is `null` for a whole-tree run rather than `[]`: absent and empty are different
+answers, and only absent may be read as a measurement of everything under `path`.
+
 ## What a "unit" is
 
 A unit is anything with a body that gets gated on its own: a function/filter, a class

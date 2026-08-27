@@ -95,6 +95,10 @@ function Measure-PSComplexity {
         [Parameter(Mandatory, ValueFromPipeline, Position = 0)] [ValidateNotNullOrEmpty()] [string[]]$Path,
         [switch]$Recurse,
         [string]$ReportPath,
+        # Files a caller says changed, restricting the run to units in them. Omit it for a
+        # whole-tree run; an EMPTY list is refused rather than treated as "nothing changed",
+        # because that is what a diff command returns when it has failed.
+        [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ChangedFile,
         # Off by default because the DEFAULT SHAPE IS A CONTRACT: CI consumers parse these
         # records, and a field that appears unbidden is a breaking change dressed as a feature.
         [switch]$Detailed
@@ -110,6 +114,17 @@ function Measure-PSComplexity {
         # cost is nil, and a guard here would be a branch nothing could observe. The report has
         # to say what the WHOLE run was asked for, and paths arrive one invocation at a time.
         $asked = [System.Collections.Generic.List[string]]::new()
+        # Built ONCE, here, so both output paths filter identically. The streaming path below and
+        # the single scan in `end` reach the same files by different routes, and a filter applied
+        # to only one of them makes the answer depend on whether -ReportPath was given -- which is
+        # exactly the bug this had while the two were wired separately.
+        #
+        # Validated here too, so an empty list is refused whichever route the run takes.
+        $changedSet = $null
+        if ($PSBoundParameters.ContainsKey('ChangedFile')) {
+            Assert-PSCxChangedFile -ChangedFile $ChangedFile
+            $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root (Get-Location).Path
+        }
     }
     process {
         $asked.AddRange([string[]]$Path)
@@ -117,7 +132,7 @@ function Measure-PSComplexity {
         # Accumulating per file here would need three guards that only save memory -- and a
         # branch that changes no output cannot be told from its own absence by any test.
         if ($ReportPath) { return }
-        foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Recurse:$Recurse -Detailed:$Detailed)) {
+        foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -ChangedSet $changedSet -Recurse:$Recurse -Detailed:$Detailed)) {
             # The projection: units to the output stream, a skip to the error stream.
             #
             # Write-Error rather than a warning: CI logs routinely swallow warnings, and this
@@ -136,7 +151,12 @@ function Measure-PSComplexity {
         # One scan over everything the run was asked for, walking each file once exactly as the
         # streaming path does. What it gives up is emitting as it goes, which is the price of a
         # report that has to describe the whole run at once.
-        $scan = Get-PSCxScan -Path $asked.ToArray() -Recurse:$Recurse -Detailed:$Detailed
+        $scanArgs = @{ Path = $asked.ToArray(); Recurse = $Recurse; Detailed = $Detailed }
+        if ($PSBoundParameters.ContainsKey('ChangedFile')) {
+            Assert-PSCxChangedFile -ChangedFile $ChangedFile
+            $scanArgs.ChangedFile = $ChangedFile
+        }
+        $scan = Get-PSCxScan @scanArgs
         # The same projection the streaming path makes: units out, a skip to the error stream.
         # Rendered here too, so -ReportPath does not quietly silence the one thing the command
         # says when it could not read a file.
@@ -261,6 +281,11 @@ function Test-PSComplexity {
         [switch]$Recurse,
         [string]$ReportPath,
         [string]$SarifPath,
+        # Files a caller says changed, restricting the run to units in them. Omit it for a
+        # whole-tree run; an EMPTY list is refused rather than treated as "nothing changed",
+        # because that is what a diff command returns when it has failed.
+        [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ChangedFile,
+
         # Empty is the normal case, and an empty array must bind rather than be rejected.
         [AllowEmptyCollection()] [object[]]$Accept = @(),
         [string]$BaselineFile,
@@ -289,7 +314,12 @@ function Test-PSComplexity {
         # holds; reading it back off the error stream required -ErrorAction SilentlyContinue,
         # which swallowed every OTHER error into the same variable and then described it to
         # the caller as a file that did not parse.
-        $scan = Get-PSCxScan -Path $paths -Recurse:$Recurse
+        $scanArgs = @{ Path = $paths; Recurse = $Recurse }
+        if ($PSBoundParameters.ContainsKey('ChangedFile')) {
+            Assert-PSCxChangedFile -ChangedFile $ChangedFile
+            $scanArgs.ChangedFile = $ChangedFile
+        }
+        $scan = Get-PSCxScan @scanArgs
         # Parse failures are refused rather than allowed past. A file the gate could not read
         # is a file it cannot vouch for, and "no unit exceeded a ceiling" is trivially true of
         # a file that produced no units -- the same shape as passing over an empty selection.
@@ -300,15 +330,16 @@ function Test-PSComplexity {
         }
         $units = $scan.Units
 
-        # Refuse rather than pass. "No unit breached a ceiling" and "no unit was measured"
-        # are the same $true, so a gate pointed at the wrong place reports clean -- which is
-        # the failure this module exists to find in other people's code.
-        if ($units.Count -eq 0) {
-            $hint = if ($Recurse) { '' } else { ', or add -Recurse if they are in subdirectories' }
-            throw ("Measured no units under: " + ($paths -join ', ') + ". Nothing was checked, " +
-                "so a pass here would describe an empty set. Check the path exists and holds " +
-                ".ps1 or .psm1 files" + $hint + '.')
-        }
+        # Before the verdict, so it is on screen whether the run passes or fails. A pass is the
+        # case that needs it: a failing gate already prints what breached.
+        $notice = Get-PSCxSubsetNotice -Scan $scan
+        if ($notice) { Write-Warning $notice }
+
+        # The decision lives in Scan.ps1 beside the scan it judges: it is a rule about what a
+        # measurement is worth, and this command is meant to stay a thin predicate.
+        $emptyFault = Get-PSCxEmptyScanFault -UnitCount $units.Count -Path $paths `
+            -Recurse:$Recurse -Filtered $PSBoundParameters.ContainsKey('ChangedFile')
+        if ($emptyFault) { throw $emptyFault }
 
         # Checked BEFORE the verdict, and thrown rather than returned as $false. A stale
         # acceptance is a fault in the policy, not a complaint about the code -- reporting it
