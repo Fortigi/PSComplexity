@@ -295,8 +295,9 @@ and expensive to rebuild, and because each one has already earned its keep.
   claiming only to write it down.
 
   This file was deliberately not written earlier. With no interior node a cycle was unreachable
-  and an allowlist would have been ceremony; `ROADMAP.md` recorded the condition for revisiting
-  and `src/Report.ps1` met it. Writing it while the edges are few and obviously correct is the
+  and an allowlist would have been ceremony. The condition for revisiting was recorded in advance
+  -- a module that both exported commands consume, living in its own file -- and `src/Report.ps1`
+  met it. Writing it while the edges are few and obviously correct is the
   cheap moment -- ratifying a graph nobody remembers agreeing to is the expensive one.
 
   There is no "one Write-Host" assertion like the sibling's, and that is deliberate:

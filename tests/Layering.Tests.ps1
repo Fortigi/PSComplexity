@@ -7,7 +7,7 @@
 #
 # This file was deliberately NOT written while the graph had no interior node: with five files
 # and every arrow pointing at a sink, a cycle was not reachable and an allowlist would have been
-# ceremony. ROADMAP.md recorded the condition for revisiting -- a module that both exported
+# ceremony. The condition for revisiting was recorded in advance -- a module that both exported
 # commands consume, living in its own file -- and src/Report.ps1 met it.
 #
 # Two things this test does NOT have to work around, unlike the sibling project's version:
