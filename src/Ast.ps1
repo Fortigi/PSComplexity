@@ -72,14 +72,20 @@ $script:PSCxUnitBoundaryTypes = @(
 # node count and depth grow together the total is quadratic: measured, a file nested 200 deep cost
 # 1.84s of CPU for 3 KB of source, while 52 KB of ordinary code cost 3.0s.
 #
-# Reference equality, not value equality: two AST nodes with identical content are different nodes,
-# and the default comparer would conflate them. Keyed on the node object itself, so entries from one
-# parse can never answer a question about another.
+# Keyed on the node OBJECT: two AST nodes with identical content are different nodes and must not
+# collide, so entries from one parse can never answer a question about another.
+#
+# The default comparer already gives that, and passing one explicitly is what NOT to do here. Ast
+# overrides neither Equals nor GetHashCode, so EqualityComparer<object>.Default is identity;
+# naming ReferenceEqualityComparer to say so costs a .NET 5 type and raises this module's floor
+# from PowerShell 7.0 to 7.1 in exchange for nothing. tests/Ast.Tests.ps1 pins the assumption with
+# two structurally identical trees that must stay apart -- if Ast ever gains value equality, that
+# test is what fails.
 #
 # Cleared per file by Clear-PSCxAstCache. Without that the tables grow for the life of the process,
 # which for a gate over a large tree is every node of every file.
-$script:PSCxBoundaryCache = [System.Collections.Generic.Dictionary[object, object]]::new([System.Collections.Generic.ReferenceEqualityComparer]::Instance)
-$script:PSCxNestingCache = [System.Collections.Generic.Dictionary[object, object]]::new([System.Collections.Generic.ReferenceEqualityComparer]::Instance)
+$script:PSCxBoundaryCache = [System.Collections.Generic.Dictionary[object, object]]::new()
+$script:PSCxNestingCache = [System.Collections.Generic.Dictionary[object, object]]::new()
 
 function Get-PSCxAstRoot {
     # The top of the tree a node belongs to.

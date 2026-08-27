@@ -5,6 +5,38 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-27
+
+### For consumers
+
+**The minimum PowerShell version is now 7.0, down from 7.2.** The old floor was set in the first
+commit and never justified; nothing in the module needed it. The real constraint is 7.0, and it is
+a hard one: the metric scores `&&`, `||`, `??`, `??=` and the ternary, the AST types for those
+arrived with the operators themselves in 7.0, and their type names are referenced directly -- an
+unresolvable type literal is a parse-time failure, so an older host cannot load the module at all
+rather than degrading quietly.
+
+Nothing else changes. If you are already on 7.2 or newer, this release is identical to 0.4.0 in
+behaviour.
+
+**The floor is still a claim rather than a checked fact**, and that is worth saying plainly: no CI
+leg runs on 7.0. `PSUseCompatibleTypes` was tried as a proof and rejected -- against a 7.0 profile
+it reports clean on `[System.DateOnly]`, `[System.Half]` and `Get-Error` alike, so a clean result
+from it means nothing at all.
+
+### Internal
+
+- **The AST index no longer names `ReferenceEqualityComparer`.** It was passed explicitly on the
+  stated grounds that "the default comparer would conflate" two structurally identical nodes. That
+  was false: `Ast` overrides neither `Equals` nor `GetHashCode`, so `EqualityComparer<object>.Default`
+  is identity already -- measured, both comparers keep two identical trees apart. The explicit type
+  is from .NET 5, so the claim cost a version of PowerShell and bought nothing, raising the module's
+  real floor to 7.1 for the four days it existed.
+
+  The assumption it was trying to state is now a comment plus the test that enforces it:
+  `tests/Ast.Tests.ps1` keeps two structurally identical trees apart, which is what fails if `Ast`
+  ever gains value equality.
+
 ## [0.4.0] - 2026-08-23
 
 ### For consumers
