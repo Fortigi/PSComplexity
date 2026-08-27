@@ -109,6 +109,17 @@ jobs:
           Import-Module ./PSComplexity.psd1 -Force
           Get-Command Measure-PSComplexity, Test-PSComplexity -ErrorAction Stop | Out-Null
 
+      # Early, because it is a text check costing under a second and the alternative is learning
+      # that a workflow lost its timeout after sixteen minutes of mutation testing.
+      #
+      # It watches THIS directory for drift from the sibling module's, which nothing did: the two
+      # repos gate each other, so their CI is assumed comparable, and it was not -- in thirteen
+      # ways at once. Each workflow reads fine on its own, which is why only a shared rule set
+      # catches it.
+      - name: CI parity (the capabilities both repos share)
+        shell: pwsh
+        run: ./tools/Test-PSCxCiParity.ps1
+
       - name: Release consistency (ModuleVersion, CHANGELOG, ReleaseNotes)
         shell: pwsh
         # -CheckGallery here and not locally: the question is whether this version has
