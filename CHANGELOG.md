@@ -122,6 +122,32 @@ keys it holds could not distinguish units the tool could.
 
 ### Internal
 
+- **A node's enclosing unit and nesting depth are computed in one descent, making the cost linear
+  in file size.** They were found by walking up from each node to its unit, from twelve call sites,
+  once per matched node -- quadratic where node count and depth grow together. Both values are
+  defined against a node's parent, so one pre-order pass computes them for the whole tree.
+
+  Reproducing the issue's own table, CPU seconds, cognitive identical at every depth:
+
+  | nesting depth | before | after |
+  |---|---|---|
+  | 100 | 0.73s | **0.30s** |
+  | 200 | 2.36s | **0.62s** |
+  | 400 | 4.72s | **1.31s** |
+
+  Per doubling the old cost grew 3.2x then 2.0x; the new one grows 2.07x then 2.11x -- linear.
+  Verified byte-identical over 514 rows of units, scores and per-increment contributions across
+  five corpora, including a flat 52 KB file and nesting 400 deep.
+
+- **The unit table is built once per file instead of three times.** `Get-PSCxUnitTable` is a full
+  AST traversal invoking a PowerShell predicate per node, and it ran once for the line numbers and
+  again inside each of the two metric maps -- three identical walks of the same tree. The maps now
+  receive it.
+
+  Measured at roughly **8% less CPU** on a 52 KB corpus, with byte-identical output. The issue
+  reported 18%; that did not reproduce, and two wall-clock A/B runs disagreed about the sign until
+  the comparison was interleaved and switched to CPU time.
+
 - **The scan moved to `src/Scan.ps1`, with its own covering suite.** `Measure-PSComplexity.ps1` is
   now the two public projections and nothing else, which is the seam its own docstring already
   described. 37 mutants stopped paying for the 18-second measuring suite and now run against one

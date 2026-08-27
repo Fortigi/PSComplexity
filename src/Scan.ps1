@@ -249,6 +249,10 @@ function Get-PSCxFileScan {
     )
     $errors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($File, [ref]$null, [ref]$errors)
+    # The per-node answer tables are for THIS file. Keyed by node reference they can never answer
+    # wrongly across parses, so this is about memory rather than correctness: without it a gate
+    # over a large tree holds every node of every file it has seen.
+    Clear-PSCxAstCache
     # Relative to where the caller is standing, which for a repo-scoped run is the repo. Not a
     # parameter: a root nobody passes is a root nobody gets wrong. Resolved for BOTH arms, so a
     # skipped file is named the same way a measured one is.
@@ -263,9 +267,12 @@ function Get-PSCxFileScan {
         }
     }
 
-    $cyc = Get-PSCxCyclomaticMap -Ast $ast
-    $cog = Get-PSCxCognitiveMap -Ast $ast
+    # ONE traversal, shared. Get-PSCxUnitTable is a full FindAll walk that invokes a PowerShell
+    # predicate for every node, and it used to run three times against the same AST in a single
+    # pass -- once here for the line numbers, and once inside each metric map.
     $lines = Get-PSCxUnitTable -Ast $ast
+    $cyc = Get-PSCxCyclomaticMap -Ast $ast -UnitTable $lines
+    $cog = Get-PSCxCognitiveMap -Ast $ast -UnitTable $lines
     # Source order, not hashtable order. .NET enumerates a hashtable by bucket layout, which is
     # neither insertion nor line order and is not required to be stable -- so two runs over one
     # unchanged file could emit the same rows in different sequences. Nothing here noticed,

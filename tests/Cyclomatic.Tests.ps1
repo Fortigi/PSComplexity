@@ -99,7 +99,7 @@ function T {
         # is what corrected it.
         $rows = @(Get-PSCxCycClauseRow -Ast $script:CycAttrAst) + @(Get-PSCxCycBlockRow -Ast $script:CycAttrAst) +
                 @(Get-PSCxCycFlowCommandRow -Ast $script:CycAttrAst) + @(Get-PSCxCycOperatorRow -Ast $script:CycAttrAst)
-        $map = Get-PSCxCyclomaticMap -Ast $script:CycAttrAst
+        $map = Get-PSCxCyclomaticMap -Ast $script:CycAttrAst -UnitTable (Get-PSCxUnitTable -Ast $script:CycAttrAst)
         $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
         $unitRows = @($rows | Where-Object { $_.Key -eq $unit })
         $map[$unit] | Should-Be (1 + (($unitRows | Measure-Object Amount -Sum).Sum))

@@ -344,7 +344,7 @@ function T {
         # on when it reads a breakdown next to a score -- and it is the check that fails if the
         # grouping drops a row on the way, which the summed map would not notice.
         $map = Get-PSCxContributionMap -Ast $script:AttrAst
-        $sums = Get-PSCxCognitiveMap -Ast $script:AttrAst
+        $sums = Get-PSCxCognitiveMap -Ast $script:AttrAst -UnitTable (Get-PSCxUnitTable -Ast $script:AttrAst)
         $unit = @($sums.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
         (($map[$unit] | Measure-Object Amount -Sum).Sum) | Should-Be $sums[$unit]
     }
@@ -360,7 +360,7 @@ function T {
     It 'leaves the summed map exactly as it was' {
         # The point of keeping the maps as projections: the published number must not move
         # because the intermediate representation grew a field.
-        $map = Get-PSCxCognitiveMap -Ast $script:AttrAst
+        $map = Get-PSCxCognitiveMap -Ast $script:AttrAst -UnitTable (Get-PSCxUnitTable -Ast $script:AttrAst)
         $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
         # foreach(1) + if(1 + 1 nesting) + boolean run(1) = 4
         $map[$unit] | Should-Be 4
