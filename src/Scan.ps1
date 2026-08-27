@@ -91,6 +91,112 @@ function Get-PSCxRelativePath {
     return $full.Substring($rootFull.Length).Replace([System.IO.Path]::DirectorySeparatorChar, '/')
 }
 
+function Get-PSCxChangedSet {
+    # The caller's changed-file list, normalised into a set the scan can compare against.
+    #
+    # Both sides have to be spelled the same way or the filter matches nothing and the run reports
+    # a confident pass over zero units. A list comes from git as repo-relative with forward
+    # slashes; a File on a record comes from Get-PSCxRelativePath. Putting both through the same
+    # function is what makes 'src/A.ps1', './src/A.ps1', 'src\A.ps1' and an absolute path the same
+    # entry.
+    #
+    # OrdinalIgnoreCase for the same reason the rest of this module uses it: a config that fails on
+    # one platform and not the other is worse than one that fails on both.
+    [OutputType([System.Collections.Generic.HashSet[string]])]
+    [CmdletBinding()]
+    param(
+        # AllowEmptyString as well as AllowEmptyCollection: a Mandatory [string[]] rejects a
+        # blank ENTRY, and `git diff --name-only` piped through PowerShell routinely yields one
+        # as a trailing line. Without it the blank-skipping below is unreachable and the caller
+        # gets a binding error instead.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ChangedFile,
+        [Parameter(Mandatory)] [string]$Root
+    )
+    $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($f in $ChangedFile) {
+        if ([string]::IsNullOrWhiteSpace($f)) { continue }
+        [void]$set.Add((Get-PSCxRelativePath -Path $f.Trim() -Root $Root))
+    }
+    # -NoEnumerate, because a HashSet is enumerable and PowerShell unrolls it on the way out: an
+    # empty one becomes $null and a one-element one becomes the STRING it holds -- both of which
+    # fail to bind several frames away from the return that caused them. The comma-wrap does the
+    # same job and declares an object[], which is not what this returns.
+    Write-Output -InputObject $set -NoEnumerate
+}
+
+function Get-PSCxEmptyScanFault {
+    # Why a run that measured nothing cannot be believed, or $null when it can.
+    #
+    # "No unit breached a ceiling" and "no unit was measured" are the same $true, so a gate
+    # pointed at the wrong place reports clean -- the failure this module exists to find in other
+    # people's code.
+    #
+    # NOT for a diff-scoped run. There, measuring nothing is an ordinary outcome -- a pull request
+    # touching only markdown -- and refusing it would fail every such build. What keeps that
+    # honest is the subset notice below, not a refusal; and the empty changed-file LIST, which is
+    # the case that actually indicates a broken diff command, is refused separately.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [int]$UnitCount,
+        [Parameter(Mandatory)] [bool]$Filtered,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$Path,
+        [Parameter(Mandatory)] [bool]$Recurse
+    )
+    if ($UnitCount -gt 0 -or $Filtered) { return $null }
+    $hint = if ($Recurse) { '' } else { ', or add -Recurse if they are in subdirectories' }
+    return ('Measured no units under: ' + ($Path -join ', ') + '. Nothing was checked, so a pass ' +
+        'here would describe an empty set. Check the path exists and holds .ps1 or .psm1 files' +
+        $hint + '.')
+}
+
+function Get-PSCxSubsetNotice {
+    # What a diff-scoped run must say out loud, or $null for a whole-tree run.
+    #
+    # A filtered pass reported as a whole-tree pass is worse than no gate: it reads as a stronger
+    # claim than it is, and the reader has no way to tell. The gate prints nothing at all when it
+    # passes, so without this a run over two files and a run over the repository are the same
+    # silence.
+    #
+    # Text rather than a Write-Warning here, so the sentence is a value a test can compare and the
+    # caller decides which stream it belongs on.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Scan)
+    if ($null -eq $Scan.Scope.ChangedFile) { return $null }
+    $files = @($Scan.Scope.ChangedFile).Count
+    $units = @($Scan.Units).Count
+    return ("Measured $units unit(s) from $files changed file(s), not the whole tree. This verdict " +
+        'covers only what -ChangedFile named; it is not a statement about the rest of the code.')
+}
+
+function Assert-PSCxChangedFile {
+    # Refuse a changed-file list that is empty, naming why.
+    #
+    # An empty list means "nothing changed", and taken at face value it produces a confident pass
+    # over zero units -- the vacuous score this module exists to find in other people's code,
+    # aimed inward. It is also the single most likely thing a caller passes by accident: a git
+    # command that failed, matched nothing, or ran against a shallow clone where the base ref does
+    # not exist prints nothing and exits 0.
+    #
+    # A caller who genuinely has no changed files wants to SKIP the gate, and that is a decision
+    # only they can make -- so it is theirs to make, in their own script, where it is visible.
+    [OutputType([void])]
+    [CmdletBinding()]
+    param(
+        # AllowEmptyString for the same reason as Get-PSCxChangedSet: a blank entry is what a
+        # diff emits as a trailing line, and rejecting it at the binder turns the refusal this
+        # function exists to make into a message about parameter binding.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [AllowNull()] [AllowEmptyString()] [string[]]$ChangedFile
+    )
+    if (@($ChangedFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) { return }
+    throw ('-ChangedFile was given no files. An empty list would restrict the run to nothing and ' +
+        'report a pass over zero units, which is the failure this module exists to find -- and it ' +
+        'is what a diff command prints when it fails, matches nothing, or runs against a shallow ' +
+        'clone whose base ref is missing. If nothing changed, skip the gate rather than asking it ' +
+        'to measure an empty set.')
+}
+
 function Get-PSCxUnitRecord {
     # Shape one output record. The only place the published shape is decided.
     #
@@ -216,14 +322,24 @@ function Get-PSCxPathScan {
         # caller happens to report errors -- the gate described it as a file that did not
         # parse, which is the same class of misdiagnosis this scan exists to end.
         [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.Generic.HashSet[string]]$Seen,
+        # $null means no filter. An EMPTY set would be ambiguous -- "nothing changed" and "no
+        # filter was asked for" are different answers -- so the public commands refuse an empty
+        # list rather than passing one down.
+        [System.Collections.Generic.HashSet[string]]$ChangedSet,
         [switch]$Recurse,
         [switch]$Detailed
     )
+    $root = (Get-Location).Path
     foreach ($p in $Path) {
         foreach ($file in (Get-PSCxSourceFile -Path $p -Recurse:$Recurse)) {
             # OrdinalIgnoreCase: Windows and macOS resolve the same file under different
             # casing, and a case-sensitive check would let those through as two files.
             if (-not $Seen.Add($file)) { continue }
+            # BEFORE the parse, so a diff-scoped run over a large tree does not read every file
+            # only to throw most of them away. The verdict is identical either way; the cost is
+            # not, and cost is most of why anyone asks for a diff-scoped run.
+            if ($null -ne $ChangedSet -and
+                -not $ChangedSet.Contains((Get-PSCxRelativePath -Path $file -Root $root))) { continue }
             # BEFORE the parse, not after. A line written afterwards names files that are
             # already done, so a scan stuck on one file looks exactly like a scan that has
             # finished -- which is the whole complaint. Named here, the last line printed IS
@@ -253,23 +369,49 @@ function Get-PSCxScan {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string[]]$Path,
+        # The files a caller says changed, or the parameter omitted for a whole-tree scan. It is
+        # recorded in Scope, because a number over a subset that cannot say WHICH subset is worse
+        # than no number: it reads as a stronger claim than it is.
+        [AllowEmptyCollection()] [string[]]$ChangedFile,
         [switch]$Recurse,
         [switch]$Detailed
     )
     $units = [System.Collections.Generic.List[object]]::new()
     $skipped = [System.Collections.Generic.List[object]]::new()
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Recurse:$Recurse -Detailed:$Detailed)) {
+    $root = (Get-Location).Path
+    # $null when no filter was asked for, which is what tells the walk to read everything. Built
+    # from $PSBoundParameters rather than from the value, so an explicitly empty list is
+    # distinguishable from an absent one -- the public commands refuse the first.
+    $changedSet = $null
+    if ($PSBoundParameters.ContainsKey('ChangedFile')) {
+        $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root $root
+    }
+    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -ChangedSet $changedSet -Recurse:$Recurse -Detailed:$Detailed)) {
         if ($fileScan.SkipReason) {
             $skipped.Add([pscustomobject]@{ File = $fileScan.File; Reason = $fileScan.SkipReason })
             continue
         }
         $units.AddRange([object[]]$fileScan.Units)
     }
+    # Assigned OUT of the hashtable literal, and typed. A $( ) subexpression UNROLLS a
+    # one-element array to the element, so a run filtered to a single file recorded a bare string
+    # where every consumer expects a list -- and the report then serialised it as one, which the
+    # published schema rejects. Same trap as returning an empty HashSet.
+    $changed = $null
+    if ($null -ne $changedSet) { $changed = [string[]]@($changedSet | Sort-Object) }
     return [pscustomobject]@{
         Units         = @($units)
         Skipped       = @($skipped)
-        Scope         = [pscustomobject]@{ Path = @($Path); Recurse = [bool]$Recurse; Root = (Get-Location).Path }
+        Scope         = [pscustomobject]@{
+            Path        = @($Path)
+            Recurse     = [bool]$Recurse
+            Root        = $root
+            # $null, not @(), when no filter was asked for. Absent and empty are different
+            # answers here: a consumer has to be able to tell a whole-tree run from one filtered
+            # down to nothing, and only one of those may be read as a full measurement.
+            ChangedFile = $changed
+        }
         MetricVersion = $script:PSCxMetricVersion
     }
 }

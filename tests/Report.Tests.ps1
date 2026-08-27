@@ -591,3 +591,38 @@ Describe 'Read-PSCxDocument' {
         (Read-PSCxDocument -Path $p).schemaVersion | Should-Be 1
     }
 }
+
+Describe 'a report says which subset it describes' {
+    # A number over a subset that cannot say WHICH subset is worse than no number: it reads as a
+    # measurement of everything under `path`.
+
+    BeforeAll {
+        $script:subDir = Join-Path ([System.IO.Path]::GetTempPath()) "cxsub-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:subDir -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:subDir 'one.ps1') -Value 'function Get-One { param($x) if ($x) { 1 } }' -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $script:subDir 'two.ps1') -Value 'function Get-Two { param($x) if ($x) { 1 } }' -Encoding utf8
+    }
+    AfterAll { Remove-Item $script:subDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'records null for a whole-tree run' {
+        # Absent and empty are different answers, and only absent may be read as a full sweep.
+        $p = Join-Path $script:subDir 'whole.json'
+        Measure-PSComplexity -Path $script:subDir -ReportPath $p | Out-Null
+        ((Get-Content $p -Raw | ConvertFrom-Json).scope.changedFile) | Should-BeNull
+    }
+
+    It 'records the filter as an ARRAY, even for a single file' {
+        # A $( ) subexpression unrolls a one-element array to the element, so a run filtered to
+        # one file wrote "src/A.ps1" where the schema promises ["src/A.ps1"] -- valid JSON, wrong
+        # type, and a consumer iterating it would walk the characters of the path.
+        $p = Join-Path $script:subDir 'part.json'
+        Measure-PSComplexity -Path $script:subDir -ChangedFile @((Join-Path $script:subDir 'one.ps1')) `
+            -ReportPath $p | Out-Null
+        $raw = [System.IO.File]::ReadAllText($p)
+        $d = $raw | ConvertFrom-Json
+        $d.scope.changedFile -is [array] | Should-BeTrue
+        @($d.scope.changedFile).Count | Should-Be 1
+        @($d.units | ForEach-Object unit) | Should-NotContainCollection 'Get-Two'
+        Should-BeTrue -Actual (Test-AgainstSchema -Json $raw)
+    }
+}

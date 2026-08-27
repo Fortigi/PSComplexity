@@ -9,6 +9,22 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ### For consumers
 
+**The gate can now be scoped to what a pull request changed.** `-ChangedFile` restricts a run to
+units in the files you name, so the verdict stops being dominated by code the author did not write
+-- which is how thresholds get raised until they stop meaning anything. With `-BaselineFile` it
+covers both halves: the baseline stops old code degrading, the diff scope stops new code arriving
+over the line.
+
+You decide what changed, and there is deliberately no `-ChangedSince <ref>`: a diff needs a base,
+and every way that goes wrong -- a shallow clone, a ref never fetched, a merge base that is not what
+the reviewer sees -- goes wrong in your environment, where you can fix it. Run `git diff --name-only`
+yourself and pass the result.
+
+An **empty** list is refused, because that is what a diff command prints when it fails, and taken at
+face value it is a confident pass over zero units. A run whose changed files hold no PowerShell
+passes instead, and says so: a filtered run warns that it measured a subset, and the JSON report
+records `scope.changedFile` -- `null` for a whole-tree run, an array for a filtered one.
+
 **The gate is now adoptable on a codebase that is already over the line.** `-BaselineFile` records
 what each already-breaching unit scored, in a committed JSON file. A unit in the baseline may not
 exceed its recorded score; a unit not in it must be under the ceilings, so new and touched code
