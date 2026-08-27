@@ -5,6 +5,21 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+### Internal
+
+- **The CI capabilities this repo shares with PSMutant are now checked by a rule set rather than
+  remembered.** The two modules gate each other, so their pipelines are assumed comparable; they
+  were thirteen capabilities apart, and nothing compared them, because every workflow reads fine on
+  its own and a gap is only visible from outside either repository.
+
+  `tools/Test-PSCxCiParity.ps1` runs in CI and by hand, over `.github/workflows/`. The rules are
+  stated as shape rather than by file name, so `tools/ParityDecisions.ps1` is byte-identical in both
+  repos apart from the command prefix -- which makes diffing the two copies the comparison, and
+  makes declining a rule a deletion somebody has to argue for rather than a silence.
+
+  It found a real gap on its first run against the sibling: PSMutant's publish workflow ran the
+  suite with the classic `Should` syntax still legal while its merge gate forbade it.
+
 ## [0.4.0] - 2026-08-23
 
 ### For consumers

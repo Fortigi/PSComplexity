@@ -33,6 +33,7 @@ CI (`.github/workflows/ci.yml`) runs:
 | Gate | What it is |
 |---|---|
 | Lint | `tools/Invoke-PSCxAnalyzer.ps1` — **every severity**, and it throws. The same script code scanning and publish run |
+| CI parity | `tools/Test-PSCxCiParity.ps1` — the capabilities this repo and PSMutant both promise, checked over `.github/workflows/` |
 | Unit tests | whole `tests/` directory, 0 failures |
 | Order independence | `tools/Test-PSCxOrderIndependence.ps1` -- the same suite again, reversed, plus an environment comparison |
 | Complexity | **its own** `Test-PSComplexity` against `src/`, 15 / 15 per unit |
@@ -320,6 +321,32 @@ and expensive to rebuild, and because each one has already earned its keep.
   here and every other script in `tools/` prints that way. The sibling project made the opposite
   choice -- it excludes the rule because its gate scripts print for a living -- so this is the
   one part of its design not to copy across. Porting it failed this gate on its own first run.
+
+- **The two repositories' CI is compared by a rule set, not by memory.** This module and PSMutant
+  gate each other, which makes it easy to assume their pipelines are comparable. They were not --
+  thirteen capabilities apart at once, and *nothing compared them*, because each workflow reads
+  perfectly well on its own and a gap is only visible from outside either repo.
+
+  `tools/Test-PSCxCiParity.ps1` checks `.github/workflows/` against the shared rules in
+  `tools/ParityDecisions.ps1`: every job carries a `timeout-minutes`, every workflow a concurrency
+  group and a `permissions` block, `publish.yml` never cancels in progress, every action pinned to a
+  SHA with the version in a trailing comment, no version written out where `pins.env` should be
+  read, no lint spelled inline, every Pester configuration disabling the classic `Should` syntax,
+  and `ci.yml` running a matrix over both operating systems with `fail-fast: false`.
+
+  **The rules are stated as shape, never by file name**, so `ParityDecisions.ps1` is byte-identical
+  in both repos apart from the command prefix. That is the whole mechanism: **diffing the two copies
+  IS the comparison**, and declining a rule becomes a deletion somebody has to argue for in a diff
+  rather than a silence. Add a rule here and the sibling fails it until it adopts or declines it.
+
+  It reads **comment-stripped** text, which is not fussiness: PSMutant's `code-scanning.yml` spends
+  six lines of prose on `Invoke-ScriptAnalyzer` explaining why it does *not* call it, and a grep
+  reads that as an inline lint gate. It is text rather than parsed YAML because PowerShell ships no
+  YAML parser, and pinning one would add a dependency to the gate that watches the dependencies.
+
+  The rule set found a real gap on its first run: PSMutant's `publish.yml` ran the suite with the
+  classic `Should` syntax still legal while its `ci.yml` forbade it -- a publish-time gate weaker
+  than the merge gate, which is the direction that matters.
 
 - **An acceptance is a checkable claim, and there must never be a plain suppression beside
   it.** `-Accept` names one unit by file AND unit, carries a written argument, and the gate
