@@ -459,6 +459,20 @@ and expensive to rebuild, and because each one has already earned its keep.
   version could not be obtained or started" from "this module is wrong under it", because the whole
   family exists to stop the second accusation being made from the first's evidence.
 
+- **A watcher that cannot see reports no faults, which looks exactly like nothing being wrong.**
+  `tools/Test-PSCxPinFreshness.ps1` grew from four single pins to also cover the two per-minor
+  compatibility lists, and building it turned up two ways to be silently blind. Both were caught by
+  planting a stale leg and checking the watcher noticed -- never by reading the code.
+
+  **`@(Invoke-RestMethod ...)` NESTS rather than flattens.** That cmdlet hands back a JSON array as
+  a single object, so the wrap produces one element whose `.tag_name` is every tag at once, `.Count`
+  is 1, a paging loop breaks after one page, and a `Where-Object` filter removes the lone nested
+  entry. Assign it directly.
+
+  **The GitHub releases API is paged**, and one page of 100 reaches back only to PowerShell 7.2.3 --
+  so an unpaged request cannot see 7.0 or 7.1, and the check is blind to precisely the floor it
+  exists to guard while reporting confidently on everything newer.
+
 - **`Write-Output` inside a value-returning function joins its return value.** `PSAvoidUsingWriteHost`
   is deliberately not excluded here, so every `tools/` script prints through the pipeline -- and a
   helper that prints progress AND returns a path hands the caller both, concatenated. The symptom

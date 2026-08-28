@@ -196,6 +196,78 @@ Describe 'Get-PSCxPinValue' {
     }
 }
 
+Describe 'Get-PSCxVersionListFault' {
+    BeforeAll {
+        # One shape reused: three legs at 5.0/5.1/6.0, and a feed that has more.
+        $script:ours = @('5.0.4', '5.1.1', '6.0.1')
+        $script:feed = @('4.9.0', '5.0.1', '5.0.4', '5.1.0', '5.1.1', '6.0.0', '6.0.1')
+    }
+
+    It 'says nothing when every leg is the newest patch of its minor' {
+        # The kept case. Without it every assertion below would pass against a function that
+        # returned a fault for everything.
+        @(Get-PSCxVersionListFault -Name 'X' -Ours $script:ours -Available $script:feed).Count | Should-Be 0
+    }
+
+    It 'reports a leg that is no longer the newest patch of its minor' {
+        (Get-PSCxVersionListFault -Name 'X' -Ours @('5.0.1', '5.1.1', '6.0.1') -Available $script:feed) -join ' ' |
+            Should-BeLikeString '*PATCH: X leg 5.0.1 is superseded by 5.0.4*'
+    }
+
+    It 'reports a released minor that no leg covers' {
+        (Get-PSCxVersionListFault -Name 'X' -Ours @('5.0.4', '6.0.1') -Available $script:feed) -join ' ' |
+            Should-BeLikeString '*MINOR: X 5.1 has been released*'
+    }
+
+    It 'reports a whole major that nothing tests' {
+        (Get-PSCxVersionListFault -Name 'X' -Ours @('5.0.4', '5.1.1') -Available $script:feed) -join ' ' |
+            Should-BeLikeString '*MAJOR: X 6.x exists*'
+    }
+
+    It 'ignores everything below the lowest leg' {
+        # The floor. The feed holds 4.9.0 and the promise starts at 5.0 -- reporting it would be a
+        # gap in a range the module never claimed, and the first run of this check did exactly that
+        # for two whole Pester majors.
+        (Get-PSCxVersionListFault -Name 'X' -Ours $script:ours -Available $script:feed) -join ' ' |
+            Should-NotBeLikeString '*4.9*'
+    }
+
+    It 'honours an exemption for a minor nobody covers' {
+        @(Get-PSCxVersionListFault -Name 'X' -Ours @('5.0.4', '6.0.1') -Available $script:feed -ExemptMinor @('5.1')).Count |
+            Should-Be 0
+    }
+
+    It 'refuses an exemption for a version that was never released' {
+        (Get-PSCxVersionListFault -Name 'X' -Ours $script:ours -Available $script:feed -ExemptMinor @('9.9')) -join ' ' |
+            Should-BeLikeString '*EXEMPTION: X 9.9 is exempted but has never been released*'
+    }
+
+    It 'refuses an exemption for a minor that IS covered' {
+        # Both halves of a contradiction are faults, because either one alone is a lie about the
+        # list: an exemption that is also tested has stopped describing anything, exactly like a
+        # stale equivalence declaration.
+        (Get-PSCxVersionListFault -Name 'X' -Ours $script:ours -Available $script:feed -ExemptMinor @('5.1')) -join ' ' |
+            Should-BeLikeString '*exempted and also covered by a leg*'
+    }
+
+    It 'reports an unreachable feed rather than reading silence as good news' {
+        (Get-PSCxVersionListFault -Name 'X' -Ours $script:ours -Available @()) -join ' ' |
+            Should-BeLikeString '*could not be checked*'
+    }
+
+    It 'reports an empty list rather than passing over nothing' {
+        (Get-PSCxVersionListFault -Name 'X' -Ours @() -Available $script:feed) -join ' ' |
+            Should-BeLikeString '*no compatibility versions pinned*'
+    }
+
+    It 'survives a prerelease string in the feed' {
+        # A gallery feed answers with things like 6.2.0-beta1, which [version] refuses outright. One
+        # such entry must not fail the whole check -- and its MINOR still counts as released.
+        (Get-PSCxVersionListFault -Name 'X' -Ours $script:ours -Available ($script:feed + '6.2.0-beta1')) -join ' ' |
+            Should-BeLikeString '*MINOR: X 6.2*'
+    }
+}
+
 Describe 'the pins file itself' {
     It 'declares every key the workflows require' {
         # The workflows assert this at run time; asserting it here means a missing pin fails

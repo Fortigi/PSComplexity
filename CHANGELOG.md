@@ -38,6 +38,34 @@ against 5.0.0 and believed the verdict, that is why.
 
 ### Internal
 
+- **The compatibility version lists are now watched, in three tiers.** `pin-freshness.yml` checked
+  four single pins and neither list, so the twelve Pester legs and six PowerShell legs could fall
+  behind in silence. A single pin is stale when something newer exists; a per-minor list is stale
+  three different ways, and they are three different decisions:
+
+  | Tier | Meaning | Response |
+  |---|---|---|
+  | `PATCH` | a leg is no longer the newest patch of its minor | bump it -- mechanical |
+  | `MINOR` | a released minor has no leg | add one -- a small choice |
+  | `MAJOR` | a whole major exists untested | decide whether the range still means what it says |
+
+  This matters because **an open-ended minimum promises every future release**: `>= 7.0` and
+  `>= 5.0.0` have no upper bound, so PowerShell 8.0 is claimed the day it ships.
+
+  Bounded downward by the lowest leg, because everything below the floor is out of scope rather
+  than uncovered -- without that the first run reported Pester 3.0 through 4.10 and two whole majors
+  as gaps.
+
+- **An exemption is a declaration that can go stale.** `PS_COMPAT_EXEMPT_MINORS` records a minor
+  deliberately left uncovered, with its reason beside it in `pins.env` -- today only 7.6, the
+  runners' own PowerShell. The watcher fails if an exempted minor was never released, or turns out
+  to be covered after all: an exemption nobody can disprove is how a list quietly stops meaning
+  anything, which is the rule a stale equivalence declaration already gets.
+
+- PowerShell releases are read from the GitHub API, **paged**. One page of 100 reaches back only to
+  7.2.3, so a single request cannot see 7.0 or 7.1 -- the watcher would have been blind to its own
+  floor going stale while reporting cheerfully on everything newer.
+
 - **PSMutant is pinned at 0.4.0**, whose `ConditionForcing` operator dispatches to three condition
   kinds rather than one -- `if`, ternary and `switch`, where 0.3.2 saw only `IfStatementAst`.
 
