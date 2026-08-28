@@ -144,25 +144,9 @@ function Get-PSCxCogRecursionRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    # The names defined in THIS file, gathered once. Direct recursion is a call to the ENCLOSING
-    # function, so a command naming nothing defined here cannot be one -- and that is seven
-    # commands in eight: measured over 235 files, 16,055 CommandAst nodes against 2,128 that name
-    # a local function, 13.3%. Without the guard the enclosing-function walk runs for every
-    # command in the file to reject almost all of them.
-    #
-    # OrdinalIgnoreCase because PowerShell resolves command names case-insensitively, which is
-    # what the `-eq` below has always done.
-    #
-    # A class method's body is itself a FunctionDefinitionAst, so methods are covered by the same
-    # query and a self-calling method still scores.
-    $local = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($d in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'FunctionDefinitionAst')) { $null = $local.Add($d.Name) }
-    if ($local.Count -eq 0) { return }
     foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'CommandAst')) {
-        $name = $n.GetCommandName()
-        if (-not $name -or -not $local.Contains($name)) { continue }
         $fn = Get-PSCxEnclosingFunctionName -Node $n
-        if ($fn -and $name -eq $fn) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
+        if ($fn -and $n.GetCommandName() -eq $fn) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
 }
 

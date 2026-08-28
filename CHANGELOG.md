@@ -10,7 +10,7 @@ All notable changes to PSComplexity are documented here. Format follows
 ### For consumers
 
 **Scanning is about 30% faster, and no score moves.** Measured over a 235-file repository holding
-259,144 AST nodes: **9,737ms to 6,809ms wall, 12,723ms to 8,875ms CPU**, interleaved over three
+259,144 AST nodes: **9,737ms to 6,872ms wall, 12,723ms to 9,152ms CPU**, interleaved over three
 pairs each time. Output is byte-identical -- 1,317 units, every `-Detailed` contribution row
 included -- and the mutant surface the self-gate measures is unchanged at 572 candidates, which is
 the check that makes "no score moves" mean something rather than sound reassuring.
@@ -20,10 +20,8 @@ per node**, and a function with `[CmdletBinding()]` and mandatory parameters cos
 invoke: 2,437ms against 62ms for the same work written inline, a factor of 39. That single call site
 was 62% of a scan.
 
-Two smaller things came with it: the collectors now ask for a type EXACTLY where that type has no
-subclass, instead of taking a path that sweeps every type in the file, unions and sorts; and the
-recursion check no longer walks up from every command in the file, because a command naming nothing
-defined in that file cannot be a call to its own enclosing function -- seven commands in eight.
+One smaller thing came with it: the collectors now ask for a type EXACTLY where that type has no
+subclass, instead of taking a path that sweeps every type in the file, unions and sorts.
 
 If you gate large repositories in CI, this is time back on every run. If you gate a handful of
 files, you will not notice it.
