@@ -4,9 +4,9 @@
 # do: a gate that quietly stops being able to fail looks exactly like a green build, and this one
 # is watching the workflows every other gate runs inside.
 #
-# What this gate is FOR is drift between two repositories, not the correctness of one. PSComplexity
-# and PSMutant gate each other, so it is easy to assume their CI is comparable -- and for a long
-# time it was not, in thirteen ways, with nothing comparing them. The rules below are stated as
+# What this gate is FOR is drift between two repositories, not the correctness of one. This module
+# and the one it is paired with gate each other, so it is easy to assume their CI is comparable --
+# and for a long time it was not, in thirteen ways, with nothing comparing them. The rules below are stated as
 # SHAPE rather than by file name (an action pinned to a SHA, a lint gate that is not spelled
 # inline) so that this file is byte-identical in both repos apart from the command prefix. Diffing
 # the two copies is then the comparison, and a rule one repo declines is a deletion somebody has to

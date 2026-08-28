@@ -3,9 +3,9 @@
     Assert this repository's CI still holds every capability the matching one's does.
 
 .DESCRIPTION
-    PSComplexity and PSMutant gate each other -- one measures the other's complexity, the other
-    mutation-tests this one's suite -- so it is easy to assume their CI is comparable. It was not,
-    in thirteen ways, and nothing compared them: each workflow reads fine on its own, and a
+    This module and the one it is paired with gate each other -- one measures the other's
+    complexity, the other mutation-tests its suite -- so it is easy to assume their CI is
+    comparable. It was not, in thirteen ways, and nothing compared them: each workflow reads fine on its own, and a
     capability present in one repository and absent in the other is invisible from inside either.
 
     The rules are stated as shape rather than by file name, so tools/ParityDecisions.ps1 is
