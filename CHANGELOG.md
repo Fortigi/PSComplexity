@@ -24,7 +24,7 @@ Nothing about the module changed.
 **The supported Pester range is now proven rather than asserted.** The manifest and README have
 always said Pester 5.0.0 or later; the gate that backs that claim ran exactly one version, 5.7.1,
 and had never once executed the floor. It now runs one leg per minor across the whole range --
-**5.0.0, 5.1.1, 5.2.2, 5.3.3, 5.4.1, 5.5.0, 5.6.1, 5.7.1, 5.8.0, 5.9.1, 6.0.1, 6.1.0** -- and all
+**5.0.4, 5.1.1, 5.2.2, 5.3.3, 5.4.1, 5.5.0, 5.6.1, 5.7.1, 5.8.0, 5.9.1, 6.0.1, 6.1.0** -- and all
 twelve pass.
 
 Nothing about the module changed. What changed is that the number you are told is the number that
