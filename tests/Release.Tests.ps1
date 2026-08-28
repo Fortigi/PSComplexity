@@ -202,7 +202,7 @@ Describe 'the pins file itself' {
         # in the suite rather than five minutes into a job.
         $pins = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) '.github/pins.env')
         foreach ($k in 'PESTER_VERSION', 'PESTER_COMPAT_VERSIONS', 'PSSA_VERSION',
-            'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS') {
+            'PS_COMPAT_VERSIONS', 'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS') {
             Get-PSCxPinValue -Line $pins -Name $k | Should-NotBeNull -Because "pins.env must define $k"
         }
     }
@@ -222,6 +222,24 @@ Describe 'the pins file itself' {
         $versions | Should-ContainCollection '5.0.0'
         foreach ($m in '5.0', '5.1', '5.2', '5.3', '5.4', '5.5', '5.6', '5.7', '5.8', '5.9', '6.0', '6.1') {
             $minors | Should-ContainCollection $m -Because "no leg covers Pester $m"
+        }
+    }
+    It 'lists a PowerShell version for every supported minor' {
+        # The manifest's PowerShellVersion is the floor consumers are told; this list is what
+        # executes against it. A minor quietly dropped here narrows what is proven without
+        # narrowing what is promised, and the run stays green.
+        #
+        # The floor itself must be covered by its own minor, and the ceiling is open on purpose:
+        # the runners' PowerShell is newer than anything listed and the ordinary suite covers it.
+        $pins = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) '.github/pins.env')
+        $versions = @((Get-PSCxPinValue -Line $pins -Name 'PS_COMPAT_VERSIONS') -split ' ' | Where-Object { $_ })
+        $minors = @($versions | ForEach-Object { $v = [version]$_; "$($v.Major).$($v.Minor)" })
+
+        $manifest = Import-PowerShellDataFile (Join-Path (Split-Path -Parent $PSScriptRoot) 'PSComplexity.psd1')
+        $floor = [version]$manifest.PowerShellVersion
+        $minors | Should-ContainCollection "$($floor.Major).$($floor.Minor)" -Because 'the declared floor must be one of the versions actually run'
+        foreach ($m in '7.0', '7.1', '7.2', '7.3', '7.4', '7.5') {
+            $minors | Should-ContainCollection $m -Because "no leg covers PowerShell $m"
         }
     }
     It 'names only paths that exist' {

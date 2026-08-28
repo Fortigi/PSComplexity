@@ -5,9 +5,21 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
-## [0.5.1] - 2026-08-27
+## [0.5.1] - 2026-08-28
 
 ### For consumers
+
+**The declared PowerShell floor is now executed, not just declared.** The manifest says
+`PowerShellVersion = '7.0'`; CI runs whatever the runners ship, which is 7.6.x, so that number had
+never been run. A new gate proves the module on one PowerShell per supported minor --
+**7.0.13, 7.1.7, 7.2.24, 7.3.12, 7.4.19, 7.5.10** -- and all six pass.
+
+Each leg downloads the official release, imports the module under it, and requires the measured
+scores to match the host's **row for row**, plus a ceiling below the fixture returning `$false`. So
+the claim is now that this module computes the same answers on 7.0 as on 7.6, rather than that
+somebody once believed it would.
+
+Nothing about the module changed.
 
 **The supported Pester range is now proven rather than asserted.** The manifest and README have
 always said Pester 5.0.0 or later; the gate that backs that claim ran exactly one version, 5.7.1,
@@ -25,6 +37,29 @@ collided. The gate then blamed this module for an error that never mentioned it.
 against 5.0.0 and believed the verdict, that is why.
 
 ### Internal
+
+- **The gate uses no Pester at all**, deliberately. The Pester gate asks whether a consumer can gate
+  on this module from inside Pester N; this one asks whether the module loads and computes correctly
+  on PowerShell N. Crossing them would multiply the legs and, worse, confound this one: Pester 6.1.0
+  does not load on PowerShell 7.0, so a fixture driven through Pester would fail the floor for a
+  reason that is not about this module.
+
+- **Equivalence across hosts, not hardcoded numbers.** A leg must reproduce the rows the current host
+  produced from the same fixture. Hardcoding scores would pin the metric a second time -- the suite
+  already does that against the published reference examples -- and would need editing whenever the
+  metric legitimately changes, which is exactly when a compatibility gate should keep working.
+
+- **`PS_COMPAT_VERSIONS` in `.github/pins.env`**, read by the script itself, so running it by hand
+  and in CI are the same run. An empty list is refused. A test asserts a leg exists for every minor
+  **and that the manifest's own floor is among them**, so raising `PowerShellVersion` without adding
+  a leg fails the suite.
+
+- **A runtime that cannot be obtained is reported as that**, never as the module failing, and an
+  unpacked runtime is only trusted once a marker file written last says the unpack finished. A
+  half-extracted archive otherwise looks identical to a whole one.
+
+- Runs on the Linux leg only: whether a PowerShell version runs this module is not an OS question,
+  and the OS matrix already answers the path half on the runner's own PowerShell.
 
 - **The compatibility gate invokes Pester through its oldest surface**, `Invoke-Pester -Path
   <file> -PassThru`, which behaves identically on every version from 5.0.0 to 6.1.0. That is also

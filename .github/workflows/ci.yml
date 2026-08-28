@@ -54,7 +54,7 @@ jobs:
       - name: Load pinned versions
         shell: pwsh
         run: |
-          $required = 'PESTER_VERSION', 'PESTER_COMPAT_VERSIONS', 'PSSA_VERSION',
+          $required = 'PESTER_VERSION', 'PESTER_COMPAT_VERSIONS', 'PS_COMPAT_VERSIONS', 'PSSA_VERSION',
                       'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS'
           $pins = @{}
           foreach ($line in Get-Content .github/pins.env) {
@@ -205,6 +205,24 @@ jobs:
       # Consumers gate on this module from inside THEIR Pester run, which is not the one
       # tests/ uses. Proven by running, in a child process, with a control assertion that
       # separates "this Pester cannot run here" from "this module is broken".
+      # Linux only, like the mutation gate. The question is whether a PowerShell VERSION runs this
+      # module, which is not an OS question -- and the OS matrix already answers the path half of it
+      # on the runner's own PowerShell. Running it on both legs would double roughly half a gigabyte
+      # of downloads to re-answer the same thing. Making it a matrix later is one line.
+      - name: Cache downloaded PowerShell runtimes
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pscx-pwsh
+          key: pwsh-runtimes-${{ runner.os }}-${{ hashFiles('.github/pins.env') }}
+
+      - name: PowerShell compatibility (every supported PowerShell, one leg per minor)
+        if: matrix.os == 'ubuntu-latest'
+        shell: pwsh
+        # No argument: the script reads PS_COMPAT_VERSIONS from the environment or pins.env, and
+        # refuses an empty list rather than reporting a pass over zero versions.
+        run: ./tools/Test-PSCxPowerShellCompatibility.ps1 -RuntimeRoot "$HOME/.pscx-pwsh"
+
       - name: Pester compatibility (every supported Pester, one leg per minor)
         shell: pwsh
         # No argument: the script reads PESTER_COMPAT_VERSIONS from the environment or straight
