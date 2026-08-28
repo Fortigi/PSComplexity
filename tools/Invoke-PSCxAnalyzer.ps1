@@ -102,7 +102,7 @@ if ($PassThru) { return $findings }
 $fault = Get-PSCxLintFault -FindingCount $findings.Count
 if ($fault) {
     # Write-Output, not Write-Host: PSAvoidUsingWriteHost is NOT excluded in this repo and every
-    # other script in tools/ prints this way. The sibling project excludes the rule and uses
+    # other script in tools/ prints this way. The another project excludes the rule and uses
     # Write-Host throughout, so this is the one line of that design that must not be copied
     # across -- and the gate this change creates caught it immediately, on itself.
     Write-Output ($findings | Format-Table Severity, RuleName, ScriptName, Line, Message -AutoSize | Out-String)

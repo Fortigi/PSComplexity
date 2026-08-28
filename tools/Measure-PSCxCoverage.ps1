@@ -5,7 +5,7 @@
 # reason: CLAUDE.md claimed 100% and nothing measured it, while CHANGELOG.md quoted a command
 # count that had been wrong for two releases.
 #
-# UseBreakpoints is set as a HEDGE, not a fix. In the sibling repo it is load-bearing --
+# UseBreakpoints is set as a HEDGE, not a fix. In another repository it is load-bearing --
 # Pester 6 moved coverage to the Profiler tracer, and a nested Pester run tears that tracer
 # down, so every file discovered afterwards reports a plausible near-zero. Measured here both
 # ways on the same suite, the two agree exactly, because nothing in tests/ starts a nested

@@ -6,7 +6,7 @@
 # suites in the order psmutant.self.config.json lists them, and those orders differ. A developer
 # running the suite by hand and the gate running it therefore never see the same sequence, so an
 # order-dependent suite is green in one and red in the other -- which is exactly how it went in
-# the sibling repo, where three CI rounds went into finding a variable one file had cleared and
+# another repository, where three CI rounds went into finding a variable one file had cleared and
 # not restored.
 #
 # Two checks, because they fail on opposite halves of the problem:
@@ -18,7 +18,7 @@
 #   The state COMPARISON catches the cause, and is direction-blind. Anything a file leaves behind
 #   is visible to every file after it, so a leak is order-dependence waiting for a reader -- and
 #   this fires on the file that leaks whether or not anything reads it yet. That is the half the
-#   reversed run misses, and the half that shipped in the sibling.
+#   reversed run misses, and the half that shipped in that project.
 #
 # It is a committed script rather than a snippet in ci.yml so that running it by hand and running
 # it in CI cannot drift, and so that a developer can settle "is this mine?" without pushing.

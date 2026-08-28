@@ -59,7 +59,7 @@ function Get-PSCxConsumerNotes {
     # knowing before someone preserves the newlines here. Git rewrites line endings inside a
     # stored string on checkout, so a multi-line value reads LF on a Linux runner and CRLF on
     # a Windows one and an exact comparison then reports on the checkout rather than the
-    # release. That bit the sibling repo -- CI green, gate red on every maintainer machine.
+    # release. That bit another repository -- CI green, gate red on every maintainer machine.
     # .gitattributes pins eol=lf so the cause is gone either way.
     $text = ($body -join ' ') -replace '\s+', ' '
     return $text.Trim()
@@ -222,7 +222,8 @@ function Get-PSCxRewrittenManifest {
     )
     # PowerShell escapes a literal quote inside a single-quoted string by doubling it.
     $literal = "'" + ($Notes -replace "'", "''") + "'"
-    $pattern = "(?s)(ReleaseNotes\s*=\s*)'.*?'(?=\s*(?
+    $pattern = "(?s)(ReleaseNotes\s*=\s*)'.*?'(?=\s*(
+?
 |\}))"
     if ($ManifestText -notmatch $pattern) {
         throw 'Manifest has no single-quoted ReleaseNotes value to replace.'

@@ -50,7 +50,7 @@ It is a script rather than a recipe in this file because a recipe cannot be run 
 figures here were a claim nobody checked, and the count quoted in `CHANGELOG.md` had been
 wrong for two releases. Do not quote a command count in prose — the script prints it.
 
-`UseBreakpoints` is set as a **hedge, not a fix**. In PSMutant it is load-bearing, because a
+`UseBreakpoints` is set as a **hedge, not a fix**. Elsewhere it is load-bearing, because a
 nested Pester run tears down Pester 6's Profiler tracer and every file discovered afterwards
 reports a plausible near-zero. Measured here both ways on the same suite, the two agree
 exactly, because nothing in `tests/` starts a nested run. The setting costs a little speed
@@ -326,7 +326,7 @@ and expensive to rebuild, and because each one has already earned its keep.
   `schemas/v1/report.schema.json` forbids `passed` unless `thresholds` are present, so a
   measurement report cannot carry a verdict nobody computed; and it requires `metricVersion`,
   `scope` and `skipped`, so no number in it can be read without what it excluded. Copied from
-  the sibling project, which forbids a mutation score in a recheck report for the same reason.
+  a mutation report, which forbids a score on a partial run for the same reason.
 
   Four traps come with it, all already paid for elsewhere. **Validate the FILE, not a parsed
   object** -- `ConvertFrom-Json` re-types the ISO-8601 `generatedAt` into a `[datetime]`.
@@ -372,7 +372,7 @@ and expensive to rebuild, and because each one has already earned its keep.
   met it. Writing it while the edges are few and obviously correct is the
   cheap moment -- ratifying a graph nobody remembers agreeing to is the expensive one.
 
-  There is no "one Write-Host" assertion like the sibling's, and that is deliberate:
+  There is no "one Write-Host" assertion here, and that is deliberate:
   `PSAvoidUsingWriteHost` is not excluded here, so PSScriptAnalyzer already fails the build. A
   second gate over the same property is one more thing to keep in step for no extra coverage.
 
@@ -391,9 +391,9 @@ and expensive to rebuild, and because each one has already earned its keep.
   is `Get-PSCxLintFault` in `ReleaseDecisions.ps1`, with tests, like every other gate decision.
 
   **`Write-Output`, never `Write-Host`, in `tools/`.** `PSAvoidUsingWriteHost` is not excluded
-  here and every other script in `tools/` prints that way. The sibling project made the opposite
-  choice -- it excludes the rule because its gate scripts print for a living -- so this is the
-  one part of its design not to copy across. Porting it failed this gate on its own first run.
+  here and every other script in `tools/` prints that way. A project whose gate scripts print for
+  a living may exclude the rule instead; that choice does not travel here, and code written under
+  it fails this gate on its first run.
 
 - **The two repositories' CI is compared by a rule set, not by memory.** This module and PSMutant
   gate each other, which makes it easy to assume their pipelines are comparable. They were not --
@@ -410,15 +410,15 @@ and expensive to rebuild, and because each one has already earned its keep.
   **The rules are stated as shape, never by file name**, so `ParityDecisions.ps1` is byte-identical
   in both repos apart from the command prefix. That is the whole mechanism: **diffing the two copies
   IS the comparison**, and declining a rule becomes a deletion somebody has to argue for in a diff
-  rather than a silence. Add a rule here and the sibling fails it until it adopts or declines it.
+  rather than a silence. Add a rule here and the other copy fails it until it adopts or declines it.
 
-  It reads **comment-stripped** text, which is not fussiness: PSMutant's `code-scanning.yml` spends
-  six lines of prose on `Invoke-ScriptAnalyzer` explaining why it does *not* call it, and a grep
-  reads that as an inline lint gate. It is text rather than parsed YAML because PowerShell ships no
+  It reads **comment-stripped** text, which is not fussiness: a workflow can spend six lines of
+  prose on `Invoke-ScriptAnalyzer` explaining why it does *not* call it, and a grep reads that as
+  an inline lint gate. It is text rather than parsed YAML because PowerShell ships no
   YAML parser, and pinning one would add a dependency to the gate that watches the dependencies.
 
-  The rule set found a real gap on its first run: PSMutant's `publish.yml` ran the suite with the
-  classic `Should` syntax still legal while its `ci.yml` forbade it -- a publish-time gate weaker
+  The rule set found a real gap on its first run: a `publish.yml` ran the suite with the classic
+  `Should` syntax still legal while the matching `ci.yml` forbade it -- a publish-time gate weaker
   than the merge gate, which is the direction that matters.
 
 - **A declared floor is exercised, or it is not a floor.** Two of them here, and they are separate
@@ -505,7 +505,7 @@ and expensive to rebuild, and because each one has already earned its keep.
   still **measured**: this is gate policy, not a measurement filter, so a report or a baseline
   built on the same records still sees the unit and its number.
 
-  There is deliberately no ambiguity arm, unlike the sibling project's equivalence
+  There is deliberately no ambiguity arm, unlike an equivalence
   declarations. A unit identity is unique within a file, so an exact File+Unit match is one or
   none by construction, and a rule that cannot fire looks exactly like a rule that passes. If
   unit identity ever stops being unique, that is the moment to add one.
@@ -647,15 +647,15 @@ and expensive to rebuild, and because each one has already earned its keep.
   files alphabetically; the mutation baseline runs the mapped covering suites in the order
   `psmutant.self.config.json` lists them. Those orders differ, so a developer running the suite by
   hand and the gate running it never see the same sequence -- and an order-dependent suite is green
-  in one and red in the other. That is not hypothetical: the sibling spent three CI rounds finding
-  a variable one file cleared in an `AfterEach` and never restored.
+  in one and red in the other. That is not hypothetical: three CI rounds went on finding a
+  variable one file cleared in an `AfterEach` and never restored.
 
   `tools/Test-PSCxOrderIndependence.ps1` runs the suite **reversed** and compares the environment
   before and after. The two halves fail on opposite ends of the same problem, which is why both are
   there: the reversed run catches a dependency by its **symptom** and is a probe rather than a
   proof -- one more permutation, not all of them -- while the environment comparison catches the
   **cause** and is direction-blind, firing on the file that leaks whether or not anything reads it
-  yet. Only the second half would have caught the sibling's instance.
+  yet. Only the second half would have caught that instance.
 
   **Two other kinds of state were tried and rejected, and the measurements are in the script.** The
   working directory cannot fire, because Pester restores it around a run -- verified with a test
