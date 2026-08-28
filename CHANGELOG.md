@@ -38,6 +38,21 @@ against 5.0.0 and believed the verdict, that is why.
 
 ### Internal
 
+- **PSMutant is pinned at 0.4.0**, whose `ConditionForcing` operator dispatches to three condition
+  kinds rather than one -- `if`, ternary and `switch`, where 0.3.2 saw only `IfStatementAst`.
+
+- **Four `if/else` expressions became ternaries**, for readability. That change was written and
+  deliberately held back first: under 0.3.2 it cost eight mutants (554 -> 546, still 100%), because
+  a condition moving into a `TernaryExpressionAst` stopped being forced to `$true` and `$false`.
+  Green over a smaller set is the shape this project exists to distrust. Re-measured on 0.4.0 the
+  count is 554 again, so the trade is gone rather than accepted.
+
+  Neither performance nor the metric is a reason for the rewrite, and both were checked so they are
+  not offered as one later: ternary is 1.04x against the `if/else` expression over 300k iterations,
+  and total cognitive drops 262 -> 258 because SonarSource scores a ternary +1 against an
+  `if/else`'s +2 -- an asymmetry faithful to the spec and pinned by two reference cases. Lowering
+  our own numbers by choosing syntax would be the worst possible reason in this module.
+
 - **The gate uses no Pester at all**, deliberately. The Pester gate asks whether a consumer can gate
   on this module from inside Pester N; this one asks whether the module loads and computes correctly
   on PowerShell N. Crossing them would multiply the legs and, worse, confound this one: Pester 6.1.0
