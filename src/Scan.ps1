@@ -85,8 +85,9 @@ function Get-PSCxRelativePath {
     # caller happened to pass an absolute path AND a Root equal to the CWD -- two conditions
     # that both had to hold and neither of which was stated. The sibling project shipped the
     # same shape and it was a live hole there, because a config may name a file by full path.
-    $full = if ([System.IO.Path]::IsPathRooted($Path)) { [System.IO.Path]::GetFullPath($Path) }
-    else { [System.IO.Path]::GetFullPath((Join-Path $Root $Path)) }
+    $full = [System.IO.Path]::IsPathRooted($Path) ?
+        [System.IO.Path]::GetFullPath($Path) :
+        [System.IO.Path]::GetFullPath((Join-Path $Root $Path))
     $rootFull = [System.IO.Path]::GetFullPath($Root)
     if (-not $rootFull.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
         $rootFull += [System.IO.Path]::DirectorySeparatorChar
@@ -201,7 +202,7 @@ function Get-PSCxEmptyScanFault {
         [Parameter(Mandatory)] [bool]$Recurse
     )
     if ($UnitCount -gt 0 -or $Filtered) { return $null }
-    $hint = if ($Recurse) { '' } else { ', or add -Recurse if they are in subdirectories' }
+    $hint = $Recurse ? '' : ', or add -Recurse if they are in subdirectories'
     return ('Measured no units under: ' + ($Path -join ', ') + '. Nothing was checked, so a pass ' +
         'here would describe an empty set. Check the path exists and holds .ps1 or .psm1 files' +
         $hint + '.')

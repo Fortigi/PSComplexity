@@ -192,7 +192,7 @@ function Initialize-PSCxAstIndex {
             continue
         }
         $script:PSCxBoundaryCache[$n] = $script:PSCxBoundaryCache[$p]
-        $raises = if ($p.GetType().Name -in $script:PSCxNestingTypes) { 1 } else { 0 }
+        $raises = ($p.GetType().Name -in $script:PSCxNestingTypes) ? 1 : 0
         $script:PSCxNestingCache[$n] = [int]$script:PSCxNestingCache[$p] + $raises
     }
     # LAST, so a walk that throws part-way leaves the root unmarked and the next ask rebuilds it

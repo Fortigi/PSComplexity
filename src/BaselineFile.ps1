@@ -71,7 +71,7 @@ function Write-PSCxBaselineFile {
     )
     # Absent is the ordinary first run, not an error: seeding a baseline is the reason this
     # switch exists.
-    $existing = if (Test-Path -LiteralPath $Path -PathType Leaf) { Read-PSCxDocument -Path $Path } else { $null }
+    $existing = (Test-Path -LiteralPath $Path -PathType Leaf) ? (Read-PSCxDocument -Path $Path) : $null
     # Only compare against a file whose numbers still mean the same thing. When the metric
     # version has moved, the recorded scores are not smaller or larger -- they are answers to a
     # different question, and a ratchet cannot be enforced across that. Regenerating wholesale is
