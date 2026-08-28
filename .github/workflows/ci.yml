@@ -102,7 +102,15 @@ jobs:
           }
           foreach ($w in $wanted) {
             if (-not (Get-Module $w.Name -ListAvailable | Where-Object Version -eq $w.Version)) {
-              Install-Module $w.Name -RequiredVersion $w.Version -Force -Scope CurrentUser
+              # -SkipPublisherCheck because Pester's signing certificate is not the same across the
+              # range this gate covers: installing 5.0.0 while 6.1.0 is present makes Install-Module
+              # refuse over an authenticode issuer mismatch, and the assert below then reports the
+              # version as "not available after install" -- naming the symptom, not the cause.
+              #
+              # It skips the match against the ALREADY-INSTALLED copy, which is a hijack check for
+              # a module resolved by name. Every version here is pinned exactly, comes from the
+              # gallery, and is asserted present afterwards, so that is not the risk being run.
+              Install-Module $w.Name -RequiredVersion $w.Version -Force -Scope CurrentUser -SkipPublisherCheck
             }
             if (-not (Get-Module $w.Name -ListAvailable | Where-Object Version -eq $w.Version)) {
               throw "$($w.Name) $($w.Version) is not available after install"
