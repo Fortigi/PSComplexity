@@ -62,15 +62,34 @@ and means a future test that does start one cannot quietly halve the number.
 That is a statement about this repo's OWN suite, not about what a consumer needs. **PSComplexity
 is usable from Pester >= 5.0.0**: it is an ordinary module with two commands, and a consumer
 gating on it does so from inside their own Pester run, which is not this one.
-`tools/Test-PSCxPesterCompatibility.ps1` proves that separately against
-`PESTER_COMPAT_VERSION` (5.7.1), which is why a second Pester is installed in CI -- it separates
+`tools/Test-PSCxPesterCompatibility.ps1` proves that separately against every version in
+`PESTER_COMPAT_VERSIONS`, which is why several other Pesters are installed in CI -- it separates
 "this Pester cannot run OUR suite" from "this module is broken for a Pester 5 consumer".
 
-**The supported range is wider than the tested point**, and that is worth saying plainly rather
-than leaving for someone to discover: 5.0.0 is the floor we support, 5.7.1 is the only Pester 5
-anything actually runs on. Same shape as the PowerShell floor above -- a declared minimum nothing
-executes against. If a consumer reports a Pester 5.0-5.6 problem, that gap is where to look
-first.
+**The tested range is now the supported range**: one leg per minor from **5.0.0 to 6.1.0**, twelve
+in all, about four seconds each. It used to be one version, 5.7.1, and the floor the manifest
+promises had never once been executed.
+
+**One leg per MINOR, and the middle is not interpolation.** Floor-plus-latest was the first plan
+and is not enough: `New-PesterConfiguration` arrived in 5.1.0, which is invisible at both ends of
+the range and fatal in between. Anything landing mid-range has that shape. `5.0.0` exactly rather
+than the newest 5.0.x, because the floor is the number consumers are told.
+
+**Pointed at 5.0.0, the old gate said the module was broken -- and it was the gate.** It built its
+configuration with `New-PesterConfiguration`, so under 5.0.0 the command was missing, PowerShell
+autoloaded a newer Pester by name, and the assemblies collided; the error named versions and never
+mentioned this module. It now invokes through `Invoke-Pester -Path <file> -PassThru`, the oldest
+surface Pester 5 has and identical on every version through 6.1.0 -- which is also what a consumer
+writes, so the gate exercises the path it describes.
+
+**A control that THROWS is an environment failure and must be caught as one.** The control exists
+to tell "this Pester cannot run here" from "this module is broken", and the script reported that
+correctly whenever the control *returned*. A throw went straight past it to the generic exit-code
+check, which blames the module for any non-zero exit. Guard the call, not just its result.
+
+Every leg is tried and every fault collected rather than stopping at the first, and an empty list
+is refused: a compatibility gate over zero versions passes every time. A test asserts a leg exists
+for every minor in the range, so narrowing the promise by deleting one fails the suite.
 
 This entry read "CI pins 5.8.0, development happens on 6.1.0" -- the two the wrong way round,
 and a version that is pinned nowhere. Tracked in **#10**.

@@ -54,7 +54,7 @@ jobs:
       - name: Load pinned versions
         shell: pwsh
         run: |
-          $required = 'PESTER_VERSION', 'PESTER_COMPAT_VERSION', 'PSSA_VERSION',
+          $required = 'PESTER_VERSION', 'PESTER_COMPAT_VERSIONS', 'PSSA_VERSION',
                       'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS'
           $pins = @{}
           foreach ($line in Get-Content .github/pins.env) {
@@ -80,7 +80,10 @@ jobs:
           path: |
             ~/.local/share/powershell/Modules
             ~/Documents/PowerShell/Modules
-          key: psmodules-${{ runner.os }}-pester${{ env.PESTER_VERSION }}-${{ env.PESTER_COMPAT_VERSION }}-pssa${{ env.PSSA_VERSION }}-psmut${{ env.PSMUTANT_VERSION }}
+          # Hashed over the whole pins file rather than spelled out version by version. The
+          # compatibility pin is now a LIST and would put spaces in the key; hashing also means a
+          # pin this key forgot to name can no longer serve a stale cache.
+          key: psmodules-${{ runner.os }}-${{ hashFiles('.github/pins.env') }}
 
       - name: Install pinned modules
         shell: pwsh
@@ -90,12 +93,24 @@ jobs:
           # on, and the tool then fails somewhere else entirely.
           $wanted = @(
             @{ Name = 'Pester';           Version = $env:PESTER_VERSION }
-            @{ Name = 'Pester';           Version = $env:PESTER_COMPAT_VERSION }
             @{ Name = 'PSScriptAnalyzer'; Version = $env:PSSA_VERSION }
           )
+          # One Pester per compatibility leg. The estate version is usually among them; the
+          # install-only-if-missing guard below makes the overlap free.
+          foreach ($v in ($env:PESTER_COMPAT_VERSIONS -split ' ' | Where-Object { $_ })) {
+            $wanted += @{ Name = 'Pester'; Version = $v }
+          }
           foreach ($w in $wanted) {
             if (-not (Get-Module $w.Name -ListAvailable | Where-Object Version -eq $w.Version)) {
-              Install-Module $w.Name -RequiredVersion $w.Version -Force -Scope CurrentUser
+              # -SkipPublisherCheck because Pester's signing certificate is not the same across the
+              # range this gate covers: installing 5.0.0 while 6.1.0 is present makes Install-Module
+              # refuse over an authenticode issuer mismatch, and the assert below then reports the
+              # version as "not available after install" -- naming the symptom, not the cause.
+              #
+              # It skips the match against the ALREADY-INSTALLED copy, which is a hijack check for
+              # a module resolved by name. Every version here is pinned exactly, comes from the
+              # gallery, and is asserted present afterwards, so that is not the risk being run.
+              Install-Module $w.Name -RequiredVersion $w.Version -Force -Scope CurrentUser -SkipPublisherCheck
             }
             if (-not (Get-Module $w.Name -ListAvailable | Where-Object Version -eq $w.Version)) {
               throw "$($w.Name) $($w.Version) is not available after install"
@@ -190,6 +205,9 @@ jobs:
       # Consumers gate on this module from inside THEIR Pester run, which is not the one
       # tests/ uses. Proven by running, in a child process, with a control assertion that
       # separates "this Pester cannot run here" from "this module is broken".
-      - name: Pester compatibility (a Pester 5 consumer)
+      - name: Pester compatibility (every supported Pester, one leg per minor)
         shell: pwsh
-        run: ./tools/Test-PSCxPesterCompatibility.ps1 -PesterVersion $env:PESTER_COMPAT_VERSION
+        # No argument: the script reads PESTER_COMPAT_VERSIONS from the environment or straight
+        # from pins.env, so running it by hand is the same run. It refuses an empty list rather
+        # than reporting a pass over zero versions.
+        run: ./tools/Test-PSCxPesterCompatibility.ps1

@@ -5,6 +5,50 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-27
+
+### For consumers
+
+**The supported Pester range is now proven rather than asserted.** The manifest and README have
+always said Pester 5.0.0 or later; the gate that backs that claim ran exactly one version, 5.7.1,
+and had never once executed the floor. It now runs one leg per minor across the whole range --
+**5.0.0, 5.1.1, 5.2.2, 5.3.3, 5.4.1, 5.5.0, 5.6.1, 5.7.1, 5.8.0, 5.9.1, 6.0.1, 6.1.0** -- and all
+twelve pass.
+
+Nothing about the module changed. What changed is that the number you are told is the number that
+gets exercised.
+
+**Pointed at the floor, the old gate reported the module broken.** It built its Pester
+configuration with `New-PesterConfiguration`, which did not exist until 5.1.0, so under 5.0.0 the
+command was not found, PowerShell autoloaded a newer Pester by name, and the two assemblies
+collided. The gate then blamed this module for an error that never mentioned it. If you ran it
+against 5.0.0 and believed the verdict, that is why.
+
+### Internal
+
+- **The compatibility gate invokes Pester through its oldest surface**, `Invoke-Pester -Path
+  <file> -PassThru`, which behaves identically on every version from 5.0.0 to 6.1.0. That is also
+  what a plain consumer writes, so the gate now exercises the path it is describing.
+
+- **A control that throws is an environment failure, and is now caught as one.** The control run
+  exists to separate "this Pester cannot run here" from "this module is broken", and the script
+  already reported that distinction correctly -- but only when the control *returned*. When it
+  threw, the exception fell through to the generic exit-code check, which attributes any non-zero
+  exit to the module. The one safeguard built for this case was bypassed by the shape of its own
+  failure.
+
+- **Every leg is tried and every fault collected**, rather than stopping at the first. Legs are
+  four seconds apart; a CI round is not.
+
+- **`PESTER_COMPAT_VERSION` became `PESTER_COMPAT_VERSIONS`**, a space-separated list read from
+  `.github/pins.env` by the script itself -- so running it by hand and running it in CI are the
+  same run. An empty list is refused rather than reported as a pass over zero versions. A test
+  asserts a leg exists for every minor in the supported range, so narrowing the promise by
+  deleting a leg fails the suite.
+
+- The module cache key is now a hash of `pins.env` rather than a hand-written list of versions,
+  which both survives a list-valued pin and stops a forgotten pin serving a stale cache.
+
 ## [0.5.0] - 2026-08-27
 
 ### For consumers
