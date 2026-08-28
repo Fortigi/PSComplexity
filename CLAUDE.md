@@ -438,6 +438,18 @@ and expensive to rebuild, and because each one has already earned its keep.
   would need editing whenever the metric legitimately changes, which is exactly when a compatibility
   gate should keep working.
 
+  **The PowerShell legs run on WINDOWS, and the floor is a Windows guarantee by decision.**
+  PowerShell 7.0 and 7.1 are built on .NET Core 3.1 and .NET 5 and need libssl 1.1, which a current
+  Ubuntu runner does not ship -- they die with "No usable version of libssl was found" before
+  executing a line, so on Linux the gate tested 7.2 upward and reported the declared floor as a
+  module failure. The Windows archives are self-contained and all six start.
+
+  That was left as 7.0 rather than raised to the oldest version runnable on both, and the reason is
+  worth keeping so it is not re-argued: a Linux user on a current distribution will not have 7.0
+  installed at all, so proving it where it can be run is the useful guarantee. If that stops being
+  true -- a distribution shipping a libssl 1.1 compatibility package, or the floor moving for another
+  reason -- the trade changes and the leg can move with it.
+
   **An unobtainable runtime is not a module failure.** Every one of these gates separates "this
   version could not be obtained or started" from "this module is wrong under it", because the whole
   family exists to stop the second accusation being made from the first's evidence.

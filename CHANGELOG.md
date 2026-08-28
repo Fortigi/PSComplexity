@@ -58,8 +58,16 @@ against 5.0.0 and believed the verdict, that is why.
   unpacked runtime is only trusted once a marker file written last says the unpack finished. A
   half-extracted archive otherwise looks identical to a whole one.
 
-- Runs on the Linux leg only: whether a PowerShell version runs this module is not an OS question,
-  and the OS matrix already answers the path half on the runner's own PowerShell.
+- **Runs on the Windows leg only, and the floor is a Windows guarantee.** PowerShell 7.0 and 7.1
+  need libssl 1.1, which a current Ubuntu no longer ships, so they cannot start there at all -- on
+  Linux this gate tested 7.2 upward and reported the floor as a module failure. The Windows archives
+  are self-contained and all six start.
+
+  The floor stays at **7.0** rather than being raised to the oldest version that runs on both: a
+  Linux user on a current distribution will not have 7.0 installed in the first place, so proving it
+  where it can actually be run is the useful guarantee rather than a diminished one. Whether a
+  PowerShell version runs this module is not an OS question, and the OS matrix already answers the
+  path half on the runner's own PowerShell.
 
 - **The compatibility gate invokes Pester through its oldest surface**, `Invoke-Pester -Path
   <file> -PassThru`, which behaves identically on every version from 5.0.0 to 6.1.0. That is also
