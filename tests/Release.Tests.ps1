@@ -201,9 +201,27 @@ Describe 'the pins file itself' {
         # The workflows assert this at run time; asserting it here means a missing pin fails
         # in the suite rather than five minutes into a job.
         $pins = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) '.github/pins.env')
-        foreach ($k in 'PESTER_VERSION', 'PESTER_COMPAT_VERSION', 'PSSA_VERSION',
+        foreach ($k in 'PESTER_VERSION', 'PESTER_COMPAT_VERSIONS', 'PSSA_VERSION',
             'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS') {
             Get-PSCxPinValue -Line $pins -Name $k | Should-NotBeNull -Because "pins.env must define $k"
+        }
+    }
+    It 'lists a compatibility version for every supported Pester minor' {
+        # The gate proves whatever this list names, so the list IS the compatibility claim. A leg
+        # silently dropped here would narrow the promise without narrowing what the README says,
+        # and the run would stay green -- which is the shape this project refuses elsewhere.
+        #
+        # Minors, not the exact patches: a patch may be superseded and the pin bumped, but a whole
+        # minor disappearing means a range nobody tests any more.
+        $pins = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) '.github/pins.env')
+        $versions = @((Get-PSCxPinValue -Line $pins -Name 'PESTER_COMPAT_VERSIONS') -split ' ' | Where-Object { $_ })
+        $minors = @($versions | ForEach-Object { $v = [version]$_; "$($v.Major).$($v.Minor)" })
+
+        # 5.0 exactly, because that is the floor the README and the manifest promise. Testing 5.0.4
+        # would prove a version no consumer was told about.
+        $versions | Should-ContainCollection '5.0.0'
+        foreach ($m in '5.0', '5.1', '5.2', '5.3', '5.4', '5.5', '5.6', '5.7', '5.8', '5.9', '6.0', '6.1') {
+            $minors | Should-ContainCollection $m -Because "no leg covers Pester $m"
         }
     }
     It 'names only paths that exist' {
