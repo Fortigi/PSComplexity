@@ -217,9 +217,10 @@ Describe 'the pins file itself' {
         $versions = @((Get-PSCxPinValue -Line $pins -Name 'PESTER_COMPAT_VERSIONS') -split ' ' | Where-Object { $_ })
         $minors = @($versions | ForEach-Object { $v = [version]$_; "$($v.Major).$($v.Minor)" })
 
-        # 5.0 exactly, because that is the floor the README and the manifest promise. Testing 5.0.4
-        # would prove a version no consumer was told about.
-        $versions | Should-ContainCollection '5.0.0'
+        # No exact-version assertion here, deliberately. Every leg is the newest patch of its minor,
+        # including the floor's, so pinning one exactly would freeze the single leg the rule says
+        # should move -- and the rule is what this test defends. The floor's MINOR is in the list
+        # below like any other.
         foreach ($m in '5.0', '5.1', '5.2', '5.3', '5.4', '5.5', '5.6', '5.7', '5.8', '5.9', '6.0', '6.1') {
             $minors | Should-ContainCollection $m -Because "no leg covers Pester $m"
         }

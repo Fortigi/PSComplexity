@@ -67,14 +67,19 @@ gating on it does so from inside their own Pester run, which is not this one.
 `PESTER_COMPAT_VERSIONS`, which is why several other Pesters are installed in CI -- it separates
 "this Pester cannot run OUR suite" from "this module is broken for a Pester 5 consumer".
 
-**The tested range is now the supported range**: one leg per minor from **5.0.0 to 6.1.0**, twelve
+**The tested range is now the supported range**: one leg per minor from **5.0 to 6.1**, twelve
 in all, about four seconds each. It used to be one version, 5.7.1, and the floor the manifest
 promises had never once been executed.
 
 **One leg per MINOR, and the middle is not interpolation.** Floor-plus-latest was the first plan
 and is not enough: `New-PesterConfiguration` arrived in 5.1.0, which is invisible at both ends of
-the range and fatal in between. Anything landing mid-range has that shape. `5.0.0` exactly rather
-than the newest 5.0.x, because the floor is the number consumers are told.
+the range and fatal in between. Anything landing mid-range has that shape.
+
+**Every leg is the newest patch of its minor, the floor's included.** It used to be `5.0.0` exactly,
+on the argument that the promised number should be the exercised one. A consumer does not install
+5.0.0 when 5.0.4 exists, so that proved a version almost nobody runs -- and it made this the one
+list needing an exemption, which anything watching these pins for staleness would have to be taught.
+A rule with one exception is two rules.
 
 **Pointed at 5.0.0, the old gate said the module was broken -- and it was the gate.** It built its
 configuration with `New-PesterConfiguration`, so under 5.0.0 the command was missing, PowerShell
