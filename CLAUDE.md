@@ -34,6 +34,7 @@ CI (`.github/workflows/ci.yml`) runs:
 |---|---|
 | Lint | `tools/Invoke-PSCxAnalyzer.ps1` — **every severity**, and it throws. The same script code scanning and publish run |
 | CI parity | `tools/Test-PSCxCiParity.ps1` — the capabilities this repo and PSMutant both promise, checked over `.github/workflows/` |
+| PowerShell compatibility | `tools/Test-PSCxPowerShellCompatibility.ps1` — one leg per supported minor, 7.0 upward. Linux only |
 | Unit tests | whole `tests/` directory, 0 failures |
 | Order independence | `tools/Test-PSCxOrderIndependence.ps1` -- the same suite again, reversed, plus an environment comparison |
 | Complexity | **its own** `Test-PSComplexity` against `src/`, 15 / 15 per unit |
@@ -414,6 +415,55 @@ and expensive to rebuild, and because each one has already earned its keep.
   The rule set found a real gap on its first run: PSMutant's `publish.yml` ran the suite with the
   classic `Should` syntax still legal while its `ci.yml` forbade it -- a publish-time gate weaker
   than the merge gate, which is the direction that matters.
+
+- **A declared floor is exercised, or it is not a floor.** Two of them here, and they are separate
+  gates on purpose: `tools/Test-PSCxPesterCompatibility.ps1` proves a consumer can gate on this
+  module from inside every supported Pester, and `tools/Test-PSCxPowerShellCompatibility.ps1` proves
+  the module loads and computes the same answers on every supported PowerShell.
+
+  **Do not cross them.** The product would be 12 x 6 legs to answer two questions, and it would
+  confound the second: Pester 6.1.0 does not load on PowerShell 7.0, so a PowerShell leg driven
+  through Pester fails the floor for a reason that is not about this module. Nothing in `src/` calls
+  a Pester API, which is what makes the direct assertions possible.
+
+  **One leg per MINOR, and the middle is not interpolation.** `New-PesterConfiguration` arrived in
+  Pester 5.1.0 -- invisible at both ends of the range and fatal in between. The floor is tested at
+  the exact version promised, not the newest patch of that minor, because the floor is the number
+  consumers are told. A test ties the manifest's own `PowerShellVersion` to the list, so raising the
+  floor without adding a leg fails the suite.
+
+  **Compare against the current host, not against numbers written in the gate.** A leg must
+  reproduce what this host measured from the same fixture. Hardcoded scores would pin the metric a
+  second time -- `tests/Cognitive.Tests.ps1` already does that against the published examples -- and
+  would need editing whenever the metric legitimately changes, which is exactly when a compatibility
+  gate should keep working.
+
+  **The PowerShell legs run on WINDOWS, and the floor is a Windows guarantee by decision.**
+  PowerShell 7.0 and 7.1 are built on .NET Core 3.1 and .NET 5 and need libssl 1.1, which a current
+  Ubuntu runner does not ship -- they die with "No usable version of libssl was found" before
+  executing a line, so on Linux the gate tested 7.2 upward and reported the declared floor as a
+  module failure. The Windows archives are self-contained and all six start.
+
+  That was left as 7.0 rather than raised to the oldest version runnable on both, and the reason is
+  worth keeping so it is not re-argued: a Linux user on a current distribution will not have 7.0
+  installed at all, so proving it where it can be run is the useful guarantee. If that stops being
+  true -- a distribution shipping a libssl 1.1 compatibility package, or the floor moving for another
+  reason -- the trade changes and the leg can move with it.
+
+  **An unobtainable runtime is not a module failure.** Every one of these gates separates "this
+  version could not be obtained or started" from "this module is wrong under it", because the whole
+  family exists to stop the second accusation being made from the first's evidence.
+
+- **`Write-Output` inside a value-returning function joins its return value.** `PSAvoidUsingWriteHost`
+  is deliberately not excluded here, so every `tools/` script prints through the pipeline -- and a
+  helper that prints progress AND returns a path hands the caller both, concatenated. The symptom
+  names a command that is a whole English sentence, and points at the call site rather than the
+  print.
+
+  Progress belongs to the caller, whose output nobody captures. Swept the eight scripts in `tools/`
+  for functions that both `Write-Output` and `return` a value: there is exactly one such pattern and
+  it was fixed on the run that found it, so the negative is confirmed rather than assumed -- and the
+  sweep was checked against a planted case first, because a scan that cannot fire proves nothing.
 
 - **A claim about the framework is checkable in ten seconds, so check it before paying for it.**
   The AST index passed `ReferenceEqualityComparer` explicitly, with a comment saying the default

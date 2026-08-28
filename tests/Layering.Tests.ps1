@@ -176,6 +176,38 @@ Describe 'module state in src/' {
     }
 }
 
+Describe 'what keeps the two compatibility gates independent' {
+    It 'names no Pester command anywhere in src/' {
+        # The two compatibility gates vary one axis each and neither varies both.
+        # Test-PSCxPowerShellCompatibility.ps1 asserts DIRECTLY rather than through Pester, and
+        # Test-PSCxPesterCompatibility.ps1 varies Pester while holding PowerShell fixed. Both rest
+        # on a single property of this module: it never calls Pester, so "works under Pester N" and
+        # "works on PowerShell M" cannot interact through our code, and the product of the two
+        # matrices -- 72 combinations -- is redundant rather than merely expensive.
+        #
+        # The day src/ calls a Pester command, that stops being true and the product becomes real
+        # work. Nothing else would say so: both gates would keep passing, because each one holds
+        # the other axis still. This assertion is the whole reason the cheap arrangement is honest.
+        $pester = @((Get-Module Pester).ExportedCommands.Keys)
+        # Read from the loaded Pester rather than written out here, so the list cannot go stale as
+        # Pester grows. Asserted non-empty first: an empty set makes every file below pass, which
+        # is the vacuous green this file exists to refuse.
+        $pester.Count | Should-BeGreaterThan 20
+
+        # Parsed, not grepped. "Pester" appears in the prose of several headers, and a comment
+        # naming a command is not a call -- the distinction this test turns on.
+        $srcDir = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
+        $calls = foreach ($f in Get-ChildItem -LiteralPath $srcDir -Filter *.ps1) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$null)
+            foreach ($c in $ast.FindAll({ $args[0] -is [System.Management.Automation.Language.CommandAst] }, $true)) {
+                $name = $c.GetCommandName()
+                if ($name -and $pester -contains $name) { "$($f.Name): $name" }
+            }
+        }
+        (@($calls) -join '; ') | Should-Be ''
+    }
+}
+
 # Deliberately not here: a "one Write-Host" assertion like the sibling's. That project excludes
 # PSAvoidUsingWriteHost repo-wide because its gate scripts print for a living, so a test is the
 # only thing that can hold the line. Here the rule is NOT excluded and src/ contains no

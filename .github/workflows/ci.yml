@@ -54,7 +54,7 @@ jobs:
       - name: Load pinned versions
         shell: pwsh
         run: |
-          $required = 'PESTER_VERSION', 'PESTER_COMPAT_VERSIONS', 'PSSA_VERSION',
+          $required = 'PESTER_VERSION', 'PESTER_COMPAT_VERSIONS', 'PS_COMPAT_VERSIONS', 'PSSA_VERSION',
                       'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS'
           $pins = @{}
           foreach ($line in Get-Content .github/pins.env) {
@@ -205,6 +205,28 @@ jobs:
       # Consumers gate on this module from inside THEIR Pester run, which is not the one
       # tests/ uses. Proven by running, in a child process, with a control assertion that
       # separates "this Pester cannot run here" from "this module is broken".
+      # WINDOWS, not Linux, and the reason is not preference. PowerShell 7.0 and 7.1 are built on
+      # .NET Core 3.1 and .NET 5, which need libssl 1.1; a current Ubuntu runner ships OpenSSL 3 and
+      # no compatibility package, so those two hosts die before running a line -- "No usable version
+      # of libssl was found". The Windows archives are self-contained and all six start.
+      #
+      # One leg only, because the question is whether a PowerShell VERSION runs this module, which is
+      # not an OS question -- and the OS matrix already answers the path half on the runner's own
+      # PowerShell. Windows is also the leg with budget: Linux carries the mutation gate.
+      - name: Cache downloaded PowerShell runtimes
+        if: matrix.os == 'windows-latest'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pscx-pwsh
+          key: pwsh-runtimes-${{ runner.os }}-${{ hashFiles('.github/pins.env') }}
+
+      - name: PowerShell compatibility (every supported PowerShell, one leg per minor)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        # No argument: the script reads PS_COMPAT_VERSIONS from the environment or pins.env, and
+        # refuses an empty list rather than reporting a pass over zero versions.
+        run: ./tools/Test-PSCxPowerShellCompatibility.ps1 -RuntimeRoot "$HOME/.pscx-pwsh"
+
       - name: Pester compatibility (every supported Pester, one leg per minor)
         shell: pwsh
         # No argument: the script reads PESTER_COMPAT_VERSIONS from the environment or straight
