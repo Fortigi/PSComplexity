@@ -159,6 +159,14 @@ function Install-PSCxRuntime {
 if ($Child) {
     # One host, one leg. Everything here runs under the DOWNLOADED PowerShell, so it must not use
     # anything newer than the oldest version in the list -- which is the point of the exercise.
+    #
+    # This line is FIRST and is load-bearing: it is how the caller tells a host that never started
+    # from a module that misbehaved. PowerShell 7.0 and 7.1 are built on .NET Core 3.1 and .NET 5
+    # and need libssl 1.1, which a current Linux distribution no longer ships -- they die with "No
+    # usable version of libssl was found" before executing a single line of this file. Reporting
+    # that as "the module is wrong under 7.0" would be the exact accusation this gate family exists
+    # to prevent.
+    Write-Output "STARTED $($PSVersionTable.PSVersion)"
     Import-Module (Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'PSComplexity.psd1') -Force
 
     $actual = Get-PSCxFixtureRow -Path $FixtureRoot
@@ -213,8 +221,31 @@ try {
             $faults.Add("PowerShell ${v}: could not be obtained -- $($_.Exception.Message)")
             continue
         }
-        & $exe -NoProfile -File $PSCommandPath -Child -FixtureRoot $srcDir -Expected $expected
-        if ($LASTEXITCODE -ne 0) { $faults.Add("PowerShell ${v}: this module does not behave correctly on it.") }
+        # The call is guarded, not just its result. A host that exits non-zero sets LASTEXITCODE and
+        # is handled below; a host that cannot be LAUNCHED -- a truncated or wrong-architecture
+        # binary -- throws instead, and under ErrorActionPreference = Stop that kills the whole gate
+        # rather than recording one leg. Both are the same finding: this version proved nothing.
+        try {
+            $out = & $exe -NoProfile -File $PSCommandPath -Child -FixtureRoot $srcDir -Expected $expected 2>&1
+            $code = $LASTEXITCODE
+        }
+        catch {
+            $out = @("could not launch: $($_.Exception.Message)")
+            $code = 1
+        }
+        $out | ForEach-Object { Write-Output "  $_" }
+        if ($code -ne 0) {
+            # Silence before the marker means the host never got as far as running our code, so the
+            # fault is the platform's and saying otherwise sends the reader to the wrong file. It is
+            # still a FAULT rather than a skip: a leg that cannot run is a version that is not
+            # proven, and passing over it would be a green gate covering less than it claims.
+            if (@($out) -notmatch '^STARTED ') {
+                $faults.Add("PowerShell ${v}: the host would not start on this platform, so nothing was proven. Not a module failure.")
+            }
+            else {
+                $faults.Add("PowerShell ${v}: this module does not behave correctly on it.")
+            }
+        }
     }
 
     if ($faults.Count -gt 0) {
