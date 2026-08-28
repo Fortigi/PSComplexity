@@ -16,10 +16,10 @@ function Get-PSCxCycClauseRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.IfStatementAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'IfStatementAst')) {
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'clause'; Line = $n.Extent.StartLineNumber; Amount = $n.Clauses.Count }
     }
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.SwitchStatementAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'SwitchStatementAst')) {
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'clause'; Line = $n.Extent.StartLineNumber; Amount = $n.Clauses.Count }
     }
 }
@@ -48,7 +48,7 @@ function Get-PSCxCycFlowCommandRow {
     # Test-PSCxFlowCommand answers False for anything that is not a CommandAst, so asking the
     # index for the CommandAst nodes and testing those is the same set in the same order -- at the
     # cost of the commands in the file rather than every node in it.
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'CommandAst')) {
         if (-not (Test-PSCxFlowCommand -Node $n)) { continue }
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'flow-command'; Line = $n.Extent.StartLineNumber; Amount = 1 }
     }
@@ -63,16 +63,16 @@ function Get-PSCxCycOperatorRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.PipelineChainAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'PipelineChainAst')) {
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 }
     }
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.TernaryExpressionAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'TernaryExpressionAst')) {
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 }
     }
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.BinaryExpressionAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'BinaryExpressionAst')) {
         if ($n.Operator -in 'And', 'Or', 'QuestionQuestion') { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.AssignmentStatementAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'AssignmentStatementAst')) {
         if ($n.Operator -eq 'QuestionQuestionEquals') { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'operator'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
 }

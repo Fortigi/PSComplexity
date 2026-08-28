@@ -39,7 +39,7 @@ function Get-PSCxCogIfRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.IfStatementAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'IfStatementAst')) {
         $extra = ($n.Clauses.Count - 1) + [int][bool]$n.ElseClause
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'if'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) + $extra }
     }
@@ -63,7 +63,7 @@ function Get-PSCxCogTernaryRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.TernaryExpressionAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'TernaryExpressionAst')) {
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'ternary'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
     }
 }
@@ -76,7 +76,7 @@ function Get-PSCxCogFlowCommandRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'CommandAst')) {
         if (-not (Test-PSCxFlowCommand -Node $n)) { continue }
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'flow-command'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
     }
@@ -88,12 +88,12 @@ function Get-PSCxCogNullCoalesceRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.BinaryExpressionAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'BinaryExpressionAst')) {
         if ($n.Operator -eq 'QuestionQuestion') {
             [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'null-coalesce'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
         }
     }
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.AssignmentStatementAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'AssignmentStatementAst')) {
         if ($n.Operator -eq 'QuestionQuestionEquals') {
             [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'null-coalesce'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
         }
@@ -108,7 +108,7 @@ function Get-PSCxCogPipelineChainRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.PipelineChainAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'PipelineChainAst')) {
         if ($n.Parent -isnot [System.Management.Automation.Language.PipelineChainAst] -or
             $n.Parent.Operator -ne $n.Operator) {
             [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'pipeline-chain'; Line = $n.Extent.StartLineNumber; Amount = 1 }
@@ -121,7 +121,7 @@ function Get-PSCxCogBooleanRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.BinaryExpressionAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'BinaryExpressionAst')) {
         if (Test-PSCxLogicalRunStart -Node $n) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'boolean-run'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
 }
@@ -144,7 +144,7 @@ function Get-PSCxCogRecursionRow {
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst]))) {
+    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'CommandAst')) {
         $fn = Get-PSCxEnclosingFunctionName -Node $n
         if ($fn -and $n.GetCommandName() -eq $fn) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
