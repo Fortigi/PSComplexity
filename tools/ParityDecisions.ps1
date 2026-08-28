@@ -20,7 +20,7 @@ function Get-PSCxWorkflowCode {
     # Workflow text with comments removed, for the rules that ask what a workflow DOES.
     #
     # A capability named only in a comment is not a capability, and the two are indistinguishable
-    # to a grep: the sibling repo's code-scanning.yml spends six lines of prose on
+    # to a grep: another repository's code-scanning.yml spends six lines of prose on
     # Invoke-ScriptAnalyzer explaining why it does NOT call it, which reads as an inline lint gate.
     #
     # A hash opens a comment where it starts a line or follows whitespace -- YAML's rule and

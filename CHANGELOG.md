@@ -327,7 +327,7 @@ keys it holds could not distinguish units the tool could.
   a relative one silently resolved against wherever the shell happened to be standing. It gave
   the right answer only while its single caller passed an absolute path **and** a root equal to
   the current directory -- two conditions that both had to hold and neither of which was
-  stated. Not reachable today; the sibling project shipped the same shape and it was a live
+  stated. Not reachable today; another project shipped the same shape and it was a live
   hole there, because a config may name a file by full path.
 
 
@@ -371,7 +371,7 @@ keys it holds could not distinguish units the tool could.
   repos apart from the command prefix -- which makes diffing the two copies the comparison, and
   makes declining a rule a deletion somebody has to argue for rather than a silence.
 
-  It found a real gap on its first run against the sibling: PSMutant's publish workflow ran the
+  It found a real gap on its first run against the other copy: a publish workflow ran the
   suite with the classic `Should` syntax still legal while its merge gate forbade it.
 
 - **A node's enclosing unit and nesting depth are computed in one descent, making the cost linear

@@ -10,7 +10,7 @@
 # ceremony. The condition for revisiting was recorded in advance -- a module that both exported
 # commands consume, living in its own file -- and src/Report.ps1 met it.
 #
-# Two things this test does NOT have to work around, unlike the sibling project's version:
+# Two things this test does NOT have to work around, unlike another project's version:
 #
 #   - src/ contains no here-strings, so there is no code the parser cannot see.
 #   - src/ dispatches nothing through a variable (`& $fn`), so every callee is resolvable.
@@ -149,7 +149,7 @@ Describe 'the dependency graph in src/' {
 Describe 'module state in src/' {
     It 'never reads a $script: variable from the file that did not write it' {
         # Locality: a constant one file writes while another reads leaves neither readable on its
-        # own, and it is an edge no call-graph check can see. The sibling project had two such
+        # own, and it is an edge no call-graph check can see. The another project had two such
         # reads and removed them in opposite directions -- one default moved to its reader, the
         # other stayed and its resolver came to it. This is what stops a third appearing here.
         $asts = Get-SrcAst
@@ -208,7 +208,7 @@ Describe 'what keeps the two compatibility gates independent' {
     }
 }
 
-# Deliberately not here: a "one Write-Host" assertion like the sibling's. That project excludes
+# Deliberately not here: a "one Write-Host" assertion like that project's. That project excludes
 # PSAvoidUsingWriteHost repo-wide because its gate scripts print for a living, so a test is the
 # only thing that can hold the line. Here the rule is NOT excluded and src/ contains no
 # Write-Host at all, so PSScriptAnalyzer already fails the build -- and a second gate over the

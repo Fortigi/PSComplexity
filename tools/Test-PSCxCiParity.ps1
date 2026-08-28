@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Assert this repository's CI still holds every capability the sibling module's does.
+    Assert this repository's CI still holds every capability the matching one's does.
 
 .DESCRIPTION
     PSComplexity and PSMutant gate each other -- one measures the other's complexity, the other

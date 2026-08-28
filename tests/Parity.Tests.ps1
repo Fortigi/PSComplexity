@@ -197,7 +197,7 @@ Describe 'how a workflow gets its tools' {
     }
 
     It 'catches a Pester configuration that does not disable the classic syntax' {
-        # The rule that found the sibling repository's real gap: its publish gate ran the suite with
+        # The rule that found another repository's real gap: its publish gate ran the suite with
         # classic Should syntax still legal, while its merge gate forbade it.
         @(Get-PSCxWorkflowToolingFault -Fact (CiFact (Broken -Line (GoodCi) -Find '$cfg.Should.DisableV5 = $true' -Replace '$cfg.Run.Path = 1'))) -join ' ' |
             Should-BeLikeString '*DisableV5*'

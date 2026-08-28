@@ -396,7 +396,7 @@ Describe 'Get-PSCxProcessStateFault' {
     }
 
     It 'names a variable the run removed' {
-        # The sibling's actual failure was this one: an AfterEach cleared a variable and never
+        # The actual failure observed was this one: an AfterEach cleared a variable and never
         # put it back, so every file after it ran in a different environment.
         Get-PSCxProcessStateFault -Before @{ 'env:GITHUB_ACTIONS' = 'true' } -After @{} |
             Should-BeLikeString '*removed: env:GITHUB_ACTIONS*'

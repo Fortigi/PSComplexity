@@ -39,7 +39,7 @@ jobs:
     # than a failed one, so it reads like somebody stopped the run.
     #
     # Raising this is the stopgap, not the answer: per-mutant cost here is 4.3s against the
-    # sibling project's 1.8s, because src/Ast.ps1 is mapped to two covering suites and pays for
+    # another project's 1.8s, because src/Ast.ps1 is mapped to two covering suites and pays for
     # both on every one of its mutants (#96).
     # 60, and the mutation step is 29 minutes of it -- measured, not guessed. The budget went
     # 20 -> 40 when that step first walked through it, and 40 -> 60 when the policy layer
@@ -127,7 +127,7 @@ jobs:
       # Early, because it is a text check costing under a second and the alternative is learning
       # that a workflow lost its timeout after sixteen minutes of mutation testing.
       #
-      # It watches THIS directory for drift from the sibling module's, which nothing did: the two
+      # It watches THIS directory for drift from the matching one, which nothing did: the two
       # repos gate each other, so their CI is assumed comparable, and it was not -- in thirteen
       # ways at once. Each workflow reads fine on its own, which is why only a shared rule set
       # catches it.
@@ -173,7 +173,7 @@ jobs:
 
       # The step above ran the suite alphabetically. The mutation baseline below runs the
       # mapped covering suites in config order, and those two orders differ -- so an
-      # order-dependent suite is green in one and red in the other, which is how the sibling
+      # order-dependent suite is green in one and red in the other, which is how another project
       # spent three CI rounds on a variable one file had cleared and not restored. Runs on both
       # platforms: only one of them reaches the mutation gate at all.
       - name: Order independence (the suite, reversed)
@@ -187,7 +187,7 @@ jobs:
         shell: pwsh
         run: ./tools/Measure-PSCxCoverage.ps1
 
-      # Self-assess: mutation-test our own metric logic with our sibling module PSMutant,
+      # Self-assess: mutation-test our own metric logic with PSMutant,
       # gating on the score. (Linux only -- test quality is platform-independent.)
       - name: Self-assess (PSMutant mutation testing)
         if: matrix.os == 'ubuntu-latest'
