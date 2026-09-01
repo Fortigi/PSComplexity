@@ -5,6 +5,8 @@
     "tests",
     "schemas"
   ],
+  "_workersComment": "Evaluate three mutants at once, each in its own sandbox copy and its own Pester runspace (PSMutant 0.5.0). THREE because the ubuntu-latest runner gives a public repo 4 vCPU and the orchestrator wants one; `workers: 0` would resolve to the same number there and to something past the useful point on a developer's machine -- PSMutant's own measurements put the optimum at four workers for a repo with few covering suites and eight for one with many, and this repo has eight. THE ACCEPTANCE IS TWO NUMBERS, not one: the same mutant COUNT and the same VERDICTS as a serial run, because a smaller mutant set scoring the same is exactly the failure this project exists to find in other people's code. Measured before this was turned on. SAFE HERE BECAUSE NOTHING IN tests/ TOUCHES PROCESS STATE: no test writes an environment variable, and every temp fixture is named with a GUID rather than $PID -- which every worker shares, since they are runspaces in one process. Both of those bit PSMutant's own suite and are the first things to check if this ever starts disagreeing with a serial run.",
+  "workers": 3,
   "_sandboxSubtrees_comment": "schemas is copied for the same reason src and tests are: tests/Report.Tests.ps1 reads schemas/v1/report.schema.json to validate what a real run wrote. Without it the sandboxed suite cannot find the file and the BASELINE goes red -- before a single mutant is tried, and with an error that names a missing path rather than the missing subtree.",
   "mutate": [
     "src/Ast.ps1",
