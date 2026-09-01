@@ -38,7 +38,28 @@ CI (`.github/workflows/ci.yml`) runs:
 | Unit tests | whole `tests/` directory, 0 failures |
 | Order independence | `tools/Test-PSCxOrderIndependence.ps1` -- the same suite again, reversed, plus an environment comparison |
 | Complexity | **its own** `Test-PSComplexity` against `src/`, 15 / 15 per unit |
-| Self-mutation | PSMutant against `psmutant.self.config.json`, break = 100 |
+| Self-mutation | PSMutant against `psmutant.self.config.json`, break = 100. Three workers -- see below |
+
+**The self-mutation gate runs THREE MUTANTS AT ONCE, and that is safe here for a reason worth
+keeping.** `workers: 3` took 554 mutants from 289s to 142s. Every worker is a runspace in ONE
+process, so they share the environment and they share `$PID` -- a test that WRITES an environment
+variable, or names a temp fixture after the process id, is then a test racing itself. Nothing in
+`tests/` does either: no test writes `$env:`, and every fixture already carries a GUID. Both
+hazards bit PSMutant's own suite and had to be fixed there first, so this is a property to keep
+rather than one to assume.
+
+`Push-Location` is fine, checked rather than assumed: a location is per-runspace, and a child
+setting its own leaves both `$PWD` and `[Environment]::CurrentDirectory` alone in the parent.
+
+**The acceptance for changing that number is TWO numbers** -- the same mutant COUNT and the same
+VERDICTS as a serial run, not a score that happens to match. That is the same rule this file
+already states for moving a file to a cheaper covering suite, and for the same reason: a smaller
+mutant set scoring the same is precisely the failure this project exists to find in other people's
+code. Measured before it was switched on: 554 both ways, identical and in order.
+
+Three rather than `0`, which means ProcessorCount - 1. The two are the same number on the
+ubuntu-latest runner a public repo gets, and `0` is worse on a developer's machine: wall clock has
+an optimum and gets worse past it, because the workers share one GC heap.
 
 Coverage is measured by one committed script, and it is enforced:
 

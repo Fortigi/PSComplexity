@@ -5,6 +5,31 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+### Internal
+
+**The self-mutation gate runs three mutants at once, on PSMutant 0.5.0.** 554 mutants, **289s to
+142s** on the same machine. `PSMUTANT_VERSION` moves 0.4.0 -> 0.5.0 and the config gains
+`"workers": 3`.
+
+Three because the ubuntu-latest runner gives a public repo 4 vCPU and the orchestrator wants one.
+`workers: 0` means "this machine" and would resolve to the same number in CI, but to something past
+the useful point on a developer's machine -- PSMutant's own measurements put the optimum at four
+workers for a repo with few covering suites and eight for one with many, and wall clock gets *worse*
+beyond it, because every worker is a runspace in one process sharing one GC heap.
+
+**The acceptance was two numbers, not one:** the same mutant COUNT and the same VERDICTS as a
+serial run -- 554 both ways, identical and in order, no stale equivalence declarations. A smaller
+mutant set scoring the same is precisely the failure this project exists to find in other people's
+code, so a matching score alone would not have been evidence.
+
+**It is safe here because nothing in `tests/` touches PROCESS state**, and that is worth stating
+because it is not automatic. Every worker is a runspace in ONE process, so they share the
+environment and they share `$PID`. No test here writes an environment variable, and every temp
+fixture is already named with a GUID rather than the process id. Both of those bit PSMutant's own
+suite and had to be fixed there before it could turn this on; they are the first things to check if
+a parallel run ever starts disagreeing with a serial one.
+
+
 ## [0.5.1] - 2026-08-28
 
 ### For consumers
