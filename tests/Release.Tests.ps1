@@ -293,7 +293,7 @@ Describe 'the pins file itself' {
         # including the floor's, so pinning one exactly would freeze the single leg the rule says
         # should move -- and the rule is what this test defends. The floor's MINOR is in the list
         # below like any other.
-        foreach ($m in '5.0', '5.1', '5.2', '5.3', '5.4', '5.5', '5.6', '5.7', '5.8', '5.9', '6.0', '6.1') {
+        foreach ($m in '5.0', '5.1', '5.2', '5.3', '5.4', '5.5', '5.6', '5.7', '5.8', '5.9', '6.0', '6.1', '6.2') {
             $minors | Should-ContainCollection $m -Because "no leg covers Pester $m"
         }
     }

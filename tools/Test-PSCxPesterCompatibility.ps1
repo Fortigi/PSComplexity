@@ -96,7 +96,7 @@ function Invoke-PSCxCompatSuite {
     # broken when pointed at it.
     #
     # -Path and -PassThru are the oldest surface Pester 5 has, and they behave identically on
-    # 5.0.0, 5.7.1, 5.8.0 and 6.1.0 -- verified, including the shape of .Containers, which the
+    # 5.0.0, 5.7.1, 5.8.0 and 6.2.0 -- verified, including the shape of .Containers, which the
     # never-ran check below reads. It is also what a plain consumer writes.
     #
     # 6>$null replaces Output.Verbosity = 'None', which lives on the configuration object this can
