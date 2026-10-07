@@ -77,7 +77,7 @@ reports a plausible near-zero. Measured here both ways on the same suite, the tw
 exactly, because nothing in `tests/` starts a nested run. The setting costs a little speed
 and means a future test that does start one cannot quietly halve the number.
 
-**Pester version split**: the suite is written for and tested against **6.1.0**, which is what
+**Pester version split**: the suite is written for and tested against **6.2.0**, which is what
 `.github/pins.env` sets as `PESTER_VERSION` and what CI and `publish.yml` both run. It uses the
 `Should-Be` assertion family, so it does not run on Pester 5 at all.
 
@@ -88,7 +88,7 @@ gating on it does so from inside their own Pester run, which is not this one.
 `PESTER_COMPAT_VERSIONS`, which is why several other Pesters are installed in CI -- it separates
 "this Pester cannot run OUR suite" from "this module is broken for a Pester 5 consumer".
 
-**The tested range is now the supported range**: one leg per minor from **5.0 to 6.1**, twelve
+**The tested range is now the supported range**: one leg per minor from **5.0 to 6.2**, thirteen
 in all, about four seconds each. It used to be one version, 5.7.1, and the floor the manifest
 promises had never once been executed.
 
@@ -106,7 +106,7 @@ A rule with one exception is two rules.
 configuration with `New-PesterConfiguration`, so under 5.0.0 the command was missing, PowerShell
 autoloaded a newer Pester by name, and the assemblies collided; the error named versions and never
 mentioned this module. It now invokes through `Invoke-Pester -Path <file> -PassThru`, the oldest
-surface Pester 5 has and identical on every version through 6.1.0 -- which is also what a consumer
+surface Pester 5 has and identical on every version through 6.2.0 -- which is also what a consumer
 writes, so the gate exercises the path it describes.
 
 **A control that THROWS is an environment failure and must be caught as one.** The control exists
@@ -329,6 +329,15 @@ Two subtleties worth knowing before touching `Ast.ps1`:
 - **Version**: bump `ModuleVersion` in `PSComplexity.psd1` in the PR; `publish.yml`
   refuses to publish when the git tag and `ModuleVersion` disagree. Update `ReleaseNotes`
   in the same edit.
+- **Unless the change ships nothing, in which case it takes neither a bump nor a CHANGELOG
+  entry.** `publish.yml` stages `PSComplexity.psd1`, `PSComplexity.psm1`, `src`, `schemas`,
+  `LICENSE` and `README.md`. A branch touching only `.github/`, `tools/`, `tests/`, a config
+  or this file leaves the repo at version N building a module byte-identical to the gallery's
+  N, so there is nothing for a consumer to observe. The release gate refuses entries under
+  `[Unreleased]` above a published `ModuleVersion` and is right to -- that is two people
+  installing "N" and getting different code -- but its advice to bump applies when something
+  SHIPPED changed. Otherwise drop the entry rather than claim a release, and record the
+  reasoning here, beside the gate it describes. A pin bump is the usual case.
 - **ASCII only** in `src/` and `tests/` — non-ASCII without a BOM trips
   `PSUseBOMForUnicodeEncodedFile` and fails lint.
 - Reference scores are the contract: `tests/Cognitive.Tests.ps1` pins the SonarSource
@@ -448,7 +457,7 @@ and expensive to rebuild, and because each one has already earned its keep.
   the module loads and computes the same answers on every supported PowerShell.
 
   **Do not cross them.** The product would be 12 x 6 legs to answer two questions, and it would
-  confound the second: Pester 6.1.0 does not load on PowerShell 7.0, so a PowerShell leg driven
+  confound the second: Pester 6.2.0 does not load on PowerShell 7.0, so a PowerShell leg driven
   through Pester fails the floor for a reason that is not about this module. Nothing in `src/` calls
   a Pester API, which is what makes the direct assertions possible.
 

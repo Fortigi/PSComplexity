@@ -11,7 +11,7 @@
     Deliberately NO Pester. The two compatibility questions are different: the Pester gate asks
     whether a consumer can gate on this module from inside Pester N, and this one asks whether the
     module loads and computes correctly on PowerShell N. Crossing them would multiply the legs, and
-    worse, would confound this one -- Pester 6.1.0 does not load on PowerShell 7.0 at all, so a
+    worse, would confound this one -- Pester 6.2.0 does not load on PowerShell 7.0 at all, so a
     fixture driven through Pester would fail the floor for a reason that is not about this module.
     Nothing in src/ calls a Pester API, so the assertions can be direct.
 
