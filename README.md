@@ -438,6 +438,8 @@ finding on an unrelated change.
 on something already argued is noise. The argument is not lost -- the JSON report carries it
 under `accepted`, which is where "what did this run excuse" is answered.
 
+The same file works in Azure DevOps -- see [Azure Pipelines](#azure-pipelines).
+
 Only the gate writes SARIF. Without ceilings there is no such thing as a finding, so a SARIF file
 from `Measure-PSComplexity` would be an empty results array claiming a clean bill of health.
 
@@ -468,6 +470,70 @@ above:
         throw 'Complexity gate failed'
     }
 ```
+
+### Azure Pipelines
+
+The same gate runs unchanged on Azure Pipelines; what differs is how the findings are shown.
+[`examples/azure-pipelines.yml`](examples/azure-pipelines.yml) is a complete pipeline with every
+step below.
+
+```yaml
+- pwsh: |
+    Install-Module PSComplexity -RequiredVersion 0.5.2 -Force -Scope CurrentUser
+    New-Item -ItemType Directory -Force '$(Build.ArtifactStagingDirectory)/complexity' | Out-Null
+    $ok = Test-PSComplexity ./src -Recurse `
+            -ReportPath '$(Build.ArtifactStagingDirectory)/complexity/complexity.json' `
+            -SarifPath  '$(Build.ArtifactStagingDirectory)/complexity/complexity.sarif'
+    if (-not $ok) { Write-Host '##vso[task.logissue type=error]Complexity gate failed'; exit 1 }
+  displayName: Complexity gate
+- task: AdvancedSecurity-Publish@1
+  condition: succeededOrFailed()
+  inputs:
+    SarifsInputDirectory: '$(Build.ArtifactStagingDirectory)/complexity'
+    Category: 'complexity'
+```
+
+**Run it from the repository root.** Every `File` -- in the records, the report and the SARIF --
+is relative to the working directory, and Azure DevOps matches a finding to a file by that path.
+Run from anywhere else and the alerts point at files that do not exist.
+
+**Two ways to see the SARIF, from the same file:**
+
+- **GitHub Advanced Security for Azure DevOps** turns each breach into a code scanning alert on the
+  repository, through `AdvancedSecurity-Publish@1`. **Set `Category`.** The log deliberately carries
+  no category of its own: on GitHub a category written into the file overrides the one the upload
+  step names, so a fixed one would make two PSComplexity uploads in one repository replace each
+  other. The pipeline names it, on both platforms.
+- **Without Advanced Security**, install the *SARIF SAST Scans Tab* extension from the Marketplace
+  and publish the SARIF as a pipeline artifact named exactly `CodeAnalysisLogs`. Each run then gets
+  a *Scans* tab listing the breaches. That is per run, not per repository: there is no alert history
+  and nothing is closed when a unit is fixed.
+
+Either way, the publishing step needs `condition: succeededOrFailed()`. The gate failing is exactly
+when there are findings, and a step that runs only on success publishes them on every build except
+the ones that have any.
+
+Azure Repos has no equivalent of GitHub's inline annotations on a pull request diff, with or without
+SARIF. What reaches the PR is the build result and its log, where each breach is already printed as a
+warning naming the unit -- which is why the module writes no `##vso[...]` commands of its own: it would be
+CI-specific output saying what the warnings already say.
+
+**Gating a pull request on what it changed.** Azure Pipelines checks out with a depth of 1 by
+default and builds a detached merge commit, so the target branch a diff needs is not there. Fetch
+full history and diff against the target branch the pipeline names:
+
+```yaml
+- checkout: self
+  fetchDepth: 0
+- pwsh: |
+    $target  = '$(System.PullRequest.TargetBranch)' -replace '^refs/heads/', ''
+    $changed = git diff --name-only "origin/$target...HEAD"
+    if (-not (Test-PSComplexity ./src -Recurse -ChangedFile $changed)) { exit 1 }
+  condition: eq(variables['Build.Reason'], 'PullRequest')
+```
+
+If the diff fails it prints nothing, and an empty `-ChangedFile` is refused rather than read as a
+pass -- so a broken checkout fails the build instead of approving it.
 
 ## Development
 

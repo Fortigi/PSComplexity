@@ -5,6 +5,29 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-09
+
+### For consumers
+
+**The SARIF log is now accepted by GitHub Advanced Security for Azure DevOps, and the README shows
+how to run the gate on Azure Pipelines.** Checked with the SARIF validator's Azure DevOps and GitHub
+Advanced Security rule sets, the log failed two rules and now passes them: the tool carries a
+`fullName` (name and version), which Azure DevOps requires, and each rule carries a `help` text,
+which GitHub Advanced Security requires. Nothing else in the log changed -- same rules, same
+results, same fingerprints -- so existing alerts are not reopened.
+
+One rule is left failing on purpose: the log carries no `automationDetails`, i.e. no category. On
+GitHub a category in the file overrides the one the upload step names, so writing one would make two
+PSComplexity uploads in one repository replace each other. **On Azure DevOps, set `Category` on
+`AdvancedSecurity-Publish@1`**; that is where it comes from.
+
+New in the README, with a complete `examples/azure-pipelines.yml`: the gate on Azure Pipelines,
+publishing the SARIF to Advanced Security or -- without it -- to the *SARIF SAST Scans Tab*
+extension, why the publishing step needs `condition: succeededOrFailed()`, and how to gate a pull
+request on the files it changed when Azure Pipelines checks out shallow and detached.
+
+No score moves and no command changed.
+
 ## [0.5.1] - 2026-08-28
 
 ### For consumers
