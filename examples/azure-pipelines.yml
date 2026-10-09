@@ -1,0 +1,88 @@
+# Example: PSComplexity as a gate in Azure Pipelines.
+#
+# Copy into your repository as azure-pipelines.yml (or add the steps to an existing pipeline).
+# Assumes your PowerShell lives under ./src and the pipeline runs from the repository root, so
+# the paths in the report and the SARIF are repo-relative -- which is what Azure DevOps and
+# GitHub both match findings against.
+#
+# Three things happen on every run:
+#   1. the gate runs, against the whole tree or -- on a pull request -- only the files it changed;
+#   2. the JSON report and the SARIF log are published as a build artifact, whatever the verdict;
+#   3. if your organisation has GitHub Advanced Security for Azure DevOps, the SARIF becomes
+#      code scanning alerts on the repository. Delete that step if it does not.
+#
+# See the README section "Azure Pipelines" for why each step is shaped the way it is.
+
+trigger:
+  - main
+
+pr:
+  - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  # Pin the version: a gate decides whether a build passes, and the metric has moved between
+  # versions for unchanged source. Two agents on the same commit must agree.
+  PSComplexityVersion: '0.5.2'
+  ReportDir: '$(Build.ArtifactStagingDirectory)/complexity'
+
+steps:
+  # Full history, not the default depth of 1: the pull-request scope below diffs against the
+  # target branch, and a shallow clone does not have it.
+  - checkout: self
+    fetchDepth: 0
+
+  - pwsh: |
+      Install-Module PSComplexity -RequiredVersion $(PSComplexityVersion) -Force -Scope CurrentUser
+      New-Item -ItemType Directory -Force -Path '$(ReportDir)' | Out-Null
+
+      $gate = @{
+          Path       = './src'
+          Recurse    = $true
+          ReportPath = '$(ReportDir)/complexity.json'
+          SarifPath  = '$(ReportDir)/complexity.sarif'
+      }
+
+      # A committed baseline lets the gate go green on a codebase already over the ceilings,
+      # while still stopping anything from getting worse.
+      if (Test-Path ./complexity-baseline.json) { $gate.BaselineFile = './complexity-baseline.json' }
+
+      # On a pull request, judge what the PR changed rather than the whole tree. An empty diff
+      # (a failed git command prints nothing) is refused by the module, not taken as a pass.
+      if ('$(Build.Reason)' -eq 'PullRequest') {
+          $target = '$(System.PullRequest.TargetBranch)' -replace '^refs/heads/', ''
+          $gate.ChangedFile = @(git diff --name-only "origin/$target...HEAD")
+      }
+
+      if (-not (Test-PSComplexity @gate)) {
+          Write-Host '##vso[task.logissue type=error]Complexity gate failed -- see the warnings above.'
+          exit 1
+      }
+    displayName: Complexity gate
+
+  # succeededOrFailed(): the gate failing is exactly when the findings matter, and a step that
+  # only runs on success would publish them on every build except the ones that need them.
+  - publish: '$(ReportDir)'
+    artifact: complexity
+    displayName: Publish complexity report
+    condition: succeededOrFailed()
+
+  # GitHub Advanced Security for Azure DevOps only. Category is REQUIRED here: PSComplexity
+  # deliberately writes no category into the SARIF, so this is where it comes from, and it keeps
+  # complexity findings apart from security alerts.
+  - task: AdvancedSecurity-Publish@1
+    displayName: Publish complexity findings to Advanced Security
+    condition: succeededOrFailed()
+    inputs:
+      SarifsInputDirectory: '$(ReportDir)'
+      Category: 'complexity'
+
+  # Without Advanced Security: install the "SARIF SAST Scans Tab" extension from the
+  # Marketplace and publish the SARIF as an artifact with exactly this name instead. The run
+  # then shows a Scans tab with the findings.
+  #
+  # - publish: '$(ReportDir)'
+  #   artifact: CodeAnalysisLogs
+  #   condition: succeededOrFailed()

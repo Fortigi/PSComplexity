@@ -374,6 +374,33 @@ Describe 'the SARIF log' {
         $script:sarif.runs[0].tool.driver.name | Should-Be 'PSComplexity'
     }
 
+    It 'names the tool with its version in fullName, which Azure DevOps requires' {
+        # GHAzDO1018: Advanced Security for Azure DevOps rejects a driver without fullName. The
+        # version half is asserted against the driver's own version rather than a literal, so the
+        # test does not need editing on every release and still fails if the two drift apart.
+        $driver = $script:sarif.runs[0].tool.driver
+        $driver.version | Should-NotBeEmptyString
+        $driver.fullName | Should-Be "PSComplexity $($driver.version)"
+    }
+
+    It 'gives every rule a help text, which GitHub Advanced Security requires' {
+        # GH2012. Checked per rule and against fullDescription, so a third rule added without
+        # help fails here rather than in somebody's upload.
+        $rules = @($script:sarif.runs[0].tool.driver.rules)
+        $rules.Count | Should-Be 2
+        foreach ($r in $rules) {
+            $r.help.text | Should-NotBeEmptyString
+            $r.help.text | Should-Be $r.fullDescription.text
+        }
+    }
+
+    It 'writes no automationDetails, leaving the category to the pipeline' {
+        # On GitHub an id in the file overrides the upload step's category input, so writing one
+        # would make two uploads in one repository overwrite each other. Pinned so that adding it
+        # is a decision somebody argues for rather than a field that appears.
+        @($script:sarif.runs[0].PSObject.Properties.Name) -contains 'automationDetails' | Should-BeFalse
+    }
+
     It 'declares one rule per metric so they suppress independently' {
         # A single rule would mean silencing cyclomatic silences cognitive, which is not a
         # decision anyone asked to make.

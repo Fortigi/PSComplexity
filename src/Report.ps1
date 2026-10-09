@@ -163,22 +163,30 @@ function Get-PSCxSarifRule {
     # Two rules rather than one: they render against the same line but suppress independently,
     # and a team that has decided cyclomatic is not their problem should not have to silence
     # cognitive to say so.
+    #
+    # Each rule carries `help` as well as `fullDescription`. The two say the same thing here, and
+    # that is deliberate rather than an oversight: the SARIF validator's GitHub Advanced Security
+    # rules (GH2012) require `help`, and it is the field an alert page renders as guidance.
     [OutputType([object[]])]
     [CmdletBinding()]
     param()
+    $cyclomatic = 'Cyclomatic complexity counts decision points: each if/elseif, switch clause, loop, catch, trap, ternary and each -and/-or. It is a count of paths, not of how hard the code is to follow.'
+    $cognitive = 'Cognitive complexity follows the SonarSource rules: structures score one each, and nesting adds its depth on top. It tracks how hard code is to follow rather than how many paths it has.'
     return @(
         [ordered]@{
             id               = 'PSCxCyclomatic'
             name             = 'CyclomaticComplexity'
             shortDescription = [ordered]@{ text = 'Cyclomatic complexity exceeds the configured ceiling.' }
-            fullDescription  = [ordered]@{ text = 'Cyclomatic complexity counts decision points: each if/elseif, switch clause, loop, catch, trap, ternary and each -and/-or. It is a count of paths, not of how hard the code is to follow.' }
+            fullDescription  = [ordered]@{ text = $cyclomatic }
+            help             = [ordered]@{ text = $cyclomatic }
             helpUri          = 'https://github.com/Fortigi/PSComplexity#the-two-metrics'
         }
         [ordered]@{
             id               = 'PSCxCognitive'
             name             = 'CognitiveComplexity'
             shortDescription = [ordered]@{ text = 'Cognitive complexity exceeds the configured ceiling.' }
-            fullDescription  = [ordered]@{ text = 'Cognitive complexity follows the SonarSource rules: structures score one each, and nesting adds its depth on top. It tracks how hard code is to follow rather than how many paths it has.' }
+            fullDescription  = [ordered]@{ text = $cognitive }
+            help             = [ordered]@{ text = $cognitive }
             helpUri          = 'https://github.com/Fortigi/PSComplexity#the-two-metrics'
         }
     )
@@ -259,11 +267,21 @@ function Get-PSCxSarifDocument {
                 tool    = [ordered]@{
                     driver = [ordered]@{
                         name           = 'PSComplexity'
+                        # Required by GitHub Advanced Security for Azure DevOps (validator rule
+                        # GHAzDO1018); GitHub ignores it. Name plus version, as the spec shows it.
+                        fullName       = "PSComplexity $ModuleVersion"
                         version        = "$ModuleVersion"
                         informationUri = 'https://github.com/Fortigi/PSComplexity'
                         rules          = Get-PSCxSarifRule
                     }
                 }
+                # No automationDetails, deliberately. Azure DevOps's validator rules want one
+                # (GHAzDO1014), but its id IS the category, and on GitHub an id written into the
+                # file takes precedence over the upload step's `category` input -- so a fixed id
+                # here would make two PSComplexity uploads in one repository overwrite each other
+                # whatever the pipeline said. The category belongs to the pipeline: `category:` on
+                # upload-sarif, `Category:` on AdvancedSecurity-Publish, which applies it when it
+                # enhances the file before publishing.
                 results = $results
             }
         )
