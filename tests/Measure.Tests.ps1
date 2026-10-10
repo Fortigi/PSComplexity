@@ -1755,3 +1755,48 @@ Describe 'a path that produced nothing is reported, not swallowed' {
         @($err).Count | Should-Be 0
     }
 }
+
+Describe 'the gate ceilings a caller gets without asking' {
+    # Both default to 15, and the README says so. A param() default is never a command, so no
+    # coverage tracer can say it ran and the mutation gate never generates a mutant for it: this
+    # test is the only thing that notices if either number moves. Each case sits exactly on one
+    # side of ONE ceiling with the other well clear, so a moved default fails exactly one case.
+    BeforeAll {
+        $script:ceil = Join-Path ([System.IO.Path]::GetTempPath()) "cxceil-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:ceil -Force | Out-Null
+        function script:Write-Unit([string]$Name, [string]$Body) {
+            $p = Join-Path $script:ceil "$Name.ps1"
+            Set-Content -LiteralPath $p -Value "function $Name { param(`$a) $Body }" -Encoding utf8
+            return $p
+        }
+        # n sequential ifs: cyclomatic n + 1, cognitive n.
+        $flat = { param($n) (1..$n | ForEach-Object { "if (`$a) { $_ }" }) -join '; ' }
+        # One outer if holding k inner ifs: cognitive 1 + 2k, cyclomatic k + 2.
+        $nested = { param($k) "if (`$a) { " + ((1..$k | ForEach-Object { "if (`$a) { $_ }" }) -join '; ') + ' }' }
+        $script:cyc15 = Write-Unit 'Cyc15' (& $flat 14)
+        $script:cyc16 = Write-Unit 'Cyc16' (& $flat 15)
+        $script:cog15 = Write-Unit 'Cog15' (& $nested 7)
+        $script:cog16 = Write-Unit 'Cog16' ((& $nested 7) + '; if ($a) { 0 }')
+    }
+    AfterAll { Remove-Item -LiteralPath $script:ceil -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'measures the fixtures it claims to' {
+        # The boundary cases only mean something if the scores are the ones intended.
+        $byUnit = @{}
+        foreach ($r in Measure-PSComplexity -Path $script:ceil) { $byUnit[$r.Unit] = $r }
+        "$($byUnit.Cyc15.Cyclomatic)/$($byUnit.Cyc15.Cognitive)" | Should-Be '15/14'
+        "$($byUnit.Cyc16.Cyclomatic)/$($byUnit.Cyc16.Cognitive)" | Should-Be '16/15'
+        "$($byUnit.Cog15.Cyclomatic)/$($byUnit.Cog15.Cognitive)" | Should-Be '9/15'
+        "$($byUnit.Cog16.Cyclomatic)/$($byUnit.Cog16.Cognitive)" | Should-Be '10/16'
+    }
+
+    It 'passes cyclomatic 15 and fails 16 by default' {
+        Test-PSComplexity -Path $script:cyc15 3>$null | Should-BeTrue
+        Test-PSComplexity -Path $script:cyc16 3>$null | Should-BeFalse
+    }
+
+    It 'passes cognitive 15 and fails 16 by default' {
+        Test-PSComplexity -Path $script:cog15 3>$null | Should-BeTrue
+        Test-PSComplexity -Path $script:cog16 3>$null | Should-BeFalse
+    }
+}
