@@ -423,9 +423,11 @@ function Get-PSCxNesting {
 function Get-PSCxNodeByTypeName {
     # Every node whose runtime type is EXACTLY this, in document order.
     #
-    # The bucket is returned as it is stored, not copied: these are the hot reads of the whole
-    # module and a copy per ask would give back the allocation the index exists to remove. No
-    # caller mutates a bucket, and none has any reason to.
+    # An ARRAY, always, and comma-wrapped so PowerShell does not unroll it on the way out: without
+    # the comma an empty result reaches the caller as $null and a one-node result as a bare node.
+    # Every caller here is a foreach, which forgives both -- a pipeline would not, since
+    # `$null | ForEach-Object` runs its body once. The bucket is a List, so this is one copy per
+    # ask, which is what the unroll already cost.
     #
     # Exact, because the caller said exact. This replaces `GetType().Name -eq $tn`, which is a
     # different question from `-is` the moment a construct gains a subclass -- and one already
@@ -439,11 +441,10 @@ function Get-PSCxNodeByTypeName {
     )
     Confirm-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Ast)
     $bucket = $null
-    if ($script:PSCxTypeNameCache.TryGetValue($TypeName, [ref]$bucket)) { return $bucket }
-    # A type the file contains no instance of. An empty result, never $null: every caller is a
-    # foreach, and the difference between the two is a run that measures nothing while looking
-    # like a run that found nothing.
-    return @()
+    if ($script:PSCxTypeNameCache.TryGetValue($TypeName, [ref]$bucket)) { return , @($bucket) }
+    # A type the file contains no instance of: an empty array, never $null -- which the comma is
+    # what actually guarantees.
+    return , [object[]]@()
 }
 
 function Get-PSCxNodeByKind {
@@ -466,9 +467,11 @@ function Get-PSCxNodeByKind {
     Confirm-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Ast)
     $key = ($Type.FullName -join '|')
     $cached = $null
-    if ($script:PSCxKindCache.TryGetValue($key, [ref]$cached)) { return $cached }
+    # Comma-wrapped for the reason Get-PSCxNodeByTypeName gives. The cache holds the array itself,
+    # so an empty answer is cached as an empty array rather than as $null.
+    if ($script:PSCxKindCache.TryGetValue($key, [ref]$cached)) { return , $cached }
     $script:PSCxKindCache[$key] = Get-PSCxKindResult -Type $Type
-    return $script:PSCxKindCache[$key]
+    return , $script:PSCxKindCache[$key]
 }
 
 function Get-PSCxKindResult {
@@ -505,7 +508,7 @@ function Get-PSCxKindResult {
     $nodes = $merged.ToArray()
     $keys = [int[]]@($nodes | ForEach-Object { $script:PSCxOrderCache[$_] })
     [array]::Sort($keys, $nodes)
-    return $nodes
+    return , $nodes
 }
 
 function Test-PSCxAssignable {

@@ -26,6 +26,12 @@ publishing the SARIF to Advanced Security or -- without it -- to the *SARIF SAST
 extension, why the publishing step needs `condition: succeededOrFailed()`, and how to gate a pull
 request on the files it changed when Azure Pipelines checks out shallow and detached.
 
+**Three internal lookups return an empty array rather than `$null`.** PowerShell unrolls a returned
+collection, so an empty result reached the caller as `$null` and a single result as a bare item,
+although one of them documented the opposite. Every caller iterated with `foreach`, which forgives
+both, so no measurement was ever wrong; a future caller using a pipeline would have run its body
+once over `$null`.
+
 No score moves and no command changed.
 
 ## [0.5.1] - 2026-08-28
