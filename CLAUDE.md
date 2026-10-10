@@ -81,6 +81,11 @@ and means a future test that does start one cannot quietly halve the number.
 `.github/pins.env` sets as `PESTER_VERSION` and what CI and `publish.yml` both run. It uses the
 `Should-Be` assertion family, so it does not run on Pester 5 at all.
 
+The estate pin above, and the leg range and newest leg below, are written out in prose, and
+`tests/Release.Tests.ps1` holds each of those three sentences equal to what `pins.env` derives --
+so this note deliberately repeats no number of its own. Reword one and that test fails, which is the intent; older
+Pesters cited as measurements elsewhere in this file are history and are left alone.
+
 That is a statement about this repo's OWN suite, not about what a consumer needs. **PSComplexity
 is usable from Pester >= 5.0.0**: it is an ordinary module with two commands, and a consumer
 gating on it does so from inside their own Pester run, which is not this one.
