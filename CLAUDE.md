@@ -343,6 +343,12 @@ Two subtleties worth knowing before touching `Ast.ps1`:
   installing "N" and getting different code -- but its advice to bump applies when something
   SHIPPED changed. Otherwise drop the entry rather than claim a release, and record the
   reasoning here, beside the gate it describes. A pin bump is the usual case.
+
+  **A change to `README.md` alone takes no bump either**, although `README.md` is staged. Nothing a
+  consumer runs is different, and a version that moves for a sentence tells every consumer to
+  upgrade for nothing. The packaged README catches up at the next release that ships code. This is
+  decided the same way in both Fortigi modules, which gate each other; a rule one states and the
+  other contradicts is the drift the parity rules exist to stop for workflows.
 - **ASCII only** in `src/` and `tests/` — non-ASCII without a BOM trips
   `PSUseBOMForUnicodeEncodedFile` and fails lint.
 - Reference scores are the contract: `tests/Cognitive.Tests.ps1` pins the SonarSource
