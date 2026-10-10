@@ -712,6 +712,15 @@ and expensive to rebuild, and because each one has already earned its keep.
   The failure message names keys and **never values**. An environment variable holds tokens as
   often as it holds flags, and this message is printed into a build log anyone can read.
 
+- **A pull request pays only for the expensive gates its change can reach.** `Get-PSCxGatePlan` in
+  `ReleaseDecisions.ps1` decides, from the files a PR changed, whether self-assessment and the
+  compatibility legs run; `tools/Get-PSCxGatePlan.ps1` gathers the inputs and prints the reason for
+  each gate. The design is shared with PSMutant, which records the reasons in full: an allowlist of
+  SAFE paths so an unknown path runs everything, only pull requests are planned, an empty change
+  list runs everything, and steps are skipped by `if:` inside the job rather than by a `paths:`
+  filter that would leave a required check pending forever. The parity rules refuse both a
+  path-filtered `ci.yml` and one whose expensive steps ignore the plan.
+
 ## Practices to adopt
 
 Gaps, stated as rules rather than as a backlog. Each points at its issue, and moves up to the

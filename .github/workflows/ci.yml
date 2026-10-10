@@ -50,6 +50,21 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Two commits, so the gate plan below can diff a pull request's merge commit against its
+          # first parent -- the base branch -- without fetching history it does not need.
+          fetch-depth: 2
+
+      # Which EXPENSIVE gates this change can affect: self-assessment and the compatibility legs,
+      # which are most of this job's wall clock. Only a pull request is ever planned -- a push to
+      # main, a tag or a manual run gets everything -- and an unreadable change list also gets
+      # everything. The steps it skips are skipped by `if:`, never by a workflow-level `paths:`
+      # filter: a required check that never starts is a PR that waits forever. The decision is a
+      # tested function in tools/ReleaseDecisions.ps1, and the step prints why it chose what it did.
+      - name: Gate plan (which expensive gates this change can affect)
+        id: plan
+        shell: pwsh
+        run: ./tools/Get-PSCxGatePlan.ps1
 
       - name: Load pinned versions
         shell: pwsh
@@ -190,7 +205,7 @@ jobs:
       # Self-assess: mutation-test our own metric logic with PSMutant,
       # gating on the score. (Linux only -- test quality is platform-independent.)
       - name: Self-assess (PSMutant mutation testing)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && steps.plan.outputs.selfmutation == 'true'
         shell: pwsh
         run: |
           if (-not (Get-Module PSMutant -ListAvailable | Where-Object Version -eq $env:PSMUTANT_VERSION)) {
@@ -214,20 +229,21 @@ jobs:
       # not an OS question -- and the OS matrix already answers the path half on the runner's own
       # PowerShell. Windows is also the leg with budget: Linux carries the mutation gate.
       - name: Cache downloaded PowerShell runtimes
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && steps.plan.outputs.compatibility == 'true'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.pscx-pwsh
           key: pwsh-runtimes-${{ runner.os }}-${{ hashFiles('.github/pins.env') }}
 
       - name: PowerShell compatibility (every supported PowerShell, one leg per minor)
-        if: matrix.os == 'windows-latest'
+        if: matrix.os == 'windows-latest' && steps.plan.outputs.compatibility == 'true'
         shell: pwsh
         # No argument: the script reads PS_COMPAT_VERSIONS from the environment or pins.env, and
         # refuses an empty list rather than reporting a pass over zero versions.
         run: ./tools/Test-PSCxPowerShellCompatibility.ps1 -RuntimeRoot "$HOME/.pscx-pwsh"
 
       - name: Pester compatibility (every supported Pester, one leg per minor)
+        if: steps.plan.outputs.compatibility == 'true'
         shell: pwsh
         # No argument: the script reads PESTER_COMPAT_VERSIONS from the environment or straight
         # from pins.env, so running it by hand is the same run. It refuses an empty list rather
