@@ -24,6 +24,13 @@ ceiling, and a metric nobody has fault-tested is just arithmetic nobody has chec
 Current state: **100% line coverage, 100% self-mutation, gate passes.** Keep it there —
 a change that drops any of the three is not finished.
 
+**What the self-mutation 100% covers.** PSMutant mutates only lines the baseline executed, and
+since its 0.6.0 a line counts as executed when the innermost command spanning it ran -- so the
+continuation lines of a multi-line statement are in the set, where before they were silently left
+out. A `param()` default is still out: no command spans it, so nothing can say it ran. The two that
+matter here, the gate's 15 / 15 ceilings, are pinned instead by a test in `tests/Measure.Tests.ps1`
+that sits a unit on each side of each ceiling.
+
 ---
 
 ## Gates
