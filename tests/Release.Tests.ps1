@@ -356,6 +356,38 @@ Describe 'the pins file itself' {
         $faults = @(Get-PSCxExemptHostFault -ExemptMinor $exempt -HostVersion $PSVersionTable.PSVersion)
         $faults -join [Environment]::NewLine | Should-Be '' -Because "this host runs PowerShell $($PSVersionTable.PSVersion)"
     }
+    It 'states in CLAUDE.md the Pester pins the pins file actually names' {
+        # CLAUDE.md writes the estate pin and the leg range out in prose, and every one of them went
+        # stale on a pin bump with nothing noticing. It ALSO names older Pesters on purpose, as
+        # recorded measurements -- so "every version here is pinned" fails on correct history, and
+        # "this version is pinned somewhere" passed on the stale one, which stays a compatibility leg.
+        #
+        # So each claim is an anchored sentence compared for EQUALITY with what pins.env derives.
+        # Rewording one fails here rather than leaving it unchecked.
+        $root = Split-Path -Parent $PSScriptRoot
+        $pins = Get-Content (Join-Path $root '.github/pins.env')
+        $claude = Get-Content -LiteralPath (Join-Path $root 'CLAUDE.md') -Raw
+        $estate = Get-PSCxPinValue -Line $pins -Name 'PESTER_VERSION'
+        $legs = @((Get-PSCxPinValue -Line $pins -Name 'PESTER_COMPAT_VERSIONS') -split ' ' | Where-Object { $_ } |
+                ForEach-Object { [version]$_ } | Sort-Object)
+        $minor = { param($v) "$($v.Major).$($v.Minor)" }
+        $words = @('zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten',
+            'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty')
+
+        $claims = @(
+            @{ Pattern = 'tested against \*\*(?<v>\d+\.\d+\.\d+)\*\*, which is'; Expected = @{ v = $estate } }
+            @{ Pattern = 'one leg per minor from \*\*(?<lo>\d+\.\d+) to (?<hi>\d+\.\d+)\*\*,\s+(?<n>[a-z]+)\s+in all'
+                Expected = @{ lo = (& $minor $legs[0]); hi = (& $minor $legs[-1]); n = $words[$legs.Count] } }
+            @{ Pattern = 'identical on every version through (?<v>\d+\.\d+\.\d+)'; Expected = @{ v = [string]$legs[-1] } }
+        )
+        foreach ($c in $claims) {
+            $found = [regex]::Match($claude, $c.Pattern)
+            $found.Success | Should-BeTrue -Because "CLAUDE.md no longer matches /$($c.Pattern)/, so nothing checks the claim it made"
+            foreach ($k in $c.Expected.Keys) {
+                $found.Groups[$k].Value | Should-Be $c.Expected[$k] -Because "CLAUDE.md /$($c.Pattern)/ group $k"
+            }
+        }
+    }
     It 'names only paths that exist' {
         # An entry naming a moved directory makes the analyzer refuse rather than scan less,
         # but only because it checks; this catches it a step earlier.
