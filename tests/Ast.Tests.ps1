@@ -461,7 +461,7 @@ Describe 'the type index' {
 
     It 'returns every node of exactly that type, in document order' {
         $t = Tree 'if ($a) { 1 }; if ($b) { 2 }; if ($c) { 3 }'
-        $viaIndex = @(Get-PSCxNodeByTypeName -Ast $t -TypeName 'IfStatementAst')
+        $viaIndex = (Get-PSCxNodeByTypeName -Ast $t -TypeName 'IfStatementAst')
         $viaWalk = @(Nodes $t 'IfStatementAst')
         $viaIndex.Count | Should-Be 3
         # Reference equality, pairwise: same nodes, same order. Comparing counts alone would pass
@@ -475,7 +475,7 @@ Describe 'the type index' {
         # The index loop skips the root for boundary and nesting -- it is seeded separately -- and
         # a bucket that inherited that skip would be a whole-tree query missing one node.
         $t = Tree '$x = 1'
-        $roots = @(Get-PSCxNodeByTypeName -Ast $t -TypeName 'ScriptBlockAst')
+        $roots = (Get-PSCxNodeByTypeName -Ast $t -TypeName 'ScriptBlockAst')
         [object]::ReferenceEquals($roots[0], $t) | Should-BeTrue
     }
 
@@ -483,7 +483,7 @@ Describe 'the type index' {
         # Empty, never $null. Every caller is a foreach, and a $null there is a silent zero rather
         # than a visible one.
         $t = Tree '$x = 1'
-        @(Get-PSCxNodeByTypeName -Ast $t -TypeName 'SwitchStatementAst').Count | Should-Be 0
+        (Get-PSCxNodeByTypeName -Ast $t -TypeName 'SwitchStatementAst').Count | Should-Be 0
     }
 
     It 'resolves a kind against the SUBCLASSES a file holds, not against a list written here' {
@@ -498,7 +498,7 @@ Describe 'the type index' {
         # the day the parser does surface it, nothing in this module has to change.
         $t = Tree 'class B { B([int]$x) { } }
 class D : B { D([int]$x) : base($x) { } }'
-        @(Get-PSCxNodeByTypeName -Ast $t -TypeName 'BaseCtorInvokeMemberExpressionAst').Count | Should-Be 0
+        (Get-PSCxNodeByTypeName -Ast $t -TypeName 'BaseCtorInvokeMemberExpressionAst').Count | Should-Be 0
         # The mechanism that WOULD catch it, exercised directly against the real subclass.
         [type[]]$want = [System.Management.Automation.Language.InvokeMemberExpressionAst]
         $sub = [System.Management.Automation.Language.Ast].Assembly.GetType(
@@ -515,7 +515,7 @@ class D : B { D([int]$x) : base($x) { } }'
     if ($i -eq 2) { break outer }
     if ($i -eq 3) { continue outer }
 }'
-        $merged = @(Get-PSCxNodeByKind -Ast $t -Type (
+        $merged = (Get-PSCxNodeByKind -Ast $t -Type (
                 [System.Management.Automation.Language.BreakStatementAst],
                 [System.Management.Automation.Language.ContinueStatementAst]))
         $merged.Count | Should-Be 3
@@ -526,7 +526,7 @@ class D : B { D([int]$x) : base($x) { } }'
 
     It 'returns an empty result when no bucket matches a kind' {
         $t = Tree '$x = 1'
-        @(Get-PSCxNodeByKind -Ast $t -Type ([System.Management.Automation.Language.SwitchStatementAst])).Count |
+        (Get-PSCxNodeByKind -Ast $t -Type ([System.Management.Automation.Language.SwitchStatementAst])).Count |
             Should-Be 0
     }
 
@@ -536,9 +536,9 @@ class D : B { D([int]$x) : base($x) { } }'
         # keyed by TYPE and has no such protection -- appended to rather than replaced, it hands
         # back the previous file's nodes, and the previous file's line numbers with them.
         $first = Tree 'if ($a) { 1 }'
-        @(Get-PSCxNodeByTypeName -Ast $first -TypeName 'IfStatementAst').Count | Should-Be 1
+        (Get-PSCxNodeByTypeName -Ast $first -TypeName 'IfStatementAst').Count | Should-Be 1
         $second = Tree 'if ($b) { 2 }'
-        $rows = @(Get-PSCxNodeByTypeName -Ast $second -TypeName 'IfStatementAst')
+        $rows = (Get-PSCxNodeByTypeName -Ast $second -TypeName 'IfStatementAst')
         $rows.Count | Should-Be 1
         [object]::ReferenceEquals($rows[0], (FirstNode $second 'IfStatementAst')) | Should-BeTrue
     }
@@ -551,9 +551,9 @@ class D : B { D([int]$x) : base($x) { } }'
         $type = [System.Management.Automation.Language.IfStatementAst]
         Get-PSCxNodeByKind -Ast $t -Type $type | Out-Null
         $script:PSCxKindCache[$type.FullName] = @('planted')
-        @(Get-PSCxNodeByKind -Ast $t -Type $type)[0] | Should-Be 'planted'
+        (Get-PSCxNodeByKind -Ast $t -Type $type)[0] | Should-Be 'planted'
         Clear-PSCxAstCache
-        @(Get-PSCxNodeByKind -Ast $t -Type $type)[0].GetType().Name | Should-Be 'IfStatementAst'
+        (Get-PSCxNodeByKind -Ast $t -Type $type)[0].GetType().Name | Should-Be 'IfStatementAst'
     }
 
     It 'numbers the walk from zero, starting at the root' {
@@ -573,10 +573,10 @@ class D : B { D([int]$x) : base($x) { } }'
         Confirm-PSCxAstIndex -Root $first
         $script:PSCxTypeNameCache['PlantedTypeAst'] = @('planted')
         Confirm-PSCxAstIndex -Root $first
-        @(Get-PSCxNodeByTypeName -Ast $first -TypeName 'PlantedTypeAst')[0] | Should-Be 'planted'
+        (Get-PSCxNodeByTypeName -Ast $first -TypeName 'PlantedTypeAst')[0] | Should-Be 'planted'
         $second = Tree 'if ($b) { 2 }'
         Confirm-PSCxAstIndex -Root $second
-        @(Get-PSCxNodeByTypeName -Ast $second -TypeName 'PlantedTypeAst').Count | Should-Be 0
+        (Get-PSCxNodeByTypeName -Ast $second -TypeName 'PlantedTypeAst').Count | Should-Be 0
     }
 
     It 'matches a type against itself and against nothing else' {
@@ -592,6 +592,43 @@ class D : B { D([int]$x) : base($x) { } }'
         [System.Management.Automation.Language.ContinueStatementAst]
         Test-PSCxAssignable -Type $want -Candidate ([System.Management.Automation.Language.ContinueStatementAst]) |
             Should-BeTrue
+    }
+}
+
+Describe 'the index lookups return arrays, whatever they found' {
+    # -is [array], never .Count: $null.Count is 0 and a single node answers .Count with 1, so a
+    # count passes for the wrong answer. Every caller in src/ is a foreach, which forgives $null --
+    # a pipeline would not, since `$null | ForEach-Object` runs its body once.
+    BeforeAll {
+        $script:idx = [System.Management.Automation.Language.Parser]::ParseInput('if ($a) { 1 }', [ref]$null, [ref]$null)
+    }
+
+    It 'by type name: empty array for an absent type' {
+        $r = Get-PSCxNodeByTypeName -Ast $script:idx -TypeName 'SwitchStatementAst'
+        $r -is [array] | Should-BeTrue
+        $r.Count | Should-Be 0
+    }
+
+    It 'by type name: array of one for a type present once' {
+        $r = Get-PSCxNodeByTypeName -Ast $script:idx -TypeName 'IfStatementAst'
+        $r -is [array] | Should-BeTrue
+        $r.Count | Should-Be 1
+    }
+
+    It 'by kind: empty array for an absent kind, asked twice so the cached answer is checked too' {
+        foreach ($i in 1, 2) {
+            $r = Get-PSCxNodeByKind -Ast $script:idx -Type ([System.Management.Automation.Language.SwitchStatementAst])
+            $r -is [array] | Should-BeTrue -Because "ask $i"
+            $r.Count | Should-Be 0
+        }
+    }
+
+    It 'by kind: array of one for a kind present once, asked twice' {
+        foreach ($i in 1, 2) {
+            $r = Get-PSCxNodeByKind -Ast $script:idx -Type ([System.Management.Automation.Language.IfStatementAst])
+            $r -is [array] | Should-BeTrue -Because "ask $i"
+            $r.Count | Should-Be 1
+        }
     }
 }
 

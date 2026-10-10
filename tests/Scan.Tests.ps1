@@ -59,14 +59,14 @@ AfterAll { Remove-Item $script:work -Recurse -Force -ErrorAction SilentlyContinu
 
 Describe 'Get-PSCxSourceFile' {
     It 'returns a single file asked for by name' {
-        @(Get-PSCxSourceFile -Path $script:flat).Count | Should-Be 1
+        (Get-PSCxSourceFile -Path $script:flat).Count | Should-Be 1
     }
 
     It 'takes .ps1 and .psm1 from a directory, and nothing else' {
         # Filtered on the extension rather than with -Include, which a directory IGNORES unless
         # -Recurse is also given -- a flat folder would resolve to zero files and every number
         # after it would describe the empty set.
-        $names = @(Get-PSCxSourceFile -Path $script:work | ForEach-Object { Split-Path $_ -Leaf })
+        $names = @((Get-PSCxSourceFile -Path $script:work) | ForEach-Object { Split-Path $_ -Leaf })
         $names | Should-ContainCollection 'flat.ps1'
         $names | Should-ContainCollection 'mod.psm1'
         $names | Should-NotContainCollection 'notes.txt'
@@ -74,9 +74,9 @@ Describe 'Get-PSCxSourceFile' {
 
     It 'stays flat without -Recurse, and descends with it' {
         # Paired, because a filter that always recursed would pass the second half alone.
-        $flatOnly = @(Get-PSCxSourceFile -Path $script:work | ForEach-Object { Split-Path $_ -Leaf })
+        $flatOnly = @((Get-PSCxSourceFile -Path $script:work) | ForEach-Object { Split-Path $_ -Leaf })
         $flatOnly | Should-NotContainCollection 'deep.ps1'
-        $deep = @(Get-PSCxSourceFile -Path $script:work -Recurse | ForEach-Object { Split-Path $_ -Leaf })
+        $deep = @((Get-PSCxSourceFile -Path $script:work -Recurse) | ForEach-Object { Split-Path $_ -Leaf })
         $deep | Should-ContainCollection 'deep.ps1'
     }
 
@@ -86,14 +86,14 @@ Describe 'Get-PSCxSourceFile' {
         $odd = Join-Path $script:work 'my[1]proj'
         New-Item -ItemType Directory -Path $odd -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $odd 'a.ps1') -Value 'function Get-A { 1 }' -Encoding utf8
-        @(Get-PSCxSourceFile -Path $odd).Count | Should-Be 1
+        (Get-PSCxSourceFile -Path $odd).Count | Should-Be 1
     }
 
     It 'returns a named file whatever its extension, because you asked for it by name' {
         # The leaf branch returns the file directly; only the DIRECTORY branch filters on
         # extension. Force that test false and a named .txt falls through to the filter and
         # disappears -- while a named .ps1 still comes back, so a .ps1 fixture cannot tell.
-        @(Get-PSCxSourceFile -Path (Join-Path $script:work 'notes.txt')).Count | Should-Be 1
+        (Get-PSCxSourceFile -Path (Join-Path $script:work 'notes.txt')).Count | Should-Be 1
     }
 
     It 'never returns a DIRECTORY that happens to be named like a script' {
@@ -101,13 +101,13 @@ Describe 'Get-PSCxSourceFile' {
         # matches the extension filter and is handed on to be parsed as source.
         $trap = Join-Path $script:work 'looks-like.ps1'
         New-Item -ItemType Directory -Path $trap -Force | Out-Null
-        @(Get-PSCxSourceFile -Path $script:work | ForEach-Object { Split-Path $_ -Leaf }) |
+        @((Get-PSCxSourceFile -Path $script:work) | ForEach-Object { Split-Path $_ -Leaf }) |
             Should-NotContainCollection 'looks-like.ps1'
     }
 
     It 'falls back to wildcard matching when the path does not exist literally' {
         # The other half of that decision: a path nobody has is treated as a pattern.
-        @(Get-PSCxSourceFile -Path (Join-Path $script:work '*.psm1')).Count | Should-Be 1
+        (Get-PSCxSourceFile -Path (Join-Path $script:work '*.psm1')).Count | Should-Be 1
     }
 }
 
@@ -571,14 +571,49 @@ Describe 'Get-PSCxSourceFile, for a path that resolves to nothing' {
         $records = @(Get-PSCxSourceFile -Path (Join-Path $script:work 'no-such-directory') 2>&1)
         @($records | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }).Count |
             Should-Be 0
-        @($records | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }).Count |
-            Should-Be 0
+        # Everything else is the function's own result, which is ONE value: an empty array. Asserted
+        # as an array, because $null.Count is 0 too and a count could not tell the two apart.
+        $result = @($records | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] })
+        $result.Count | Should-Be 1
+        $result[0] -is [array] | Should-BeTrue
+        $result[0].Count | Should-Be 0
     }
 
     It 'still finds files under a path that IS there' {
         # The other half, in the same file. A test that only pins the absence would pass just as
         # well if discovery had stopped working altogether.
-        @(Get-PSCxSourceFile -Path $script:work -Recurse).Count | Should-BeGreaterThan 0
+        (Get-PSCxSourceFile -Path $script:work -Recurse).Count | Should-BeGreaterThan 0
+    }
+}
+
+Describe 'Get-PSCxSourceFile returns an array, whatever it found' {
+    BeforeAll {
+        $script:arr = Join-Path ([System.IO.Path]::GetTempPath()) "pscx-arr-$([guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $script:arr 'empty') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $script:arr 'one') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:arr 'one/a.ps1') -Value '1'
+    }
+    AfterAll { Remove-Item -LiteralPath $script:arr -Recurse -Force -ErrorAction SilentlyContinue }
+
+    # -is [array], never .Count: $null.Count is 0 and a scalar string answers .Count with 1, so a
+    # count passes for every one of the wrong answers this guards against.
+    It 'is an empty array for a directory holding no PowerShell' {
+        $r = Get-PSCxSourceFile -Path (Join-Path $script:arr 'empty')
+        $r -is [array] | Should-BeTrue
+        $r.Count | Should-Be 0
+    }
+
+    It 'is an empty array for a path that is not there' {
+        $r = Get-PSCxSourceFile -Path (Join-Path $script:arr 'missing')
+        $r -is [array] | Should-BeTrue
+    }
+
+    It 'is an array of one for a directory holding one file, and for the file itself' {
+        foreach ($p in (Join-Path $script:arr 'one'), (Join-Path $script:arr 'one/a.ps1')) {
+            $r = Get-PSCxSourceFile -Path $p
+            $r -is [array] | Should-BeTrue -Because $p
+            $r.Count | Should-Be 1
+        }
     }
 }
 

@@ -16,10 +16,14 @@ function Get-PSCxSourceFile {
     # [string[]] and not [string], unlike the streaming collectors: this RETURNS the whole
     # collection as one value rather than emitting items, so the array form is the accurate
     # declaration. The analyzer says so, which is how the distinction was found.
-    [OutputType([string[]])]
+    #
+    # Comma-wrapped, so an empty result reaches the caller as an empty array rather than as $null,
+    # and a single file as an array of one. Callers ASSIGN the result: wrapped in @( ) it would be
+    # an array holding the array. Both types declared, because `, $x` is statically an Object[].
+    [OutputType([string[]], [object[]])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string]$Path, [switch]$Recurse)
-    if (Test-Path -LiteralPath $Path -PathType Leaf) { return [string[]]@((Resolve-Path -LiteralPath $Path).Path) }
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { return , [string[]]@((Resolve-Path -LiteralPath $Path).Path) }
 
     # Take an existing path literally, and as a wildcard only when nothing is there. -Path
     # glob-parses '[', so a real directory named 'my[1]proj' matches nothing and the scan
@@ -33,12 +37,12 @@ function Get-PSCxSourceFile {
     $gci = @{ File = $true; Recurse = [bool]$Recurse }
     if (Test-Path -LiteralPath $Path) { $gci.LiteralPath = $Path }
     elseif (Test-Path -Path $Path) { $gci.Path = $Path }
-    else { return [string[]]@() }
+    else { return , [string[]]@() }
 
     # Filter on the extension rather than with -Include, which a directory ignores unless
     # -Recurse is also present: a flat folder would resolve to zero files and every number
     # after it would describe the empty set.
-    return [string[]]@(Get-ChildItem @gci |
+    return , [string[]]@(Get-ChildItem @gci |
             Where-Object { $_.Extension -in '.ps1', '.psm1' } |
             ForEach-Object { $_.FullName })
 }
@@ -472,7 +476,7 @@ function Get-PSCxPathScan {
     )
     $root = (Get-Location).Path
     foreach ($p in $Path) {
-        $files = @(Get-PSCxSourceFile -Path $p -Recurse:$Recurse)
+        $files = Get-PSCxSourceFile -Path $p -Recurse:$Recurse
         # Recorded BEFORE the changed-file filter, because "this path is not there" and "nothing in
         # this path changed" are different answers and only the first one is a mistake.
         if ($files.Count -eq 0) {
