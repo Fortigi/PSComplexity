@@ -304,8 +304,8 @@ Describe 'the pins file itself' {
         # The workflows assert this at run time; asserting it here means a missing pin fails
         # in the suite rather than five minutes into a job.
         $pins = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) '.github/pins.env')
-        foreach ($k in 'PESTER_VERSION', 'PESTER_COMPAT_VERSIONS', 'PSSA_VERSION',
-            'PS_COMPAT_VERSIONS', 'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS') {
+        foreach ($k in 'PESTER_VERSION', 'PESTER_COMPAT_VERSIONS', 'PESTER_COMPAT_EXEMPT_MINORS', 'PSSA_VERSION',
+            'PS_COMPAT_VERSIONS', 'PS_COMPAT_EXEMPT_MINORS', 'PSMUTANT_VERSION', 'CONVERTTOSARIF_VERSION', 'PSSA_PATHS') {
             Get-PSCxPinValue -Line $pins -Name $k | Should-NotBeNull -Because "pins.env must define $k"
         }
     }
@@ -386,6 +386,24 @@ Describe 'the pins file itself' {
             foreach ($k in $c.Expected.Keys) {
                 $found.Groups[$k].Value | Should-Be $c.Expected[$k] -Because "CLAUDE.md /$($c.Pattern)/ group $k"
             }
+        }
+    }
+    It 'exempts only minors that are neither covered nor imaginary, in <ExemptKey>' -ForEach @(
+        @{ ExemptKey = 'PESTER_COMPAT_EXEMPT_MINORS'; ListKey = 'PESTER_COMPAT_VERSIONS' }
+        @{ ExemptKey = 'PS_COMPAT_EXEMPT_MINORS'; ListKey = 'PS_COMPAT_VERSIONS' }
+    ) {
+        # An exemption is a claim, and the watcher fails a claim that stopped describing anything.
+        # Asserted here so a typo fails in the suite rather than as a weekly issue. Both lists,
+        # because the watcher reads both: a rule asserted for one of them is how the two came to
+        # differ without anybody deciding they should.
+        $pins = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) '.github/pins.env')
+        $exempt = @((Get-PSCxPinValue -Line $pins -Name $ExemptKey) -split ' ' | Where-Object { $_ })
+        $minors = @((Get-PSCxPinValue -Line $pins -Name $ListKey) -split ' ' | Where-Object { $_ } |
+                ForEach-Object { $v = [version]$_; "$($v.Major).$($v.Minor)" })
+        $minors.Count | Should-BeGreaterThan 0 -Because "$ListKey must hold legs, or there is nothing to compare an exemption with"
+        foreach ($e in $exempt) {
+            $e | Should-MatchString '^\d+\.\d+$' -Because 'an exemption names a minor, not a full version'
+            $minors | Should-NotContainCollection $e -Because "$e is exempted and also covered by a leg; one of the two is wrong"
         }
     }
     It 'names only paths that exist' {
