@@ -503,6 +503,13 @@ and expensive to rebuild, and because each one has already earned its keep.
   so an unpaged request cannot see 7.0 or 7.1, and the check is blind to precisely the floor it
   exists to guard while reporting confidently on everything newer.
 
+  **An exemption's REASON is checked too, and not by the watcher.** `PS_COMPAT_EXEMPT_MINORS`
+  spares 7.6 a downloaded leg because it is the runners' own PowerShell -- true until GitHub moves
+  the image, when the old minor silently loses all coverage while its exemption keeps the watcher
+  quiet. `Get-PSCxExemptHostFault` compares each exempted minor with `$PSVersionTable` of the host
+  running the suite, asserted on every CI leg and skipped off CI, so the first pull request after
+  the image moves fails naming both minors and the fix.
+
 - **`Write-Output` inside a value-returning function joins its return value.** `PSAvoidUsingWriteHost`
   is deliberately not excluded here, so every `tools/` script prints through the pipeline -- and a
   helper that prints progress AND returns a path hands the caller both, concatenated. The symptom

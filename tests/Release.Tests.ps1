@@ -196,6 +196,37 @@ Describe 'Get-PSCxPinValue' {
     }
 }
 
+Describe 'Get-PSCxExemptHostFault' {
+    It 'accepts an exemption that names the host minor, whatever its patch' {
+        # Patch is deliberately ignored: the runner image takes 7.6.1 without anyone deciding it,
+        # and a check that failed on that would be muted within a week.
+        @(Get-PSCxExemptHostFault -ExemptMinor @('7.6') -HostVersion '7.6.1').Count | Should-Be 0
+    }
+
+    It 'reports an exemption the host has moved past, naming both minors and the fix' {
+        # The failure this exists for: the runner moves to 7.7, and 7.6 keeps its exemption while
+        # nothing runs it any more.
+        $f = @(Get-PSCxExemptHostFault -ExemptMinor @('7.6') -HostVersion '7.7.0')
+        $f.Count | Should-Be 1
+        $f[0] | Should-BeLikeString 'EXEMPTION: PowerShell 7.6 is exempted*this host runs 7.7.0.*'
+        $f[0] | Should-BeLikeString '*Move 7.6 into PS_COMPAT_VERSIONS as a downloaded leg, and exempt 7.7 instead.'
+    }
+
+    It 'compares the minor, not the major alone' {
+        # 7.6 against a 7.60 host would pass a major-only or a prefix comparison.
+        @(Get-PSCxExemptHostFault -ExemptMinor @('7.6') -HostVersion '7.60.0').Count | Should-Be 1
+    }
+
+    It 'judges each exemption on its own' {
+        $f = @(Get-PSCxExemptHostFault -ExemptMinor @('7.5', '7.6', '7.4') -HostVersion '7.6.0')
+        ($f | ForEach-Object { $_.Split(' ')[2] }) -join ',' | Should-Be '7.5,7.4'
+    }
+
+    It 'has nothing to say about an empty exemption list' {
+        @(Get-PSCxExemptHostFault -ExemptMinor @() -HostVersion '7.6.0').Count | Should-Be 0
+    }
+}
+
 Describe 'Get-PSCxVersionListFault' {
     BeforeAll {
         # One shape reused: three legs at 5.0/5.1/6.0, and a feed that has more.
@@ -314,6 +345,16 @@ Describe 'the pins file itself' {
         foreach ($m in '7.0', '7.1', '7.2', '7.3', '7.4', '7.5') {
             $minors | Should-ContainCollection $m -Because "no leg covers PowerShell $m"
         }
+    }
+    It 'exempts from the PowerShell legs only the PowerShell this runner ships' -Skip:($env:GITHUB_ACTIONS -ne 'true') {
+        # The exemption's REASON is that the ordinary suite already runs under that minor -- true
+        # only on the runner, so only checked there. Every CI leg runs this suite, so the first PR
+        # after the runner image moves fails here, naming the cause, instead of the old minor
+        # losing all coverage while the weekly watcher stays quiet.
+        $pins = Get-Content (Join-Path (Split-Path -Parent $PSScriptRoot) '.github/pins.env')
+        $exempt = @((Get-PSCxPinValue -Line $pins -Name 'PS_COMPAT_EXEMPT_MINORS') -split ' ' | Where-Object { $_ })
+        $faults = @(Get-PSCxExemptHostFault -ExemptMinor $exempt -HostVersion $PSVersionTable.PSVersion)
+        $faults -join [Environment]::NewLine | Should-Be '' -Because "this host runs PowerShell $($PSVersionTable.PSVersion)"
     }
     It 'names only paths that exist' {
         # An entry naming a moved directory makes the analyzer refuse rather than scan less,
