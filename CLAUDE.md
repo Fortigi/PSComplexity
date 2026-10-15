@@ -618,10 +618,16 @@ and expensive to rebuild, and because each one has already earned its keep.
   carrying its path as a property, which is the ordinary shape for an object a caller builds,
   selects or filters, bound to nothing and measured **nothing, silently**.
 
-  `PSPath` is deliberately NOT aliased. It is provider-qualified
-  (`Microsoft.PowerShell.Core\FileSystem::/x`), and `[System.IO.Path]::GetFullPath` in
-  `Get-PSCxRelativePath` would turn that into a path no other run could match against -- which is
-  the identity bug 0.4.0 existed to fix, reintroduced through a different door.
+  `PSPath` is NOT aliased, because it would add nothing: every `FileInfo` and `DirectoryInfo`
+  carries `FullName` too, so it would only be a second route for input that already binds.
+
+  *The reason this used to give is no longer true.* It said a provider-qualified path
+  (`Microsoft.PowerShell.Core\FileSystem::/x`) could not be matched, and until #171 that was so:
+  `.Path` kept the prefix, and the module could not even read a file on a UNC share. Paths are now
+  resolved through `.ProviderPath`, and the location through `Get-PSCxWorkingRoot`, so a
+  provider-qualified path measures and is named exactly as a plain one. If the alias is ever
+  wanted, the open question is which property binds when an object carries both -- not whether
+  the path can be resolved.
 
 - **The scan is the measurement; the published output is a projection of it.** `Get-PSCxScan`
   returns what was asked for, which units were found, and which files were skipped and why.
