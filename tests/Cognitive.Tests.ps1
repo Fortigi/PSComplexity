@@ -61,6 +61,12 @@ function Get-Fib { param($n) if ($n -le 1) { return $n }; return (Get-Fib ($n - 
     @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'an ordinary method is not flow'; expected = 0; code = 'function T { param($xs) $xs.Add({ $_ }) }' }
     @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'null-coalescing nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $x, $y) if ($a) { $z = $x ?? $y } }' }
     @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'null-coalescing assignment nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $x) if ($a) { $x ??= 1 } }' }
+    # A construct in a CONDITION pays the nesting, like one in the body (#156). The spec is
+    # silent and SonarC# and SonarJava disagree for the if -- see the README section
+    # "Constructs inside a condition". The if is the case they disagree on, so it is pinned
+    # beside a loop, where both charge it; 2 for either would be a different decision.
+    @{ spec = 'DECISION -- the spec is silent; matches SonarC#, not SonarJava (README, "Constructs inside a condition")'; name = 'a ternary in an if condition pays the nesting'; expected = 3; code = 'function T { param($x) if ($x ? 1 : 2) { 1 } }' }
+    @{ spec = 'DECISION -- the spec is silent; matches SonarC# and SonarJava (README, "Constructs inside a condition")'; name = 'null-coalescing in a while condition pays the nesting'; expected = 3; code = 'function T { param($a, $b) while ($a ?? $b) { 1 } }' }
     @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'flat function scores 0'; expected = 0; code = 'function T { param($x) $y = $x + 1; return $y }' }
     # Every remaining entry in the cognitive block list, flat. Four of the eight type names
     # could be DELETED with the whole suite green: tests/ contained no `catch` and no `trap`

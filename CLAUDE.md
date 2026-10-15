@@ -693,6 +693,11 @@ and expensive to rebuild, and because each one has already earned its keep.
   are pinned in the same file and are equally contractual; the difference is that moving one
   of them is a decision about PowerShell, while moving a reference case is a bug.
 
+  A third kind is labelled `DECISION`: cases the specification leaves open and SonarSource's own
+  implementations answer differently, such as a ternary in an `if` condition (#156). The README
+  section "Constructs inside a condition" records the choice and both implementations, checked
+  against their source -- so a report that one of these is a bug is answered there.
+
 - **A test has to live in the file the mutation config maps to.** `psmutant.self.config.json`
   maps each source file to specific test files. A test in the wrong file covers the code and
   **cannot kill its mutants** -- that has already happened here once, with a ternary case that

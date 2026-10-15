@@ -639,6 +639,29 @@ parse to different AST nodes entirely, so there is no ambiguity.
 If you need the specification's numbers exactly and nothing more, pin `0.2.0`; every score
 here is greater than or equal to the one it produced.
 
+### Constructs inside a condition
+
+A construct written in a structure's **condition** pays that structure's nesting, exactly as
+one in its body does. `if ($x ? 1 : 2) { }` scores the ternary +2, not +1, and so does
+`while ($a ?? $b) { }`, a `foreach` over a ternary, or a `Where-Object` in an `if` condition.
+
+This is a decision, not an oversight, and it is stated here so it is not reported as a bug.
+The specification lists what raises nesting (B2) and charges a structure nested *inside* one
+(B3), but never separates a condition from a body -- and SonarSource's own implementations
+disagree:
+
+| Implementation | Construct in an `if` condition | In a loop or ternary condition |
+|---|---|---|
+| SonarC# -- `CSharpCognitiveComplexityMetric.cs` | pays the nesting | pays the nesting |
+| SonarJava -- `CognitiveComplexityVisitor.java` | does not | pays the nesting |
+| PSComplexity | pays the nesting | pays the nesting |
+
+SonarC# visits each whole node, condition included, inside `VisitWithNesting`; SonarJava scans
+an `if` condition before raising nesting, but raises it before visiting a loop or a ternary.
+Checked against sonar-dotnet `a73145b` and sonar-java `5778942`. PSComplexity matches SonarC#
+everywhere, and SonarJava everywhere except an `if` condition: one rule for every structure
+rather than an exception for one of them.
+
 
 ## License
 
