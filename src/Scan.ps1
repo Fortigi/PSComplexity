@@ -37,7 +37,11 @@ function Get-PSCxSourceFile {
     # this file and this line, it was attributed to Get-ChildItem rather than to the module, and
     # it did not reach the caller's -ErrorVariable -- so the only thing a consumer saw was zero
     # units. Get-PSCxPathScan records the empty result as a fact instead, and the gate refuses it.
-    $gci = @{ File = $true; Recurse = [bool]$Recurse }
+    # -Force so hidden entries are walked on every OS (#161). Without it the same tree measured
+    # differently per platform: Linux treats a dot-name as hidden and skipped `.github/x.ps1`
+    # silently, while Windows hides by attribute and measured it. Code is code wherever it lives,
+    # and a gate that skips some of it without a word passes over what it never read.
+    $gci = @{ File = $true; Recurse = [bool]$Recurse; Force = $true }
     if (Test-Path -LiteralPath $Path) { $gci.LiteralPath = $Path }
     elseif (Test-Path -Path $Path) { $gci.Path = $Path }
     else { return , [string[]]@() }
@@ -528,11 +532,48 @@ function Get-PSCxSkipReason {
     #
     # Discriminated on ErrorId rather than on the message text, which is prose and may be
     # localised. FileReadError is what the parser raises when it could not read the bytes at all.
+    #
+    # Two more are not syntax either, and fail only where the HOST cannot parse them (#161): a
+    # `workflow`, which PowerShell 7 does not parse at all, and a DSC `Configuration` on a host
+    # without the DSC schema store -- Linux, by default. Calling those "parse error" sent the
+    # reader to fix syntax that is fine on Windows PowerShell. Only the first line of the message
+    # is kept: the DSC one carries the .NET exception and its whole stack trace.
     [OutputType([string])]
     [CmdletBinding()]
-    param([Parameter(Mandatory)] $ParseError)
-    if ($ParseError.ErrorId -eq 'FileReadError') { return "could not be read: $($ParseError.Message)" }
-    return "parse error: $($ParseError.Message)"
+    param(
+        [Parameter(Mandatory)] $ParseError,
+        # The file's tokens, for the DSC case, which has no ErrorId of its own.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Token
+    )
+    $message = ($ParseError.Message -split '\r?\n')[0]
+    if ($ParseError.ErrorId -eq 'FileReadError') { return "could not be read: $message" }
+    if ($ParseError.ErrorId -eq 'WorkflowNotSupportedInPowerShellCore') { return "a workflow, which PowerShell 7 cannot parse: $message" }
+    if (Test-PSCxDscSchemaFault -ParseError $ParseError -Token $Token) {
+        return "a DSC Configuration, which this host cannot parse without the DSC schema store: $message"
+    }
+    return "parse error: $message"
+}
+
+function Test-PSCxDscSchemaFault {
+    # True when a parse error is the parser failing to load DSC resources for a `Configuration`,
+    # rather than a fault in the source.
+    #
+    # By POSITION, not message: that error has the generic ErrorId 'ParserError', and its text is
+    # a .NET exception message that may be localised. It always sits on the token straight after
+    # the `Configuration` keyword -- the configuration's name, where the parser goes to look the
+    # resources up. A real syntax error later in the same file is not there, and keeps its name.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $ParseError,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Token
+    )
+    if ($ParseError.ErrorId -ne 'ParserError') { return $false }
+    for ($i = 1; $i -lt $Token.Count; $i++) {
+        if ($Token[$i - 1].Kind -eq 'Configuration' -and
+            $Token[$i].Extent.StartOffset -eq $ParseError.Extent.StartOffset) { return $true }
+    }
+    return $false
 }
 
 function Get-PSCxFileScan {
@@ -550,7 +591,8 @@ function Get-PSCxFileScan {
         [switch]$Detailed
     )
     $errors = $null
-    $ast = [System.Management.Automation.Language.Parser]::ParseFile($File, [ref]$null, [ref]$errors)
+    $tokens = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($File, [ref]$tokens, [ref]$errors)
     # The per-node answer tables are for THIS file. Keyed by node reference they can never answer
     # wrongly across parses, so this is about memory rather than correctness: without it a gate
     # over a large tree holds every node of every file it has seen.
@@ -565,7 +607,7 @@ function Get-PSCxFileScan {
         return [pscustomobject]@{
             File       = $relative
             Units      = @()
-            SkipReason = Get-PSCxSkipReason -ParseError $errors[0]
+            SkipReason = Get-PSCxSkipReason -ParseError $errors[0] -Token $tokens
         }
     }
 
