@@ -420,8 +420,11 @@ Describe 'Policy checks over many entries' {
     It 'takes time that does not grow with the number of units per entry' {
         # A RATIO rather than a time limit, so the machine's speed cancels out. Ten times the
         # units: the per-entry search took ten times as long, about 8x measured with the
-        # pipeline overhead included, and the lookup takes about the same. 3 sits between the two
-        # with room for noise on a busy runner.
+        # pipeline overhead included, and the lookup takes 1.5-2x. 3 sits between the two.
+        #
+        # The FASTEST of three runs at each size, interleaved. Noise on a shared runner only ever
+        # adds time, so the minimum is the closest reading of what the code costs. One run each
+        # read 4.4 on a Windows CI runner for code that measures 1.6-2.0 locally.
         $entries = foreach ($i in 0..1999) { Entry -File "src/F$($i % 200).ps1" -Name "Invoke-U$i" }
         $accept = foreach ($i in 0..1999) { @{ File = "src/F$($i % 200).ps1"; Unit = "Invoke-U$i"; Reason = 'r' } }
         $small = foreach ($i in 0..219) { Unit -File "src/F$($i % 200).ps1" -Name "Invoke-U$i" }
@@ -436,8 +439,13 @@ Describe 'Policy checks over many entries' {
             return $clock.Elapsed.TotalMilliseconds
         }
         $null = & $time $small  # warm-up, so neither side pays for compilation
-        $ratio = (& $time $large) / (& $time $small)
-        $ratio | Should-BeLessThan 3
+        $largeMs = [double]::MaxValue
+        $smallMs = [double]::MaxValue
+        foreach ($round in 1..3) {
+            $largeMs = [Math]::Min($largeMs, (& $time $large))
+            $smallMs = [Math]::Min($smallMs, (& $time $small))
+        }
+        $largeMs / $smallMs | Should-BeLessThan 3
     }
 }
 
