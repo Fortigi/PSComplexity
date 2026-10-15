@@ -530,6 +530,43 @@ Describe 'Get-PSCxProcessStateFault' {
     }
 }
 
+Describe 'the gallery description names what the metric scores' {
+    # The manifest Description is the gallery page, and nothing held it to the code. #74 fixed
+    # it once and it drifted again: 0.6.0 scores the .ForEach() and .Where() methods (#159), and
+    # the Description went on listing the extensions without them (#184). The README's
+    # "PowerShell-specific increments" table is the list a construct joins when it starts being
+    # scored, so the Description is checked against that table rather than against a third copy.
+
+    BeforeAll {
+        $root = Split-Path -Parent $PSScriptRoot
+        $script:galleryText = (Import-PowerShellDataFile (Join-Path $root 'PSComplexity.psd1')).Description
+        $readme = Get-Content (Join-Path $root 'README.md')
+        $start = [array]::IndexOf($readme, '### PowerShell-specific increments')
+        $rows = @($readme[($start + 1)..($readme.Count - 1)] | Where-Object { $_ -like '| ``*' })
+        # The table's construct column, unescaped: `\|\|` is how a table cell spells ||. The
+        # one-character aliases (% and ?) are left out -- the README itself says they are aliases,
+        # and a gallery summary that names the cmdlet has named the construct.
+        $script:scored = @(foreach ($row in $rows) {
+                foreach ($m in [regex]::Matches(($row -split '(?<!\\)\|')[1], '`([^`]+)`')) {
+                    $m.Groups[1].Value -replace '\\\|', '|'
+                }
+            }) | Where-Object { $_.Length -gt 1 }
+    }
+
+    It 'reads the table it checks against' {
+        # A check over an empty list passes every time, and a reworded heading would empty it.
+        (@($script:scored) -join ' ') | Should-Be 'ForEach-Object Where-Object .ForEach() .Where() && || ?? ??='
+    }
+
+    It 'names <_> in the manifest Description' -ForEach @(
+        'ForEach-Object', 'Where-Object', '.ForEach()', '.Where()', '&&', '||', '??', '??='
+    ) {
+        # Listed here as well as read from the README so each construct fails by name. The test
+        # above ties this list to the table, so the table stays the one place to add a construct.
+        $script:galleryText.Contains($_) | Should-BeTrue -Because "the README scores $_ and the gallery page should say so"
+    }
+}
+
 Describe 'main must not claim a version that already shipped' {
     # It once did: main stood at 0.2.0, 0.2.0 was on the gallery, and merged work sat under
     # [Unreleased] with every gate passing. Two people installing "0.2.0" -- one from the
