@@ -480,6 +480,17 @@ Describe 'the AST index, where it can be got wrong invisibly' {
         (Get-PSCxUnitBoundary -Node $n).Name | Should-Be 'F'
     }
 
+    It 'READS a boundary cached as $null too, rather than taking it for a miss (#155)' {
+        # Top-level code has no boundary, so $null is a real answer, and the indexer that reads
+        # the cache returns $null for a miss as well. Planting $null over a node whose true
+        # boundary is F tells the two apart: a hit returns $null, a mistaken rebuild returns F.
+        $t = Tree 'function F { if ($a) { 1 } }'
+        $n = FirstNode $t 'IfStatementAst'
+        Get-PSCxUnitBoundary -Node $n | Out-Null
+        $script:PSCxBoundaryCache[$n] = $null
+        Get-PSCxUnitBoundary -Node $n | Should-BeNull
+    }
+
     It 'READS the nesting index rather than recomputing it' {
         $t = Tree 'function F { if ($a) { if ($b) { 1 } } }'
         $n = @(Nodes $t 'IfStatementAst')[-1]

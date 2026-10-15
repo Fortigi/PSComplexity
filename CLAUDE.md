@@ -262,11 +262,20 @@ A filtered run emits a notice because a passing gate is otherwise silent, and `s
 in the report is `null` for a whole-tree run rather than `[]`: absent and empty are different
 answers, and only absent may be read as a measurement of everything under `path`.
 
-**The unit table is built once per file and passed down.** `Get-PSCxUnitTable` is a full `FindAll`
-traversal that invokes a PowerShell predicate for every node, and it used to run three times
-against the same AST in one pass -- once for the line numbers and once inside each metric map. The
-maps now take it as a **mandatory** parameter: an optional one with a fallback would be a branch
-whose two arms produce identical output, which no test could distinguish from its own absence.
+**The unit table is built once per file and passed down.** `Get-PSCxUnitTable` used to be a full
+`FindAll` traversal invoking a PowerShell predicate for every node, run three times against the
+same AST in one pass -- once for the line numbers and once inside each metric map. It reads the
+index's type buckets now (#155): 209ms to 7ms on a 28k-node file. The maps still take it as a
+**mandatory** parameter: an optional one with a fallback would be a branch whose two arms produce
+identical output, which no test could distinguish from its own absence.
+
+**The per-row helpers read their caches through indexers too** (#155), for the reason the index
+pass does. `Get-PSCxUnitKey` cost 75us a call and is called once per scoring row; it is 36us now,
+`Get-PSCxNesting` 33us to 12us. Two traps in doing it, both pinned by tests in
+`tests/Ast.Tests.ps1`: a boundary can be `$null` (top-level code), which an indexer cannot tell
+from a miss, so only then is `ContainsKey` asked; and a loop counter in the kind query's sort was a
+literal no test could pin -- the first node of a union is always its earliest -- so it is a
+`foreach` expression with no counter.
 
 **That same pass also buckets every node by TYPE, and the metrics read the buckets.** Each
 collector used to call `Ast.FindAll(scriptblock, $true)`, which walks every node and invokes a

@@ -309,10 +309,14 @@ function Get-PSCxUnitBoundary {
     [OutputType([System.Management.Automation.Language.Ast])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Node)
-    $found = $null
-    if ($script:PSCxBoundaryCache.TryGetValue($Node, [ref]$found)) { return $found }
-    Initialize-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Node)
-    [void]$script:PSCxBoundaryCache.TryGetValue($Node, [ref]$found)
+    # An indexer, not TryGetValue with a [ref]: every scoring row reaches this, and the [ref] form
+    # costs 17us a call against well under 1us (#155). A boundary can be $null -- top-level code
+    # has none -- which the indexer cannot tell from a miss, so only then is membership asked.
+    $found = $script:PSCxBoundaryCache[$Node]
+    if ($null -eq $found -and -not $script:PSCxBoundaryCache.ContainsKey($Node)) {
+        Initialize-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Node)
+        $found = $script:PSCxBoundaryCache[$Node]
+    }
     return $found
 }
 
@@ -386,8 +390,9 @@ function Get-PSCxUnitName {
     #
     # Reference-keyed and cleared per file, exactly like the boundary and nesting tables, so an
     # entry from one parse can never answer a question about another.
-    $cachedName = $null
-    if ($script:PSCxNameCache.TryGetValue($Boundary, [ref]$cachedName)) { return [string]$cachedName }
+    # An indexer: a name is never $null, so $null is the miss (#155).
+    $cachedName = $script:PSCxNameCache[$Boundary]
+    if ($null -ne $cachedName) { return [string]$cachedName }
     $parts = [System.Collections.Generic.List[string]]::new()
     $parts.Add((Get-PSCxUnitOwnName -Boundary $Boundary))
     # Walk out through every enclosing unit. Resolve each one first: a class method's body is
@@ -396,7 +401,7 @@ function Get-PSCxUnitName {
     $seen = Resolve-PSCxUnitBoundary -Boundary $Boundary
     $p = $Boundary.Parent
     while ($p) {
-        if ($p.GetType().Name -in $script:PSCxUnitBoundaryTypes) {
+        if ($script:PSCxUnitBoundaryTypeIndex[$p.GetType().Name]) {
             $outer = Resolve-PSCxUnitBoundary -Boundary $p
             if (-not [object]::ReferenceEquals($outer, $seen)) {
                 $parts.Insert(0, (Get-PSCxUnitOwnName -Boundary $outer))
@@ -430,10 +435,13 @@ function Get-PSCxNesting {
     [OutputType([int])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Node)
-    $found = $null
-    if ($script:PSCxNestingCache.TryGetValue($Node, [ref]$found)) { return [int]$found }
-    Initialize-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Node)
-    [void]$script:PSCxNestingCache.TryGetValue($Node, [ref]$found)
+    # An indexer, for the reason Get-PSCxUnitBoundary gives. A depth is never $null for a node
+    # the index has seen, so $null IS the miss here.
+    $found = $script:PSCxNestingCache[$Node]
+    if ($null -eq $found) {
+        Initialize-PSCxAstIndex -Root (Get-PSCxAstRoot -Node $Node)
+        $found = $script:PSCxNestingCache[$Node]
+    }
     return [int]$found
 }
 
@@ -523,7 +531,10 @@ function Get-PSCxKindResult {
     # scriptblock per comparison -- the exact cost this index exists to stop paying. The keys are
     # walk positions and so are unique, which is why an unstable sort is safe here.
     $nodes = $merged.ToArray()
-    $keys = [int[]]@($nodes | ForEach-Object { $script:PSCxOrderCache[$_] })
+    # A foreach STATEMENT, not ForEach-Object: the pipeline form invokes a script block per node
+    # (#155). And no index counter, which would be a literal no test could pin: the first node of
+    # a union is always its earliest, so starting the count at 1 sorts identically.
+    $keys = [int[]]@(foreach ($node in $nodes) { $script:PSCxOrderCache[$node] })
     [array]::Sort($keys, $nodes)
     return , $nodes
 }
@@ -550,30 +561,22 @@ function Get-PSCxUnitTable {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     $units = @{ '<script-body>' = 1 }
-    # No .GetNewClosure() here, unlike the per-type loops in Cyclomatic/Cognitive:
-    # those capture a local loop variable and need one. This predicate captures
-    # nothing, and a closure built INSIDE a function loses the module scope, so
-    # $script:PSCxUnitBoundaryTypes would come back empty and match nothing.
-    $isBodyOwner = {
-        param($x)
-        if ($x -is [System.Management.Automation.Language.PropertyMemberAst]) {
-            # An ENUM member is a PropertyMemberAst too, and an initialised one -- `Red = 1`
-            # -- would otherwise become a unit while a bare `Green` would not, making an
-            # enum's complexity depend on whether anyone numbered its members. A label is
-            # not code; there is nothing in it to measure.
-            #
-            # Folded into ONE returned expression rather than an early `return $false`: this
-            # is a FindAll predicate, so $false and $null behave identically and a separate
-            # return is unobservable -- it survived every mutant. The `-and` is observable,
-            # because flipping it turns enum members back into units.
-            $isEnumMember = $x.Parent -is [System.Management.Automation.Language.TypeDefinitionAst] -and $x.Parent.IsEnum
-            return (-not $isEnumMember) -and [bool]$x.InitialValue
+    # From the index's type buckets, not a FindAll of its own: the index already walked the tree
+    # and filed every node by type, and a second walk invoking a PowerShell predicate per node
+    # was a fifth of a file's measurement (#155). The buckets are by EXACT type name, which is
+    # what the predicate it replaced tested.
+    foreach ($typeName in $script:PSCxUnitBoundaryTypes) {
+        foreach ($node in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName $typeName)) {
+            # An ENUM member is a PropertyMemberAst too, and an initialised one -- `Red = 1` --
+            # would otherwise become a unit while a bare `Green` would not, making an enum's
+            # complexity depend on whether anyone numbered its members. A label is not code;
+            # there is nothing in it to measure. A property with no initialiser has no body.
+            if ($node -is [System.Management.Automation.Language.PropertyMemberAst] -and
+                (($node.Parent -is [System.Management.Automation.Language.TypeDefinitionAst] -and $node.Parent.IsEnum) -or
+                -not $node.InitialValue)) { continue }
+            $unit = Resolve-PSCxUnitBoundary -Boundary $node
+            $units[(Get-PSCxUnitName -Boundary $unit)] = $unit.Extent.StartLineNumber
         }
-        return $x.GetType().Name -in $script:PSCxUnitBoundaryTypes
-    }
-    foreach ($node in $Ast.FindAll($isBodyOwner, $true)) {
-        $unit = Resolve-PSCxUnitBoundary -Boundary $node
-        $units[(Get-PSCxUnitName -Boundary $unit)] = $unit.Extent.StartLineNumber
     }
     return $units
 }

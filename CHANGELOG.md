@@ -61,10 +61,12 @@ with its scores; the new **`-AllowNew`** switch records them deliberately, and e
 named in a warning. Seeding a baseline, or regenerating one across a metric version change, is
 unchanged and needs no switch.
 
-**Measuring is 38-47% faster** (#154). The per-file index pass was most of the cost, and nearly
-all of that was PowerShell's price for calling a .NET method once per syntax node. It now reads
-through indexers instead: 51.8us a node down to 12.7us. Every score, unit and `-Detailed`
-contribution is unchanged.
+**Measuring is markedly faster** (#154, #155). Nearly all of a file's measurement time was
+PowerShell's price for calling a .NET method once per syntax node, and a second walk of the whole
+tree to find the units. The index pass now reads through indexers -- 51.8us a node down to
+12.7us -- and the unit table reads the index instead of walking again: 209ms to 7ms on a 28k-node
+file. A 28k-node file went from about 1.85s to 0.8s, and the module's own source from about 660ms
+to 360ms. Every score, unit and `-Detailed` contribution is unchanged.
 
 ## [0.5.2] - 2026-10-09
 
