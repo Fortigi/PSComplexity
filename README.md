@@ -131,7 +131,8 @@ record, leaves it alone. It has happened twice: 0.3.0 taught the metric PowerShe
 constructs, and 0.4.0 stopped merging two units written on one line. Both were corrections, and
 both silently re-scored code nobody had touched. Anything that persists or compares scores should
 refuse to compare across two values rather than mix them. It starts at **1** with 0.4.0; earlier
-releases carry no version and are not comparable with these.
+releases carry no version and are not comparable with these. It is **2** from 0.6.0, which scores
+the `.ForEach()` and `.Where()` methods as the cmdlets they mirror.
 
 Those names, their order and their types are the public contract, and a test asserts them
 exactly -- a sixth field fails the suite, so widening this is a decision rather than a side
@@ -274,7 +275,7 @@ The file looks like this:
 ```json
 {
   "schemaVersion": 1,
-  "metricVersion": 1,
+  "metricVersion": 2,
   "generatedAt": "2026-08-25T09:12:44Z",
   "units": [
     { "file": "src/Parser.ps1", "unit": "Read-Token", "cyclomatic": 34, "cognitive": 41 }
@@ -601,6 +602,7 @@ resembles, and the choice is stated here rather than left to be discovered from 
 |---|---|---|
 | `ForEach-Object`, `%` | a loop | It is PowerShell's second loop. A body written with it branches exactly as much as the `foreach` form, and scoring it lower rewarded a rewrite that changes nothing a reader would call a decomposition. |
 | `Where-Object`, `?` | a conditional | Same argument: it is a filter, and a filter is a branch. |
+| `.ForEach()`, `.Where()` | a loop, a conditional | The same two cmdlets written as the methods every object carries. They take a script block exactly as the cmdlets do, so scoring them lower made the method a cheaper spelling of the same logic. Instance calls only -- the intrinsics are never static. |
 | `&&`, `\|\|` | a boolean run | They are control flow between pipelines, not boolean operators — but a *run* of them costs 1, exactly as `-and`/`-or` does, so the shell idiom is never dearer than the expression it mirrors. |
 | `??`, `??=` | a ternary | A choice between two values on a null test, which is what the ternary rule already covers. |
 

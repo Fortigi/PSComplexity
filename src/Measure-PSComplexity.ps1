@@ -18,8 +18,9 @@ function Measure-PSComplexity {
         Parses each .ps1/.psm1 file with the PowerShell AST and reports both metrics.
         Cognitive complexity implements the SonarSource metric in full (nesting-aware) and
         extends it for PowerShell constructs the specification does not cover:
-        ForEach-Object and Where-Object score as the loop and conditional they stand in for,
-        && and || as a boolean run, ?? and ??= as a ternary. Cyclomatic is the classic
+        ForEach-Object and Where-Object, and the .ForEach() and .Where() methods, score as the
+        loop and conditional they stand in for, && and || as a boolean run, ?? and ??= as a
+        ternary. Cyclomatic is the classic
         decision-point count, over the same set of constructs. A file that fails to parse is
         skipped and reported on the error stream, naming the file and the parse error;
         measurement continues over every other file rather than stopping.

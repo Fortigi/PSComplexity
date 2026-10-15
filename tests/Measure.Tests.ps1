@@ -219,7 +219,7 @@ Describe 'a score says which metric produced it' {
         $rows.Count | Should-BeGreaterThan 1
         # Every record, not the first: a stamp applied in one branch of the emitter and not
         # another is worse than none, because the gap is invisible.
-        @($rows | Where-Object { $_.MetricVersion -ne 1 }).Count | Should-Be 0
+        @($rows | Where-Object { $_.MetricVersion -ne (Get-PSCxMetricVersion) }).Count | Should-Be 0
     }
 
     It 'is an int, so a consumer can compare it rather than parse it' {
@@ -1229,7 +1229,7 @@ function Invoke-Twice { param($a, $b) if ($a) { if ($b) { 2 } } }
         # stops being the answer the moment either metric changes, and the test would then be
         # asserting against a number this module no longer produces.
         function script:New-Baseline {
-            param($Entries, [int]$MetricVersion = 1, [int]$SchemaVersion = 1)
+            param($Entries, [int]$MetricVersion = (Get-PSCxMetricVersion), [int]$SchemaVersion = 1)
             $p = Join-Path $script:blDir "bl-$([System.Guid]::NewGuid().ToString('N')).json"
             [pscustomobject]@{
                 schemaVersion = $SchemaVersion
@@ -1429,7 +1429,7 @@ function Invoke-Twice { param($a, $b) if ($a) { if ($b) { 2 } } }
             # Absent and empty are different answers. An absent array is a file somebody started
             # and did not finish; an empty one is a deliberate "nothing is recorded".
             $noUnits = Join-Path $script:blDir 'nounits.json'
-            Set-Content -LiteralPath $noUnits -Value '{ "schemaVersion": 1, "metricVersion": 1 }' -Encoding utf8
+            Set-Content -LiteralPath $noUnits -Value "{ `"schemaVersion`": 1, `"metricVersion`": $(Get-PSCxMetricVersion) }" -Encoding utf8
             { Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $noUnits `
                     -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*no units array*'
         }
@@ -1504,7 +1504,7 @@ function Invoke-Twice { param($a, $b) if ($a) { if ($b) { 2 } } }
             Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `
                 -UpdateBaseline -WarningAction SilentlyContinue | Should-BeTrue
             $doc = Get-Content -LiteralPath $bl -Raw | ConvertFrom-Json
-            $doc.metricVersion | Should-Be 1
+            $doc.metricVersion | Should-Be (Get-PSCxMetricVersion)
             @($doc.units | Where-Object unit -eq 'Invoke-Hot')[0].cyclomatic | Should-Be $script:blHot.Cyclomatic
         }
 

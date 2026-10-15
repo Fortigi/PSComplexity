@@ -69,14 +69,14 @@ function Get-PSCxCogTernaryRow {
 }
 
 function Get-PSCxCogFlowCommandRow {
-    # ForEach-Object / Where-Object: one increment + nesting, exactly as the keyword loop
-    # and conditional get. Their script block is a ScriptBlockExpressionAst, which already
-    # raises nesting for anything inside, so a body written this way now costs the same as
-    # the keyword form rather than less.
+    # ForEach-Object / Where-Object and the .ForEach() / .Where() methods: one increment +
+    # nesting, exactly as the keyword loop and conditional get. Their script block is a
+    # ScriptBlockExpressionAst, which already raises nesting for anything inside, so a body
+    # written this way now costs the same as the keyword form rather than less.
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'CommandAst')) {
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst], [System.Management.Automation.Language.InvokeMemberExpressionAst]))) {
         if (-not (Test-PSCxFlowCommand -Node $n)) { continue }
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'flow-command'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
     }

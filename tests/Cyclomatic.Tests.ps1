@@ -18,6 +18,13 @@ $script:CyclomaticCases = @(
     @{ name = 'the foreach KEYWORD scores identically'; expected = 3; code = 'function T { param($xs) foreach ($x in $xs) { if ($x) { 1 } } }' }
     @{ name = 'Where-Object is a conditional'; expected = 2; code = 'function T { param($xs) $xs | Where-Object { $_ -gt 0 } }' }
     @{ name = 'the % alias counts too'; expected = 2; code = 'function T { param($xs) $xs | % { $_ } }' }
+    # The intrinsic methods, each paired with the cmdlet case above it: the same logic must
+    # score the same however it is spelled (#159).
+    @{ name = 'the .ForEach() method scores as ForEach-Object'; expected = 3; code = 'function T { param($xs) $xs.ForEach({ if ($_) { 1 } }) }' }
+    @{ name = 'the .Where() method scores as Where-Object'; expected = 2; code = 'function T { param($xs) $xs.Where({ $_ -gt 0 }) }' }
+    @{ name = 'a chain of the two methods scores as the pipeline'; expected = 3; code = 'function T { param($xs) $xs.Where({ $_ }).ForEach({ $_ }) }' }
+    @{ name = 'the pipeline that chain stands in for'; expected = 3; code = 'function T { param($xs) $xs | Where-Object { $_ } | ForEach-Object { $_ } }' }
+    @{ name = 'an ordinary method is not flow'; expected = 1; code = 'function T { param($xs) $xs.Add({ $_ }) }' }
     @{ name = 'each && link is a decision'; expected = 3; code = 'function T { a && b && c }' }
     @{ name = 'null-coalescing = 2'; expected = 2; code = 'function T { param($a,$b) $x = $a ?? $b }' }
     @{ name = 'null-coalescing ASSIGNMENT = 2'; expected = 2; code = 'function T { param($a) $a ??= 1 }' }

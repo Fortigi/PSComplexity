@@ -50,6 +50,11 @@ $script:PSCxFlowCommands = @(
     'Where-Object', 'where', '?'
 )
 
+# The same two, written as the intrinsic methods every object carries: `$x.ForEach({ })` and
+# `$x.Where({ })` take a script block exactly as the cmdlets do and branch exactly as much, so
+# scoring them lower made the method form a cheaper spelling of the same logic (#159).
+$script:PSCxFlowMethods = @('ForEach', 'Where')
+
 $script:PSCxUnitBoundaryTypes = @(
     # FunctionMemberAst is unreachable TODAY and kept on purpose. Every usage of this list walks
     # UP the parent chain, and PowerShell wraps a class member's body in its own
@@ -587,7 +592,7 @@ function Get-PSCxEnclosingMethod {
 }
 
 function Test-PSCxFlowCommand {
-    # True when a node is a call to a cmdlet that acts as control flow.
+    # True when a node is a call to a cmdlet, or an intrinsic method, that acts as control flow.
     #
     # Matched on the name as WRITTEN, because that is all a static walk has: `%` and
     # ForEach-Object are the same command at run time and different text here, so both
@@ -595,6 +600,13 @@ function Test-PSCxFlowCommand {
     [OutputType([bool])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Node)
+    # The method form is matched by name alone, as the cmdlet is: `.ForEach('Name')` counts as
+    # `ForEach-Object Name` does. INSTANCE calls only -- the intrinsics are never static, so
+    # `[Type]::Where()` is somebody else's method. A computed name (`$x.$m()`) has no Value,
+    # and -contains answers False for it, as it does for a nameless command below.
+    if ($Node -is [System.Management.Automation.Language.InvokeMemberExpressionAst]) {
+        return (-not $Node.Static) -and ($script:PSCxFlowMethods -contains $Node.Member.Value)
+    }
     if ($Node -isnot [System.Management.Automation.Language.CommandAst]) { return $false }
     # No guard for a null name: a command invoked through a variable (`& $cmd`) has none,
     # and -contains already answers False for it. A guard here would be unreachable by any

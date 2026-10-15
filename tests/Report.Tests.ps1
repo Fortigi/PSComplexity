@@ -305,7 +305,7 @@ function Get-R2 { param($a, $b, $c) if ($a) { if ($b) { if ($c) { 1 } } } }
         $bl = Join-Path $script:out 'bl.json'
         [pscustomobject]@{
             schemaVersion = 1
-            metricVersion = 1
+            metricVersion = Get-PSCxMetricVersion
             generatedAt   = '2026-01-01T00:00:00Z'
             units         = @([pscustomobject]@{
                     file = $hot.File; unit = 'Invoke-Hot'

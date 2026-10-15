@@ -2,8 +2,8 @@
 
 Cyclomatic and cognitive complexity for PowerShell, computed from the AST. Cognitive
 complexity **implements the SonarSource metric in full, and extends it for PowerShell
-constructs the specification does not cover** -- `ForEach-Object`, `Where-Object`, `&&`,
-`||`, `??` -- each scored by the rule it most resembles. Every reference example still scores
+constructs the specification does not cover** -- `ForEach-Object`, `Where-Object`, the
+`.ForEach()`/`.Where()` methods, `&&`, `||`, `??` -- each scored by the rule it most resembles. Every reference example still scores
 exactly as published. This used to say "a faithful port"; that was accurate before the
 extensions and is not now, and the README lists them. Ships `Measure-PSComplexity` (data) and `Test-PSComplexity` (CI gate).
 Published to the PowerShell Gallery.
@@ -650,8 +650,8 @@ and expensive to rebuild, and because each one has already earned its keep.
   specification calls the classic implementation error.
 
   That is a claim about the SPECIFICATION's cases only. The metric also increments for
-  constructs the specification does not cover -- `ForEach-Object`, `Where-Object`, `&&`,
-  `||`, `??` -- which are listed in the README with the rule each is scored by. Those cases
+  constructs the specification does not cover -- `ForEach-Object`, `Where-Object`, the
+  `.ForEach()`/`.Where()` methods, `&&`, `||`, `??` -- which are listed in the README with the rule each is scored by. Those cases
   are pinned in the same file and are equally contractual; the difference is that moving one
   of them is a decision about PowerShell, while moving a reference case is a bug.
 

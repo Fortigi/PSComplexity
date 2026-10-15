@@ -5,9 +5,21 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
-## [0.5.3] - 2026-10-15
+## [0.6.0] - 2026-10-15
 
 ### For consumers
+
+**The `.ForEach()` and `.Where()` methods now score as `ForEach-Object` and `Where-Object` do**
+(#159). The methods take a script block exactly as the cmdlets do, and branch exactly as much, but
+scored nothing: `$x | Where-Object { ... }` scored one more than the identical `$x.Where({ ... })`,
+so the method form was a cheaper spelling of the same logic. Each is now one decision for
+cyclomatic and one increment plus nesting for cognitive, the same as the cmdlet. Only instance
+calls count -- the intrinsics are never static, so `[Type]::Where()` is somebody else's method.
+
+**Scores rise for any code that uses them, and the metric version is now 2.** A baseline recorded
+against version 1 is refused rather than compared; regenerate it with `-UpdateBaseline` and review
+the diff. Code that uses neither method scores exactly as before, and every SonarSource reference
+case is unchanged.
 
 **A large baseline no longer slows the gate down** (#153). Each baseline entry and each acceptance
 was checked by searching the whole list of measured units, so the check took entries x units: a
@@ -15,7 +27,7 @@ was checked by searching the whole list of measured units, so the check took ent
 once per run and each entry is a single lookup -- measured on that size, 12.3 seconds of checking
 becomes 0.3.
 
-Matching is unchanged: file and unit, ignoring case. No score moves and no command changed.
+Matching is unchanged: file and unit, ignoring case. This one moves no score.
 
 ## [0.5.2] - 2026-10-09
 
