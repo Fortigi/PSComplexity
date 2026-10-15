@@ -58,7 +58,11 @@ process, so they share the environment and they share `$PID` -- a test that WRIT
 variable, or names a temp fixture after the process id, is then a test racing itself. Nothing in
 `tests/` does either: no test writes `$env:`, and every fixture already carries a GUID. Both
 hazards bit PSMutant's own suite and had to be fixed there first, so this is a property to keep
-rather than one to assume.
+rather than one to assume -- and `tests/ParallelSafety.Tests.ps1` keeps it (#188). It parses every
+file in `tests/` and fails, naming file and line, on an environment write or a use of the process
+id. Reads of `$env:` are fine and common; the scan tells a read from a write by the tree, not the
+text. The order-independence gate does not cover this: it sees a variable a test leaks, not one
+written and restored, which is still a race between workers.
 
 **If a leg goes inexplicably red straight after a local self-mutation run, suspect the installed
 Pester before the code.** A PSMutant run here once left Pester unable to run a trivial `1 + 1`
