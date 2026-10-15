@@ -93,6 +93,14 @@ fails** as naming no measured unit -- write it without the modifier. A baseline 
 step: this release's metric version change already has it regenerated. A `global:` and a plain
 definition of one name in one file are now duplicates, numbered `#1`, `#2`.
 
+**A `-ChangedFile` list naming PowerShell files that are not there is refused** (#160). The list is
+resolved against the current directory and git prints paths relative to the repository root, so a
+gate run from a subdirectory matched nothing, measured no units and **passed**, with only the
+subset notice to show for it. Both commands now refuse a listed `.ps1` or `.psm1` that does not
+exist, naming it and the likely cause. A deleted file is refused too: list changes with
+`git diff --name-only --diff-filter=d`, as every example now does. Other entries, such as a
+deleted README, are not checked.
+
 ## [0.5.2] - 2026-10-09
 
 ### For consumers

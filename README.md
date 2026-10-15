@@ -365,7 +365,7 @@ write -- which is how thresholds get raised until they stop meaning anything.
 `-ChangedFile` restricts the run to units in the files you name:
 
 ```powershell
-$changed = git diff --name-only origin/main...HEAD
+$changed = git diff --name-only --diff-filter=d origin/main...HEAD
 if (-not (Test-PSComplexity ./src -Recurse -ChangedFile $changed)) {
     throw 'Complexity gate failed'
 }
@@ -396,6 +396,13 @@ A `git diff` that fails prints nothing and exits 0. Taken at face value that is 
 over zero units. If your pipeline can genuinely produce "no changed files", skip the step -- that
 is a decision only you can make, and it should be visible in your workflow rather than inferred
 here.
+
+**So is a list naming PowerShell files that are not there.** The list is resolved against the
+current directory, and git prints paths relative to the repository root -- so a gate run from a
+subdirectory matched nothing, measured no units, and passed. Run it from the root. A file the
+change *deleted* is refused the same way, because there is nothing left to measure; that is what
+`--diff-filter=d` in the examples is for. Only `.ps1` and `.psm1` entries are checked: a deleted
+README changes no answer.
 
 **A filtered run says so.** The gate prints nothing when it passes, so a diff-scoped pass and a
 whole-tree pass would otherwise look identical:
@@ -564,7 +571,7 @@ full history and diff against the target branch the pipeline names:
   fetchDepth: 0
 - pwsh: |
     $target  = '$(System.PullRequest.TargetBranch)' -replace '^refs/heads/', ''
-    $changed = git diff --name-only "origin/$target...HEAD"
+    $changed = git diff --name-only --diff-filter=d "origin/$target...HEAD"
     if (-not (Test-PSComplexity ./src -Recurse -ChangedFile $changed)) { exit 1 }
   condition: eq(variables['Build.Reason'], 'PullRequest')
 ```

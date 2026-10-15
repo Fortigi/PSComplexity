@@ -101,7 +101,7 @@ function Measure-PSComplexity {
 
     .EXAMPLE
         # Measure only what a pull request touched, and keep the machine-readable record:
-        $changed = git diff --name-only origin/main...HEAD
+        $changed = git diff --name-only --diff-filter=d origin/main...HEAD
         Measure-PSComplexity ./src -Recurse -ChangedFile $changed -ReportPath ./reports/complexity.json
 
     .LINK
@@ -372,7 +372,7 @@ function Test-PSComplexity {
 
     .EXAMPLE
         # Gate a pull request on what it changed, and render findings inline:
-        $changed = git diff --name-only origin/main...HEAD
+        $changed = git diff --name-only --diff-filter=d origin/main...HEAD
         Test-PSComplexity ./src -Recurse -ChangedFile $changed -SarifPath ./reports/complexity.sarif
 
     .LINK

@@ -508,11 +508,46 @@ Describe 'Get-PSCxChangedSet' {
 }
 
 Describe 'Assert-PSCxChangedFile' {
-    It 'accepts a list naming at least one file' {
-        Assert-PSCxChangedFile -ChangedFile @('src/A.ps1')
+    # From the fixture directory, as a gate runs from the repository root: the list is resolved
+    # against the current directory, which is the whole of #160.
+    BeforeEach { Push-Location $script:work }
+    AfterEach { Pop-Location }
+
+    It 'accepts a list naming files that are there, however each is spelled' {
+        # Trimmed, backslashed, and a non-PowerShell entry that is NOT there -- a deleted README
+        # changes no answer, so only .ps1 and .psm1 entries are checked. And a blank line.
+        Assert-PSCxChangedFile -ChangedFile @(' flat.ps1 ', 'nested\deep.ps1', 'mod.psm1', 'gone.md', '')
         # No exception is the assertion; Pester fails the test on one. Paired with the refusals
         # below, which is what stops a guard that refuses everything passing this file.
         $true | Should-BeTrue
+    }
+
+    It 'refuses a listed <Name> that is not there, naming it and the likely cause (#160)' -ForEach @(
+        @{ Name = '.ps1'; File = 'gone.ps1' }
+        @{ Name = '.psm1'; File = 'gone.psm1' }
+        @{ Name = 'extension in another case'; File = 'gone.PS1' }
+    ) {
+        # Only the missing entry is named, not the one that is there beside it.
+        { Assert-PSCxChangedFile -ChangedFile @('flat.ps1', $File) } |
+            Should-Throw -ExceptionMessage "*names 1 PowerShell file(s) that do not exist from '*': $File. The list is resolved against the current directory*run from the root*--diff-filter=d*"
+    }
+
+    It 'refuses a list resolved from the wrong directory -- the case behind #160' {
+        # git prints nested/deep.ps1 relative to the root. From inside nested/ that names nothing,
+        # and the run used to measure 0 units and pass.
+        Push-Location (Join-Path $script:work 'nested')
+        try {
+            { Assert-PSCxChangedFile -ChangedFile @('nested/deep.ps1') } |
+                Should-Throw -ExceptionMessage '*that do not exist from*nested*: nested/deep.ps1.*'
+        }
+        finally { Pop-Location }
+    }
+
+    It 'refuses a listed directory that merely ends in .ps1' {
+        # A directory cannot be the changed FILE the entry claims; measured as a path it would be
+        # walked for its contents instead.
+        New-Item -ItemType Directory -Path (Join-Path $script:work 'dir.ps1') -Force | Out-Null
+        { Assert-PSCxChangedFile -ChangedFile @('dir.ps1') } | Should-Throw -ExceptionMessage '*: dir.ps1.*'
     }
 
     It 'refuses an empty list' {

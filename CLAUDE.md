@@ -264,6 +264,12 @@ exits 0, and taken at face value that is a confident pass over zero units. So an
 `-ChangedFile` is refused, while a run whose changed files simply hold no PowerShell passes and
 says so -- those are different situations and only one of them indicates a broken pipeline.
 
+The second guard is a **listed `.ps1`/`.psm1` that is not there** (#160). The list is resolved
+against the current directory and git prints it relative to the repository root, so a gate run from
+a subdirectory matched nothing and passed -- the docs-only exemption above is exactly what let it
+through. It is still not a git dependency: the module checks the list it was handed against the
+disk, and the fix it names (run from the root, `--diff-filter=d`) stays in the caller's script.
+
 A filtered run emits a notice because a passing gate is otherwise silent, and `scope.changedFile`
 in the report is `null` for a whole-tree run rather than `[]`: absent and empty are different
 answers, and only absent may be read as a measurement of everything under `path`.
