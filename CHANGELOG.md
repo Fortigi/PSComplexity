@@ -18,7 +18,7 @@ calls count -- the intrinsics are never static, so `[Type]::Where()` is somebody
 
 **Scores rise for any code that uses them, and the metric version is now 2.** A baseline recorded
 against version 1 is refused rather than compared; regenerate it with `-UpdateBaseline` and review
-the diff. Code that uses neither method scores exactly as before, and every SonarSource reference
+the diff. Code that uses neither method, nor a recursion form below (#182), scores exactly as before, and every SonarSource reference
 case is unchanged.
 The gallery description names the methods too (#184); it had gone on listing the extensions
 without them, and a test now holds it to the README's list of scored constructs.
@@ -111,6 +111,16 @@ the gate. A `workflow`, which PowerShell 7 cannot parse, and a DSC `Configuratio
 without the DSC schema store (Linux by default) were skipped as "parse error", and the DSC one
 carried a whole .NET stack trace. Each is now named for what it is, in one line. The gate still
 refuses such a run.
+
+**Recursion is counted through `${function:Name}` and `$MyInvocation`, and a script calling itself
+counts too** (#182). Recursion was only ever a function calling its own name, so `& ${function:Get-Fact}`
+and `& $MyInvocation.MyCommand` inside `Get-Fact` scored nothing, and a script recursing into itself
+-- through `& $PSCommandPath`, `$MyInvocation.MyCommand.Path`, or its own file name as `.\Self.ps1`
+or `$PSScriptRoot\Self.ps1` -- could not score recursion at all. Each now counts +1, the
+`<script-body>` unit's for a script. **Scores rise** where these forms are used, under the same metric version 2, so one regenerated
+baseline covers both changes. The README's new
+"Recursion" section lists every form recognised and those left out on purpose. `& $function:Get-Fact`
+stays uncounted: it is `$function:Get` followed by the text `-Fact`, and does not run `Get-Fact`.
 
 ## [0.5.2] - 2026-10-09
 

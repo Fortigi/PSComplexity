@@ -67,6 +67,8 @@ function Get-PSCxSourceFile {
 # Starts at 1 with 0.4.0. Scores from earlier releases carry no version and are not comparable
 # with these; that is a statement about what was never recorded, not a claim that they agree.
 # 2: the .ForEach() and .Where() methods score as the cmdlets do (#159).
+#    Unreleased with it: recursion through ${function:Name}, $MyInvocation, and a script calling
+#    itself (#182).
 $script:PSCxMetricVersion = 2
 
 function Get-PSCxWorkingRoot {

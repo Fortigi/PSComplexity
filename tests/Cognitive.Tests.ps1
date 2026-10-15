@@ -243,6 +243,65 @@ Describe 'recursion through a qualified name (#158)' {
     }
 }
 
+Describe 'recursion through a nameless command, and a script calling itself (#182)' {
+    # Each case is if(1) + recursion(1) = 2; a missed recursion reads 1. The README section
+    # "Recursion" lists these forms and the ones left out; this is where each is pinned.
+    BeforeAll {
+        function script:Get-ScriptBodyCognitive {
+            # The <script-body> unit of a file with a chosen NAME, because one form is the
+            # script's own file name. A GUID folder keeps the name free.
+            param([string]$Code, [string]$Name = 'Get-Self.ps1')
+            $dir = Join-Path ([System.IO.Path]::GetTempPath()) "cxrec-$([System.Guid]::NewGuid().ToString('N'))"
+            $null = New-Item -ItemType Directory -Path $dir
+            try {
+                Set-Content (Join-Path $dir $Name) $Code -Encoding utf8
+                (Measure-PSComplexity -Path (Join-Path $dir $Name) | Where-Object Unit -eq '<script-body>').Cognitive
+            }
+            finally { Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'counts a function calling <Name>' -ForEach @(
+        @{ Name = 'its body through the function drive'; Code = 'function Get-Rc { param($n) if ($n) { & ${function:Get-Rc} ($n - 1) } }' }
+        @{ Name = 'itself through $MyInvocation.MyCommand'; Code = 'function Get-Rc { param($n) if ($n) { & $MyInvocation.MyCommand ($n - 1) } }' }
+        @{ Name = 'itself through $MyInvocation.MyCommand.Name'; Code = 'function Get-Rc { param($n) if ($n) { & $MyInvocation.MyCommand.Name ($n - 1) } }' }
+    ) {
+        Get-CognitiveOf -Code $Code | Should-Be 2
+    }
+
+    It 'does not count a function calling <Name>' -ForEach @(
+        @{ Name = '$function:Get-Rc, which is $function:Get followed by -Rc'; Code = 'function Get-Rc { param($n) if ($n) { & $function:Get-Rc ($n - 1) } }' }
+        @{ Name = 'a command held in a variable'; Code = 'function Get-Rc { param($n) $cmd = ''Get-Rc''; if ($n) { & $cmd ($n - 1) } }' }
+        @{ Name = 'its body through Invoke-Command'; Code = 'function Get-Rc { param($n) if ($n) { Invoke-Command ${function:Get-Rc} -ArgumentList ($n - 1) } }' }
+        @{ Name = '$MyInvocation inside a script block, which has its own'; Code = 'function Get-Rc { param($n) if ($n) { & { & $MyInvocation.MyCommand } } }' }
+    ) {
+        Get-CognitiveOf -Code $Code | Should-Be 1
+    }
+
+    It 'counts a script calling itself through <Name>' -ForEach @(
+        @{ Name = '$PSCommandPath'; Code = 'param($n) if ($n) { & $PSCommandPath ($n - 1) }' }
+        @{ Name = '$MyInvocation.MyCommand.Path'; Code = 'param($n) if ($n) { & $MyInvocation.MyCommand.Path ($n - 1) }' }
+        @{ Name = 'its own file name, relative'; Code = 'param($n) if ($n) { .\Get-Self.ps1 ($n - 1) }' }
+        @{ Name = 'its own file name beside it'; Code = 'param($n) if ($n) { & "$PSScriptRoot/Get-Self.ps1" ($n - 1) }' }
+    ) {
+        Get-ScriptBodyCognitive -Code $Code | Should-Be 2
+    }
+
+    It 'does not count a script calling <Name>' -ForEach @(
+        @{ Name = 'another script'; Code = 'param($n) if ($n) { .\Get-Other.ps1 ($n - 1) }' }
+        @{ Name = 'a command held in a variable'; Code = 'param($n) $cmd = $PSCommandPath; if ($n) { & $cmd ($n - 1) }' }
+    ) {
+        Get-ScriptBodyCognitive -Code $Code | Should-Be 1
+    }
+
+    It 'charges $PSCommandPath inside a function to nothing -- it runs the script, not the function' {
+        # Mutual recursion between a unit and its file is not counted, as no mutual recursion is.
+        $code = 'function Get-Rc { param($n) if ($n) { & $PSCommandPath ($n - 1) } }'
+        Get-CognitiveOf -Code $code | Should-Be 1
+        Get-ScriptBodyCognitive -Code $code | Should-Be 0
+    }
+}
+
 Describe 'Test-PSCxFlowCommand' {
     BeforeAll {
         function Get-Node { param([string]$Code, [string]$Type)
