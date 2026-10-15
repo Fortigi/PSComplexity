@@ -169,13 +169,48 @@ Describe 'Write-PSCxBaselineFile' {
         @((Get-Content -LiteralPath $p -Raw | ConvertFrom-Json).units).Count | Should-Be 0
     }
 
-    It 'records a unit the baseline does not yet mention without calling it a raise' {
-        # A NEW violation is not a regression against a recorded number, because there is no
-        # recorded number. Treated as one, seeding a baseline would be impossible.
+    It 'refuses to add a unit the baseline has never recorded, naming it (#152)' {
+        # This test used to assert the opposite -- that an update records a new unit without being
+        # asked. A new unit is new code or a renamed one, and a rename that also got worse is
+        # the regression the ratchet exists to refuse; an unconditional update absorbed it.
+        $p = Baseline -Units @(Entry -Name 'Other' -Cyc 20 -Cog 30)
+        $before = Get-Content -LiteralPath $p -Raw
+        { Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @((Unit -Name 'Other'), (Unit -Name 'Fresh')) -Accept @() `
+                -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
+            Should-Throw -ExceptionMessage '*src/A.ps1 Fresh (cyclomatic 20, cognitive 30)*not in the baseline*-AllowNew*'
+        (Get-Content -LiteralPath $p -Raw) | Should-Be $before
+    }
+
+    It 'records it with -AllowNew, and still says so' {
         $p = Baseline -Units @(Entry -Name 'Other' -Cyc 20 -Cog 30)
         Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @((Unit -Name 'Other'), (Unit -Name 'Fresh')) -Accept @() `
-            -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
+            -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 -AllowNew -WarningVariable warned 3>$null
         $doc = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
         (($doc.units.unit | Sort-Object) -join ',') | Should-Be 'Fresh,Other'
+        # One warning, for the ADDED unit only: the one already recorded is not news.
+        @($warned).Count | Should-Be 1
+        [string]$warned[0] | Should-BeLikeString '*src/A.ps1 Fresh at cyclomatic 20, cognitive 30*new to the baseline*'
+    }
+
+    It 'still refuses a unit worse than recorded, even with -AllowNew' {
+        # -AllowNew is about units the file has never seen; it cannot make a recorded one worse.
+        $p = Baseline -Units @(Entry -Cyc 20 -Cog 30)
+        { Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @(Unit -Cyc 21 -Cog 30) -Accept @() `
+                -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 -AllowNew } |
+            Should-Throw -ExceptionMessage '*worse than recorded*'
+    }
+
+    It 'needs no -AllowNew to seed, or to regenerate across a metric change, and warns about neither' {
+        # Nothing to add TO: every unit is new to an absent file, and an incomparable one is
+        # regenerated wholesale and reviewed as a diff.
+        $seed = NewPath
+        Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $seed -Unit @(Unit -Name 'Fresh') -Accept @() `
+            -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 -WarningVariable seedWarned 3>$null
+        $regen = Baseline -Units @(Entry -Name 'Other') -Metric 99
+        Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $regen -Unit @(Unit -Name 'Fresh') -Accept @() `
+            -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 -WarningVariable regenWarned 3>$null
+        (Get-Content -LiteralPath $seed -Raw | ConvertFrom-Json).units[0].unit | Should-Be 'Fresh'
+        (Get-Content -LiteralPath $regen -Raw | ConvertFrom-Json).units[0].unit | Should-Be 'Fresh'
+        @($seedWarned).Count + @($regenWarned).Count | Should-Be 0
     }
 }

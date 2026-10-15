@@ -435,6 +435,61 @@ Describe 'Policy checks over many entries' {
     }
 }
 
+Describe 'Get-PSCxBaselineAddition' {
+    BeforeAll {
+        $script:recorded = Get-PSCxBaselineMap -PathComparison Ordinal -Entry @(Entry -Name 'Kept')
+    }
+
+    It 'names a breaching unit the baseline has never recorded (#152)' {
+        $added = @(Get-PSCxBaselineAddition -Unit @((Unit -Name 'Kept'), (Unit -Name 'Fresh')) -Accept @() `
+                -MaxCyclomatic 15 -MaxCognitive 15 -Map $script:recorded -PathComparison Ordinal)
+        (($added | ForEach-Object Unit) -join ',') | Should-Be 'Fresh'
+    }
+
+    It 'leaves out a new unit within both ceilings, which the file would not record anyway' {
+        @(Get-PSCxBaselineAddition -Unit @(Unit -Name 'Fresh' -Cyc 15 -Cog 15) -Accept @() `
+                -MaxCyclomatic 15 -MaxCognitive 15 -Map $script:recorded -PathComparison Ordinal).Count | Should-Be 0
+    }
+
+    It 'leaves out an accepted unit, which the file never records' {
+        $acc = @(@{ File = 'src/A.ps1'; Unit = 'Fresh'; Reason = 'r' })
+        @(Get-PSCxBaselineAddition -Unit @(Unit -Name 'Fresh') -Accept $acc `
+                -MaxCyclomatic 15 -MaxCognitive 15 -Map $script:recorded -PathComparison Ordinal).Count | Should-Be 0
+    }
+
+    It 'finds a recorded unit under any casing of its NAME' {
+        @(Get-PSCxBaselineAddition -Unit @(Unit -Name 'KEPT') -Accept @() `
+                -MaxCyclomatic 15 -MaxCognitive 15 -Map $script:recorded -PathComparison Ordinal).Count | Should-Be 0
+    }
+}
+
+Describe 'Get-PSCxBaselineUpdateFault' {
+    It 'says nothing when nothing is raised or added' {
+        Get-PSCxBaselineUpdateFault -Raised @() -Added @() | Should-BeNull
+    }
+
+    It 'refuses a raise, naming the unit and its scores' {
+        Get-PSCxBaselineUpdateFault -Raised @(Unit -Cyc 21 -Cog 30) -Added @() |
+            Should-BeLikeString '*src/A.ps1 Invoke-Thing is now cyclomatic 21, cognitive 30*worse than recorded*'
+    }
+
+    It 'refuses a raise even with -AllowNew' {
+        Get-PSCxBaselineUpdateFault -Raised @(Unit) -Added @() -AllowNew | Should-BeLikeString '*worse than recorded*'
+    }
+
+    It 'refuses a SINGLE added unit too' {
+        # One, not two: a guard that counted from the wrong place would pass any multi-unit case.
+        Get-PSCxBaselineUpdateFault -Raised @() -Added @(Unit -Name 'Fresh') | Should-BeLikeString '*Fresh*not in the baseline*'
+    }
+
+    It 'refuses an addition, naming every unit, unless -AllowNew (#152)' {
+        $added = @((Unit -Name 'A2' -Cyc 5 -Cog 10), (Unit -Name 'B' -Cyc 3 -Cog 3))
+        Get-PSCxBaselineUpdateFault -Raised @() -Added $added |
+            Should-BeLikeString '*src/A.ps1 A2 (cyclomatic 5, cognitive 10); src/A.ps1 B (cyclomatic 3, cognitive 3)*not in the baseline*-AllowNew*'
+        Get-PSCxBaselineUpdateFault -Raised @() -Added $added -AllowNew | Should-BeNull
+    }
+}
+
 Describe 'Get-PSCxBaselineDocumentFault' {
     It 'says nothing about a document this run can compare against' {
         Get-PSCxBaselineDocumentFault -Document (Doc) -MetricVersion 1 -SchemaVersion 1 | Should-BeNull

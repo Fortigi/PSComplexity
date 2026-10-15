@@ -337,6 +337,20 @@ function Test-PSComplexity {
         numbers are answers to a different question rather than smaller or larger ones. That file
         is regenerated wholesale, and the diff is where it gets reviewed.
 
+        Nor does it add a unit the file has never recorded, unless -AllowNew says to: see below.
+
+    .PARAMETER AllowNew
+        With -UpdateBaseline, also record breaching units the existing baseline has never seen.
+
+        Without it such an update is refused, naming each unit. A unit new to the baseline is new
+        code, which should meet the ceilings, or a renamed one -- and a rename that also got worse
+        is exactly the regression the ratchet exists to catch, which an unconditional update would
+        absorb. With it, each added unit is still named in a warning, so the log says what the
+        diff says.
+
+        Not needed to seed a baseline, or to regenerate one across a metric version change: there
+        is nothing to add to.
+
         No report and no SARIF are written by an update: the verdict they would record is one the
         call just manufactured.
 
@@ -390,7 +404,8 @@ function Test-PSComplexity {
         # Empty is the normal case, and an empty array must bind rather than be rejected.
         [AllowEmptyCollection()] [object[]]$Accept = @(),
         [string]$BaselineFile,
-        [switch]$UpdateBaseline
+        [switch]$UpdateBaseline,
+        [switch]$AllowNew
     )
     # ValueFromPipeline needs begin/process/end, not a bare body. A bare body IS the `end`
     # block, so it would run once with $Path holding only the LAST item piped in -- and the
@@ -409,6 +424,11 @@ function Test-PSComplexity {
         # whole tree and then say it had no path.
         if ($UpdateBaseline -and -not $BaselineFile) {
             throw '-UpdateBaseline needs -BaselineFile: there is no default path for a baseline, because a file the gate reads without being told to is one nobody reviews.'
+        }
+        # Refused rather than ignored: a gate run carrying -AllowNew believes it permitted
+        # something, and it permits nothing without an update to apply it to.
+        if ($AllowNew -and -not $UpdateBaseline) {
+            throw '-AllowNew only applies with -UpdateBaseline: it permits an update to record units the baseline has never seen, and without an update there is nothing for it to permit.'
         }
         $paths = $collected.ToArray()
         # The scan, not the record stream. What was skipped is a fact the measurement already
@@ -461,7 +481,7 @@ function Test-PSComplexity {
         if ($UpdateBaseline) {
             Write-PSCxBaselineFile -Path $BaselineFile -Unit $units -Accept $Accept `
                 -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
-                -MetricVersion (Get-PSCxMetricVersion) -PathComparison $scan.PathComparison
+                -MetricVersion (Get-PSCxMetricVersion) -PathComparison $scan.PathComparison -AllowNew:$AllowNew
             # No report and no SARIF from an update. The verdict they would record is one this
             # call just manufactured by recording every breach, and an artefact saying "passed"
             # about that is the mute button the whole policy layer exists instead of.

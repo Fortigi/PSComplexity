@@ -69,7 +69,10 @@ function Write-PSCxBaselineFile {
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive,
         [Parameter(Mandatory)] [int]$MetricVersion,
-        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
+        # Record units the existing file has never seen (#152). Never needed to SEED a baseline or
+        # to regenerate one across a metric change: there is nothing to add to.
+        [switch]$AllowNew
     )
     # Absent is the ordinary first run, not an error: seeding a baseline is the reason this
     # switch exists.
@@ -81,11 +84,16 @@ function Write-PSCxBaselineFile {
     $comparable = $null -ne $existing -and -not (Get-PSCxBaselineDocumentFault -Document $existing `
             -MetricVersion $MetricVersion -SchemaVersion (Get-PSCxBaselineSchemaVersion))
     if ($comparable) {
-        $raised = @(Get-PSCxBaselineRaise -Unit $Unit -Map (Get-PSCxBaselineMap -Entry @($existing.units) -PathComparison $PathComparison))
-        if ($raised.Count -gt 0) {
-            throw ("Refusing to update $Path : " +
-                (($raised | ForEach-Object { "$($_.File) $($_.Unit) is now cyclomatic $($_.Cyclomatic), cognitive $($_.Cognitive)" }) -join '; ') +
-                ' -- worse than recorded. A baseline only ever ratchets down; fix the regression, or accept the unit with an argument for it.')
+        $map = Get-PSCxBaselineMap -Entry @($existing.units) -PathComparison $PathComparison
+        $added = @(Get-PSCxBaselineAddition -Unit $Unit -Accept $Accept -MaxCyclomatic $MaxCyclomatic `
+                -MaxCognitive $MaxCognitive -Map $map -PathComparison $PathComparison)
+        $fault = Get-PSCxBaselineUpdateFault -Raised @(Get-PSCxBaselineRaise -Unit $Unit -Map $map) `
+            -Added $added -AllowNew:$AllowNew
+        if ($fault) { throw "Refusing to update $Path : $fault" }
+        # Recorded on purpose, and still SAID: the diff should not be the only place a reviewer
+        # can find a unit that joined the baseline.
+        foreach ($a in $added) {
+            Write-Warning "Recording $($a.File) $($a.Unit) at cyclomatic $($a.Cyclomatic), cognitive $($a.Cognitive): new to the baseline."
         }
     }
     Save-PSCxDocument -Path $Path -Document (Get-PSCxBaselineDocument -Unit $Unit -Accept $Accept `

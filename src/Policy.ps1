@@ -369,6 +369,56 @@ function Get-PSCxBaselineRaise {
     }
 }
 
+function Get-PSCxBaselineAddition {
+    # The units an update would record that the file has never recorded (#152).
+    #
+    # The raise check above only sees units the file already names, so a unit renamed AND made
+    # worse -- A at 6 becomes A2 at 10 -- and a brand-new breach both reached the file silently:
+    # re-running the tool absorbed the very regression the gate had just refused. A unit the
+    # baseline has not seen is new code, which should meet the ceilings, or a renamed one; this
+    # module cannot tell which, so it names them and lets the caller decide.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unit,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Accept,
+        [Parameter(Mandatory)] [int]$MaxCyclomatic,
+        [Parameter(Mandatory)] [int]$MaxCognitive,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [hashtable]$Map,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+    )
+    # Exactly what the document writer would record -- breaching and not accepted -- so the two
+    # cannot disagree about which units an update adds.
+    Get-PSCxUnacceptedUnit -Unit $Unit -Accept $Accept -MaxCyclomatic $MaxCyclomatic `
+        -MaxCognitive $MaxCognitive -PathComparison $PathComparison | Where-Object {
+        -not $Map.ContainsKey((Get-PSCxPolicyKey -File ([string]$_.File) -Unit ([string]$_.Unit)))
+    }
+}
+
+function Get-PSCxBaselineUpdateFault {
+    # Why an update to an EXISTING baseline must not be written, as text. Nothing when it may.
+    #
+    # Worse-than-recorded first, and refused even with -AllowNew: that switch says "these units
+    # are new and I mean to record them", which is never true of a unit the file already holds.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Raised,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Added,
+        [switch]$AllowNew
+    )
+    if ($Raised.Count -gt 0) {
+        return ((($Raised | ForEach-Object { "$($_.File) $($_.Unit) is now cyclomatic $($_.Cyclomatic), cognitive $($_.Cognitive)" }) -join '; ') +
+            ' -- worse than recorded. A baseline only ever ratchets down; fix the regression, or accept the unit with an argument for it.')
+    }
+    if ($Added.Count -gt 0 -and -not $AllowNew) {
+        return ((($Added | ForEach-Object { "$($_.File) $($_.Unit) (cyclomatic $($_.Cyclomatic), cognitive $($_.Cognitive))" }) -join '; ') +
+            ' -- not in the baseline. A unit it has never recorded is new code, which should meet the ceilings, ' +
+            'or a renamed one, which may also have got worse, and recording it here would absorb either. Fix it, ' +
+            'accept it with an argument, or record it on purpose with -AllowNew.')
+    }
+}
+
 function Get-PSCxBaselineDocument {
     # The baseline to write: every unit that breaches a ceiling and that nobody has accepted, at
     # the score it has now.

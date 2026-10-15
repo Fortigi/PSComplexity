@@ -52,6 +52,15 @@ exact case; a unit name still ignores case everywhere. A case-sensitive folder i
 case-insensitive project is reported rather than guessed at: the second of two files differing only
 in case is skipped, naming the first, and the gate refuses the run.
 
+**`-UpdateBaseline` no longer adds a unit the baseline has never recorded without being told to**
+(#152). The "never record anything worse" check only looked at units the file already named, so a
+unit renamed *and* made worse -- `A` at 3 becoming `A2` at 10 -- and a brand-new breaching unit were
+both written in silently: the gate refused the run, and re-running with `-UpdateBaseline` absorbed
+the regression it had just caught. Updating an existing baseline now refuses such units, naming each
+with its scores; the new **`-AllowNew`** switch records them deliberately, and each one is still
+named in a warning. Seeding a baseline, or regenerating one across a metric version change, is
+unchanged and needs no switch.
+
 ## [0.5.2] - 2026-10-09
 
 ### For consumers
