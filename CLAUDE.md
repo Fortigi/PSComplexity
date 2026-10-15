@@ -245,6 +245,12 @@ re-read by whoever edits the file; a baseline is committed once and reviewed rar
 entry with an ordinal in it is **refused** rather than approximated. A line number is no better
 and worse in the ordinary case, where it churns on every edit above the unit.
 
+A function's **scope modifier is not identity** (#158): `function global:Get-Fact` is the unit
+`Get-Fact`, so adding the modifier cannot orphan a baseline entry. It was dropped in 0.6.0 because
+that release's metric version change already forces every baseline to be regenerated -- a key
+change was never going to be cheaper. Recursion compares names the same way, through the one
+pattern in `Ast.ps1`; the two must agree, or a scoped function stops counting its own calls.
+
 **Who decides what "changed" is, is the decision #7 owned.** `-ChangedFile` takes a list; there
 is deliberately no `-ChangedSince <ref>`. A diff is not a fact this module can compute -- it needs
 a base, and every way that goes wrong goes wrong in the CALLER's environment: a shallow clone where

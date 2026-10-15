@@ -139,6 +139,13 @@ $script:PSCxNameCache = [System.Collections.Generic.Dictionary[object, object]]:
 # index.
 $script:PSCxIndexedRoot = $null
 
+# A function's scope modifier, which says where it is defined and not which function it is (#158):
+# `function global:Get-Fact` and its call `Get-Fact` are one function, and adding the modifier must
+# not rename the unit, which is its baseline and acceptance key. The unit name and recursion both
+# strip it, and must agree. An operator rather than a helper, because recursion applies it once per
+# COMMAND: two helper calls there tripled that collector's time, about 60ms on a 28k-node file.
+$script:PSCxScopeModifierPattern = '^(global|script|local|private):'
+
 function Get-PSCxAstRoot {
     # The top of the tree a node belongs to.
     #
@@ -354,12 +361,12 @@ function Get-PSCxDisplayName {
 function Get-PSCxUnitOwnName {
     # A unit's own name, unqualified: 'Get-Thing' for a function, 'Class.Member' for a class
     # member (whose Parent is the TypeDefinitionAst carrying the class name). A constructor is
-    # named after its class, so it reads 'Order.Order'.
+    # named after its class, so it reads 'Order.Order'. A function's scope modifier is dropped.
     [OutputType([string])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Boundary)
     if ($Boundary -is [System.Management.Automation.Language.FunctionDefinitionAst]) {
-        return $Boundary.Name
+        return $Boundary.Name -replace $script:PSCxScopeModifierPattern, ''
     }
     return '{0}.{1}' -f $Boundary.Parent.Name, $Boundary.Name
 }
@@ -581,17 +588,24 @@ function Get-PSCxUnitTable {
     return $units
 }
 
-function Get-PSCxEnclosingFunctionName {
-    # Name of the nearest enclosing FUNCTION, for bare-command recursion detection.
-    # $null when the nearest body-owner is a class member: a bare command inside a
-    # method is a command lookup, never a call to the method, so walking past the
-    # method to an outer function would attribute recursion to the wrong unit.
-    [OutputType([string])]
+function Test-PSCxSelfCall {
+    # True when a command calls the FUNCTION it sits in, for direct-recursion detection.
+    # False when the nearest body-owner is a class member: a bare command inside a method is a
+    # command lookup, never a call to the method, so walking past the method to an outer
+    # function would attribute recursion to the wrong unit. False at file scope too.
+    #
+    # Compared as the function each side NAMES, not as written (#158): `MyMod\Get-Fact` and
+    # `global:Get-Fact` both call Get-Fact, and so does `Get-Fact` inside `function global:Get-Fact`
+    # -- an exact match on the text missed all three. A module qualifier is ONE segment before a
+    # backslash; anything reading as a path -- `.\Get-Fact`, `C:\Get-Fact`, `~\x`, two segments --
+    # runs a script rather than this function, so it is left as written and never matches.
+    [OutputType([bool])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Node)
     $boundary = Get-PSCxUnitBoundary -Node $Node
-    if ($boundary -is [System.Management.Automation.Language.FunctionDefinitionAst]) { return $boundary.Name }
-    return $null
+    if ($boundary -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) { return $false }
+    $called = $Node.GetCommandName() -replace '^[^\\/:.~][^\\/:]*\\', '' -replace $script:PSCxScopeModifierPattern, ''
+    return $called -eq ($boundary.Name -replace $script:PSCxScopeModifierPattern, '')
 }
 
 function Get-PSCxEnclosingMethod {

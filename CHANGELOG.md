@@ -81,6 +81,18 @@ own `+1` row at its own line, construct `elseif` or `else`. A class method calli
 reported as construct `unknown`; it is `recursion`, as a function calling itself already was.
 Every total is unchanged; only the rows that make it up are split and named.
 
+**Recursion is counted through a module qualifier or a scope modifier, and a scope modifier is no
+longer part of a unit's name** (#158). Recursion was an exact match on the command text, so
+`MyMod\Get-Fact` or `script:Get-Fact` inside `Get-Fact`, and `Get-Fact` inside
+`function global:Get-Fact`, scored nothing. Each now counts; a path such as `.\Get-Fact` runs a
+script, not the function, and still does not.
+
+The unit was named `global:Get-Fact`, so adding or removing the modifier renamed it and orphaned its
+baseline entry and acceptance. It is named `Get-Fact` now. **An acceptance naming the old form
+fails** as naming no measured unit -- write it without the modifier. A baseline needs no separate
+step: this release's metric version change already has it regenerated. A `global:` and a plain
+definition of one name in one file are now duplicates, numbered `#1`, `#2`.
+
 ## [0.5.2] - 2026-10-09
 
 ### For consumers
