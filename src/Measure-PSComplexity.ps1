@@ -144,7 +144,7 @@ function Measure-PSComplexity {
         # duplicate rows in the output, doubling that file's contribution to anything that
         # counts. In `begin` rather than `process` so it also spans pipeline input, where
         # each item arrives as its own invocation of the block below.
-        $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        $seen = [System.Collections.Generic.HashSet[string]]::new((Get-PSCxPathComparer))
         # Paths that produced no source file, collected across the whole run for the same reason
         # $seen is: each piped path arrives as its own invocation of the process block.
         $unmatched = [System.Collections.Generic.List[object]]::new()

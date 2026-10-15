@@ -115,7 +115,7 @@ function Get-PSCxRelativePath {
     }
     # Outside the root, keep the full path. A ../../ chain says less than the absolute path
     # does and is no more portable, so pretending would only hide where the file came from.
-    if (-not $full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $full.StartsWith($rootFull, (Get-PSCxPathComparison))) {
         return $full.Replace([System.IO.Path]::DirectorySeparatorChar, '/')
     }
     return $full.Substring($rootFull.Length).Replace([System.IO.Path]::DirectorySeparatorChar, '/')
@@ -130,8 +130,8 @@ function Get-PSCxChangedSet {
     # function is what makes 'src/A.ps1', './src/A.ps1', 'src\A.ps1' and an absolute path the same
     # entry.
     #
-    # OrdinalIgnoreCase for the same reason the rest of this module uses it: a config that fails on
-    # one platform and not the other is worse than one that fails on both.
+    # Compared as the platform's file system compares names (Get-PSCxPathComparer): on Linux
+    # 'src/a.ps1' is not 'src/A.ps1', and a list naming one must not select the other (#151).
     [OutputType([System.Collections.Generic.HashSet[string]])]
     [CmdletBinding()]
     param(
@@ -142,7 +142,7 @@ function Get-PSCxChangedSet {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ChangedFile,
         [Parameter(Mandatory)] [string]$Root
     )
-    $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $set = [System.Collections.Generic.HashSet[string]]::new((Get-PSCxPathComparer))
     foreach ($f in $ChangedFile) {
         if ([string]::IsNullOrWhiteSpace($f)) { continue }
         [void]$set.Add((Get-PSCxRelativePath -Path $f.Trim() -Root $Root))
@@ -501,8 +501,9 @@ function Get-PSCxPathScan {
             continue
         }
         foreach ($file in $files) {
-            # OrdinalIgnoreCase: Windows and macOS resolve the same file under different
-            # casing, and a case-sensitive check would let those through as two files.
+            # The path comparer: Windows and macOS reach one file under two casings, which must
+            # count once; on Linux two casings are two files, and skipping the second dropped it
+            # without a word while the gate passed (#151).
             if (-not $Seen.Add($file)) { continue }
             # BEFORE the parse, so a diff-scoped run over a large tree does not read every file
             # only to throw most of them away. The verdict is identical either way; the cost is
@@ -548,7 +549,7 @@ function Get-PSCxScan {
     $units = [System.Collections.Generic.List[object]]::new()
     $skipped = [System.Collections.Generic.List[object]]::new()
     $unmatched = [System.Collections.Generic.List[object]]::new()
-    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $seen = [System.Collections.Generic.HashSet[string]]::new((Get-PSCxPathComparer))
     $root = Get-PSCxWorkingRoot
     # $null when no filter was asked for, which is what tells the walk to read everything. Built
     # from $PSBoundParameters rather than from the value, so an explicitly empty list is
