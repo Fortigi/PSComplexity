@@ -20,6 +20,8 @@ calls count -- the intrinsics are never static, so `[Type]::Where()` is somebody
 against version 1 is refused rather than compared; regenerate it with `-UpdateBaseline` and review
 the diff. Code that uses neither method scores exactly as before, and every SonarSource reference
 case is unchanged.
+The gallery description names the methods too (#184); it had gone on listing the extensions
+without them, and a test now holds it to the README's list of scored constructs.
 
 **A large baseline no longer slows the gate down** (#153). Each baseline entry and each acceptance
 was checked by searching the whole list of measured units, so the check took entries x units: a
