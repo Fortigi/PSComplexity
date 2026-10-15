@@ -205,7 +205,10 @@ Three properties of the list are worth relying on:
   dropped or misattributed on the way to this list -- it cannot catch a construct scored wrong
   in the first place, because that moves both sides together. Verified both ways rather than
   assumed. Whether the scores themselves are right is the reference-score suite's job.
-- **Rows are in line order**, so a unit reads top to bottom.
+- **Rows are in source order** -- by line, then left to right within a line -- so a unit reads
+  as it is written: a one-line `if ... elseif ... else` lists `if`, `elseif`, `else`. Two rows that
+  start at the same column, such as a ternary whose condition is a boolean run, are ordered by
+  construct name.
 - **A decision-free unit gets an empty list, not a missing property.** Absent and empty are
   different answers, and iterating the property should not require telling them apart.
 

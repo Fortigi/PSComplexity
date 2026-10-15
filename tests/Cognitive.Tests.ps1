@@ -438,7 +438,40 @@ function T {
         $map = Get-PSCxContributionMap -Row @(Get-PSCxCognitiveRow -Ast $script:AttrAst)
         $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
         (@($map[$unit] | ForEach-Object { "$($_.Construct)@$($_.Line)+$($_.Amount)" }) -join ' ') |
-            Should-Be 'block@3+1 boolean-run@4+1 if@4+2'
+            Should-Be 'block@3+1 if@4+2 boolean-run@4+1'
+    }
+
+    It 'orders rows on one line as they are written, left to right (#186)' -ForEach @(
+        # By line alone the tie fell to the construct NAME, so the chain read `else, elseif, if`.
+        @{ Name = 'a one-line if chain'; Code = 'function T { param($a) if ($a -eq 1) { 1 } elseif ($a -eq 2) { 2 } else { 3 } }'; Expected = 'if,elseif,else' }
+        # Name order would put the boolean run first.
+        @{ Name = 'an if before its condition''s boolean run'; Code = 'function T { param($a, $b) if ($a -and $b) { 1 } }'; Expected = 'if,boolean-run' }
+        # And a ternary after it: name order is right here only by accident of the alphabet.
+        @{ Name = 'a ternary before an if'; Code = 'function T { param($a) $x = $a ? 1 : 2; if ($a) { 1 } }'; Expected = 'ternary,if' }
+    ) {
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput($Code, [ref]$null, [ref]$null)
+        $map = Get-PSCxContributionMap -Row @(Get-PSCxCognitiveRow -Ast $ast)
+        $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
+        (@($map[$unit] | ForEach-Object Construct) -join ',') | Should-Be $Expected
+    }
+
+    It 'breaks a tie at one column by construct name, so the order never depends on the collectors' {
+        # A ternary whose condition is a boolean run: both start at `$a`.
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput('function T { param($a, $b) $a -and $b ? 1 : 2 }', [ref]$null, [ref]$null)
+        $map = Get-PSCxContributionMap -Row @(Get-PSCxCognitiveRow -Ast $ast)
+        $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
+        (@($map[$unit] | ForEach-Object Construct) -join ',') | Should-Be 'boolean-run,ternary'
+        $rows = @(Get-PSCxCognitiveRow -Ast $ast)
+        [array]::Reverse($rows)
+        $reversed = Get-PSCxContributionMap -Row $rows
+        (@($reversed[$unit] | ForEach-Object Construct) -join ',') | Should-Be 'boolean-run,ternary'
+    }
+
+    It 'publishes Line, Construct and Amount only -- the column is a sort key, not a field' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput('function T { param($a) if ($a) { 1 } }', [ref]$null, [ref]$null)
+        $map = Get-PSCxContributionMap -Row @(Get-PSCxCognitiveRow -Ast $ast)
+        $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
+        ($map[$unit][0].PSObject.Properties.Name -join ',') | Should-Be 'Line,Construct,Amount'
     }
 
     It 'gives each clause of an if chain its own row at its own line (#157)' {
