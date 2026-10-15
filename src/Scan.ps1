@@ -23,7 +23,10 @@ function Get-PSCxSourceFile {
     [OutputType([string[]], [object[]])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] [string]$Path, [switch]$Recurse)
-    if (Test-Path -LiteralPath $Path -PathType Leaf) { return , [string[]]@((Resolve-Path -LiteralPath $Path).Path) }
+    # ProviderPath, not Path: for a UNC path, or any path written provider-qualified, Path keeps
+    # the 'Microsoft.PowerShell.Core\FileSystem::' prefix, and the parser then reads that as a file
+    # name and fails (#171). Get-ChildItem's FullName below is already the plain form.
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { return , [string[]]@((Resolve-Path -LiteralPath $Path).ProviderPath) }
 
     # Take an existing path literally, and as a wildcard only when nothing is there. -Path
     # glob-parses '[', so a real directory named 'my[1]proj' matches nothing and the scan
@@ -61,6 +64,19 @@ function Get-PSCxSourceFile {
 # with these; that is a statement about what was never recorded, not a claim that they agree.
 # 2: the .ForEach() and .Where() methods score as the cmdlets do (#159).
 $script:PSCxMetricVersion = 2
+
+function Get-PSCxWorkingRoot {
+    # Where the caller is standing, as a FILE-SYSTEM path: the root every File is made relative to.
+    #
+    # (Get-Location).Path is the PowerShell path, and on a UNC share -- or after Set-Location to a
+    # provider-qualified path -- it carries the 'Microsoft.PowerShell.Core\FileSystem::' prefix.
+    # Handed to [System.IO.Path] as a root, that turned every relative path under it into a file
+    # nobody could open (#171). One reader, so the next caller cannot pick the wrong property.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param()
+    return (Get-Location).ProviderPath
+}
 
 function Get-PSCxRelativePath {
     # A path two machines can agree on.
@@ -386,7 +402,7 @@ function Get-PSCxFileScan {
     # Relative to where the caller is standing, which for a repo-scoped run is the repo. Not a
     # parameter: a root nobody passes is a root nobody gets wrong. Resolved for BOTH arms, so a
     # skipped file is named the same way a measured one is.
-    $relative = Get-PSCxRelativePath -Path $File -Root (Get-Location).Path
+    $relative = Get-PSCxRelativePath -Path $File -Root (Get-PSCxWorkingRoot)
     if ($errors) {
         # The FIRST error. Later ones are usually cascade from it, and a skip that does not say
         # why is the one thing the reason string exists to prevent.
@@ -475,7 +491,7 @@ function Get-PSCxPathScan {
         [switch]$Recurse,
         [switch]$Detailed
     )
-    $root = (Get-Location).Path
+    $root = Get-PSCxWorkingRoot
     foreach ($p in $Path) {
         $files = Get-PSCxSourceFile -Path $p -Recurse:$Recurse
         # Recorded BEFORE the changed-file filter, because "this path is not there" and "nothing in
@@ -533,7 +549,7 @@ function Get-PSCxScan {
     $skipped = [System.Collections.Generic.List[object]]::new()
     $unmatched = [System.Collections.Generic.List[object]]::new()
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $root = (Get-Location).Path
+    $root = Get-PSCxWorkingRoot
     # $null when no filter was asked for, which is what tells the walk to read everything. Built
     # from $PSBoundParameters rather than from the value, so an explicitly empty list is
     # distinguishable from an absent one -- the public commands refuse the first.

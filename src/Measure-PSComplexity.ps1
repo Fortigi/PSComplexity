@@ -161,7 +161,7 @@ function Measure-PSComplexity {
         $changedSet = $null
         if ($PSBoundParameters.ContainsKey('ChangedFile')) {
             Assert-PSCxChangedFile -ChangedFile $ChangedFile
-            $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root (Get-Location).Path
+            $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root (Get-PSCxWorkingRoot)
         }
     }
     process {

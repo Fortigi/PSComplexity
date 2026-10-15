@@ -350,6 +350,69 @@ Describe 'Get-PSCxScan' {
     }
 }
 
+Describe 'a provider-qualified path, which is what a UNC path becomes (#171)' {
+    # PowerShell writes a UNC location as 'Microsoft.PowerShell.Core\FileSystem::\\server\share',
+    # and .Path keeps that prefix where .ProviderPath drops it. A UNC share cannot be relied on
+    # on a CI runner, but a LOCAL path written provider-qualified takes the same route through the
+    # same two properties on every platform -- which is how the bug was reproduced, and how
+    # these tests reach it.
+    BeforeAll {
+        $script:plainWork = (Resolve-Path -LiteralPath $script:work).ProviderPath
+        $script:plainFlat = (Resolve-Path -LiteralPath $script:flat).ProviderPath
+        $script:qualify = { param($p) "Microsoft.PowerShell.Core\FileSystem::$p" }
+    }
+
+    It 'resolves a qualified file to the plain file-system path' {
+        # The exact string, so the assertion says the prefix is gone rather than merely that
+        # something was returned.
+        $files = Get-PSCxSourceFile -Path (& $script:qualify $script:plainFlat)
+        ($files -join '|') | Should-Be $script:plainFlat
+    }
+
+    It 'reads the working root as a file-system path from a qualified location' {
+        Push-Location -LiteralPath (& $script:qualify $script:plainWork)
+        try { Get-PSCxWorkingRoot | Should-Be $script:plainWork }
+        finally { Pop-Location }
+    }
+
+    It 'measures a qualified file exactly as it measures the plain one' {
+        $plain = Get-PSCxScan -Path @($script:plainFlat)
+        $qualified = Get-PSCxScan -Path @(& $script:qualify $script:plainFlat)
+        @($qualified.Skipped).Count | Should-Be 0
+        @($qualified.Units).Count | Should-BeGreaterThan 0
+        (@($qualified.Units | ForEach-Object { "$($_.File)|$($_.Unit)|$($_.Cyclomatic)|$($_.Cognitive)" }) -join ';') |
+            Should-Be (@($plain.Units | ForEach-Object { "$($_.File)|$($_.Unit)|$($_.Cyclomatic)|$($_.Cognitive)" }) -join ';')
+    }
+
+    It 'measures a RELATIVE path from a qualified location, named relative to it' {
+        # The half a share user hits first: Set-Location to the share, then gate ./src.
+        Push-Location -LiteralPath (& $script:qualify $script:plainWork)
+        try { $scan = Get-PSCxScan -Path @('./flat.ps1') }
+        finally { Pop-Location }
+        @($scan.Skipped).Count | Should-Be 0
+        (@($scan.Units | ForEach-Object File | Sort-Object -Unique) -join '|') | Should-Be 'flat.ps1'
+    }
+
+    It 'names files under a DIRECTORY relative to a qualified location' {
+        # The quiet half. A directory always measured -- Get-ChildItem hands back plain paths --
+        # but against a prefixed root every File came out absolute, so a baseline or acceptance
+        # keyed 'flat.ps1' matched nothing. Measured before the fix: the full share path.
+        Push-Location -LiteralPath (& $script:qualify $script:plainWork)
+        try { $scan = Get-PSCxScan -Path @('.') }
+        finally { Pop-Location }
+        @($scan.Units | ForEach-Object File) | Should-ContainCollection 'flat.ps1'
+    }
+
+    It 'matches -ChangedFile from a qualified location' {
+        # The dangerous half. With an absolute File on every unit, a repo-relative changed list
+        # matched nothing, and "no changed PowerShell" is a PASS -- over zero units.
+        Push-Location -LiteralPath (& $script:qualify $script:plainWork)
+        try { $scan = Get-PSCxScan -Path @('.') -ChangedFile @('flat.ps1') }
+        finally { Pop-Location }
+        (@($scan.Units | ForEach-Object Unit | Sort-Object -Unique) -join '|') | Should-Be '<script-body>|Get-Flat'
+    }
+}
+
 Describe 'Get-PSCxMetricVersion' {
     It 'reports the version this build measures with' {
         # Read through the function rather than the variable, because no other file may reach
