@@ -404,34 +404,43 @@ Describe 'Policy checks over many entries' {
     }
 
     It 'takes time that does not grow with the number of units per entry' {
-        # A RATIO rather than a time limit, so the machine's speed cancels out. Ten times the
-        # units: the per-entry search took ten times as long, about 8x measured with the
-        # pipeline overhead included, and the lookup takes 1.5-2x. 3 sits between the two.
+        # A RATIO rather than a time limit, so the machine's speed cancels out, and a ratio of the
+        # PER-ENTRY cost: ten times the units, the same entries. A per-entry search reads ~18x
+        # (planted and measured); the lookup reads 1.0-1.3x. 3 sits between the two.
         #
-        # The FASTEST of three runs at each size, interleaved. Noise on a shared runner only ever
-        # adds time, so the minimum is the closest reading of what the code costs. One run each
-        # read 4.4 on a Windows CI runner for code that measures 1.6-2.0 locally.
-        $entries = foreach ($i in 0..1999) { Entry -File "src/F$($i % 200).ps1" -Name "Invoke-U$i" }
-        $accept = foreach ($i in 0..1999) { @{ File = "src/F$($i % 200).ps1"; Unit = "Invoke-U$i"; Reason = 'r' } }
+        # It read 3.0 on a Linux CI runner for correct code, as the plain ratio of two run times,
+        # and two things in the fixture were adding to it -- both easy to reintroduce:
+        #  - The entries named units 0..1999, so at the small size nine in ten MISSED and returned
+        #    early. Every entry now names a unit present at both sizes, so each does the same work.
+        #  - The lookup is built once per call, which is linear in units and correct. Each size is
+        #    also timed with no entries and that subtracted, leaving only what each entry costs.
+        #
+        # The FASTEST of three runs of each, interleaved. Noise on a shared runner only ever adds
+        # time, so the minimum is the closest reading of what the code costs.
+        $entries = foreach ($i in 0..1999) { $j = $i % 220; Entry -File "src/F$($j % 200).ps1" -Name "Invoke-U$j" }
+        $accept = foreach ($i in 0..1999) { $j = $i % 220; @{ File = "src/F$($j % 200).ps1"; Unit = "Invoke-U$j"; Reason = 'r' } }
         $small = foreach ($i in 0..219) { Unit -File "src/F$($i % 200).ps1" -Name "Invoke-U$i" }
-        $large = foreach ($i in 0..2199) { Unit -File "src/F$($i % 200).ps1" -Name "Invoke-U$i" }
+        # The extra units go IN FRONT of the named ones: appended, a search that stops at its
+        # match never reaches them, and a planted per-entry search passed this test.
+        $large = @(foreach ($i in 0..1979) { Unit -File "src/F$($i % 200).ps1" -Name "Invoke-X$i" }) + $small
         # A stopwatch rather than Measure-Command: the analyzer cannot see a parameter used
         # inside a nested script block, and reports it unused.
         $time = {
-            param($Unit)
+            param($Unit, $Entry, $Accepted)
             $clock = [System.Diagnostics.Stopwatch]::StartNew()
-            $null = $entries | Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit $Unit -Accept @() -MaxCyclomatic 15 -MaxCognitive 15
-            $null = $accept | Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit $Unit -MaxCyclomatic 15 -MaxCognitive 15
+            $null = $Entry | Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit $Unit -Accept @() -MaxCyclomatic 15 -MaxCognitive 15
+            $null = $Accepted | Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit $Unit -MaxCyclomatic 15 -MaxCognitive 15
             return $clock.Elapsed.TotalMilliseconds
         }
-        $null = & $time $small  # warm-up, so neither side pays for compilation
-        $largeMs = [double]::MaxValue
-        $smallMs = [double]::MaxValue
+        $null = & $time $small $entries $accept  # warm-up, so neither side pays for compilation
+        $ms = @{ LargeAll = [double]::MaxValue; LargeNone = [double]::MaxValue; SmallAll = [double]::MaxValue; SmallNone = [double]::MaxValue }
         foreach ($round in 1..3) {
-            $largeMs = [Math]::Min($largeMs, (& $time $large))
-            $smallMs = [Math]::Min($smallMs, (& $time $small))
+            $ms.LargeAll = [Math]::Min($ms.LargeAll, (& $time $large $entries $accept))
+            $ms.LargeNone = [Math]::Min($ms.LargeNone, (& $time $large @() @()))
+            $ms.SmallAll = [Math]::Min($ms.SmallAll, (& $time $small $entries $accept))
+            $ms.SmallNone = [Math]::Min($ms.SmallNone, (& $time $small @() @()))
         }
-        $largeMs / $smallMs | Should-BeLessThan 3
+        ($ms.LargeAll - $ms.LargeNone) / ($ms.SmallAll - $ms.SmallNone) | Should-BeLessThan 3
     }
 }
 
