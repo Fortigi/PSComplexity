@@ -36,12 +36,24 @@ function Test-PSCxLogicalRunStart {
 
 function Get-PSCxCogIfRow {
     # if leading clause: 1 + nesting; each else-if and the else: +1 (no nesting bonus).
+    #
+    # One row per CLAUSE, each at its own line (#157). The chain used to be one row at the `if`
+    # carrying every clause's point, so -Detailed could not say which branch cost what. An
+    # elseif sits at its condition's line; the else at its block's, since the AST keeps no
+    # extent for the `else` keyword itself -- and `} else {` puts the two on one line.
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'IfStatementAst')) {
-        $extra = ($n.Clauses.Count - 1) + [int][bool]$n.ElseClause
-        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'if'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) + $extra }
+        $key = Get-PSCxUnitKey -Node $n
+        [pscustomobject]@{ Key = $key; Construct = 'if'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
+        # Clauses[0] is the if itself.
+        for ($i = 1; $i -lt $n.Clauses.Count; $i++) {
+            [pscustomobject]@{ Key = $key; Construct = 'elseif'; Line = $n.Clauses[$i].Item1.Extent.StartLineNumber; Amount = 1 }
+        }
+        if ($n.ElseClause) {
+            [pscustomobject]@{ Key = $key; Construct = 'else'; Line = $n.ElseClause.Extent.StartLineNumber; Amount = 1 }
+        }
     }
 }
 
@@ -178,7 +190,7 @@ function Get-PSCxCogMethodRecursionRow {
         if (-not $method) { continue }
         if ($n.Member.Value -ne $method.Name) { continue }
         if (Test-PSCxSelfInvocation -Node $n -Method $method) {
-            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'unknown'; Line = $n.Extent.StartLineNumber; Amount = 1 }
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Amount = 1 }
         }
     }
 }
