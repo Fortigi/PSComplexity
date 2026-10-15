@@ -74,6 +74,13 @@ decide it and SonarSource's own implementations disagree -- SonarC# charges it, 
 for an `if` -- so the choice and both implementations are now written down rather than left to be
 reported as a bug. Nothing about the scores changes.
 
+**`-Detailed` gives each clause of an `if` chain its own row, and names method recursion** (#157).
+An `if`/`elseif`/`else` chain was one row at the `if` line carrying every clause's point -- `if +4`
+-- so the breakdown could not say which branch cost what. Each `elseif` and the `else` is now its
+own `+1` row at its own line, construct `elseif` or `else`. A class method calling itself was
+reported as construct `unknown`; it is `recursion`, as a function calling itself already was.
+Every total is unchanged; only the rows that make it up are split and named.
+
 ## [0.5.2] - 2026-10-09
 
 ### For consumers

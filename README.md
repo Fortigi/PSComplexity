@@ -204,6 +204,10 @@ Three properties of the list are worth relying on:
 - **A decision-free unit gets an empty list, not a missing property.** Absent and empty are
   different answers, and iterating the property should not require telling them apart.
 
+Each clause of an `if` chain is its own row: the `if` with its nesting, then every `elseif` at
+its condition's line and the `else` at its block's, each +1. A chain therefore shows which branch
+costs what rather than landing on the `if` line as one lump.
+
 `Contributions` covers the **cognitive** score only; cyclomatic is a count of decision points
 and its total is already its own explanation.
 

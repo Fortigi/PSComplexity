@@ -133,6 +133,12 @@ Describe 'Cognitive complexity - class members' {
         Get-UnitCognitive -Code $code -Unit 'C.Walk' | Should-Be 2
     }
 
+    It 'labels method recursion as recursion, as function recursion is (#157)' {
+        # It said 'unknown' in -Detailed, the one construct with no name.
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput('class C { [int] Walk($o) { return $this.Walk($o.Next) } }', [ref]$null, [ref]$null)
+        (@(Get-PSCxCogMethodRecursionRow -Ast $ast | ForEach-Object Construct) -join ',') | Should-Be 'recursion'
+    }
+
     It 'counts a static method calling itself through the class name' {
         $code = 'class C { static [int] Helper($o) { if ($o) { return [C]::Helper($o.Next) } return 0 } }'
         Get-UnitCognitive -Code $code -Unit 'C.Helper' | Should-Be 2
@@ -349,6 +355,43 @@ function T {
         $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
         (@($map[$unit] | ForEach-Object { "$($_.Construct)@$($_.Line)+$($_.Amount)" }) -join ' ') |
             Should-Be 'block@3+1 boolean-run@4+1 if@4+2'
+    }
+
+    It 'gives each clause of an if chain its own row at its own line (#157)' {
+        # The chain used to be ONE row, if@3+4 here, so a reader could not see which branch
+        # cost what. Nested in a foreach, deliberately: only the if pays the nesting, and a
+        # flat fixture cannot tell 1 + 0 from 1 + nesting on the elseif and else rows.
+        $file = Join-Path ([System.IO.Path]::GetTempPath()) "cxchain-$([System.Guid]::NewGuid().ToString('N')).ps1"
+        Set-Content $file @'
+function T {
+    param($a, $xs)
+    foreach ($x in $xs) {
+        if ($a -eq 1) {
+            1
+        } elseif ($a -eq 2) {
+            2
+        } elseif ($a -eq 3) {
+            3
+        } else {
+            4
+        }
+    }
+}
+'@ -Encoding utf8
+        try {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$null, [ref]$null)
+            $map = Get-PSCxContributionMap -Row @(Get-PSCxCognitiveRow -Ast $ast)
+            $unit = @($map.Keys | Where-Object { $_ -notlike '<script-body>*' })[0]
+            (@($map[$unit] | ForEach-Object { "$($_.Construct)@$($_.Line)+$($_.Amount)" }) -join ' ') |
+                Should-Be 'block@3+1 if@4+2 elseif@6+1 elseif@8+1 else@10+1'
+        }
+        finally { Remove-Item $file -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'gives an if with no other clause exactly one row' {
+        # The other side of the loop above: an if alone must not grow an elseif or else row.
+        $ast = [System.Management.Automation.Language.Parser]::ParseInput('function T { param($a) if ($a) { 1 } }', [ref]$null, [ref]$null)
+        (@(Get-PSCxCogIfRow -Ast $ast | ForEach-Object Construct) -join ',') | Should-Be 'if'
     }
 
     It 'accounts for exactly the points the summed map reports' {
