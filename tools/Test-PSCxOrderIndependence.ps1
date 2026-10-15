@@ -90,6 +90,11 @@ $fault = Get-PSCxTestRunFault -FailedCount $result.FailedCount `
     -ContainerResult @($result.Containers | ForEach-Object { [string]$_.Result }) `
     -ContainerName @($result.Containers | ForEach-Object { Split-Path $_.Item -Leaf })
 if ($fault) {
+    # NAMED before the throw. The run is silent by design (Verbosity None), so without this a CI log
+    # says "1 test(s) failed" and nothing a reader can act on -- which is how #178 first failed.
+    foreach ($failed in $result.Failed) {
+        Write-Output ('[-] {0} :: {1}' -f $failed.ExpandedPath, ([string]$failed.ErrorRecord[0].Exception.Message -split "`n")[0])
+    }
     throw ("$fault This is the suite in REVERSE file order. If it passes alphabetically, the " +
         'failure is not in the test that reported it -- it is in what ran before it.')
 }
