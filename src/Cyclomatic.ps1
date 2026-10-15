@@ -100,10 +100,10 @@ function Get-PSCxCyclomaticMap {
         # collects its own.
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Row,
         # The unit table, built ONCE per file by the caller. Mandatory rather than optional with
-        # a fallback: Get-PSCxUnitTable is a full FindAll traversal invoking a PowerShell
-        # predicate per node, and it was run three times against the same AST in one pass. A
-        # fallback would leave a branch no test could ever distinguish from its own absence --
-        # both arms produce identical output, which is exactly the mutant this repo refuses.
+        # a fallback: it was once run three times against the same AST in one pass, each a full
+        # FindAll invoking a PowerShell predicate per node. It reads the index's buckets now
+        # (#155), but a fallback would still leave a branch no test could ever distinguish from
+        # its own absence -- both arms produce identical output, the mutant this repo refuses.
         [Parameter(Mandatory)] [hashtable]$UnitTable
     )
     $map = @{}
