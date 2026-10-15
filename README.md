@@ -634,6 +634,14 @@ the ones that do are attributed in the test suite.
 - Cognitive complexity is computed via ancestor-based nesting analysis; it reproduces the
   SonarSource reference scores. Mutual (indirect) recursion is not counted — only direct
   self-recursion, matching the common implementation.
+- **Some files cannot be parsed on some hosts, and are skipped with that reason rather than as a
+  syntax error.** A `workflow` cannot be parsed by PowerShell 7 at all. A DSC `Configuration`
+  cannot be parsed where the DSC schema store is missing, which is Linux by default; Windows parses
+  it. Either way the gate refuses the run, because it cannot vouch for a file it did not read.
+  Gate DSC configurations on Windows, or leave such files out of the path you gate on.
+- **Hidden files and dot-directories are measured, on every OS.** `.github/scripts/x.ps1` is
+  code like any other. Before 0.6.0, Linux skipped dot-names silently while Windows measured them,
+  so one tree gave two answers.
 
 ### PowerShell-specific increments
 

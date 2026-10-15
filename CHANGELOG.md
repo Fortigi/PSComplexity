@@ -103,6 +103,15 @@ exist, naming it and the likely cause. A deleted file is refused too: list chang
 `git diff --name-only --diff-filter=d`, as every example now does. Other entries, such as a
 deleted README, are not checked.
 
+**Hidden files and dot-directories are measured on every OS, and a host that cannot parse a file says
+so** (#161). On Linux, `-Recurse` skipped dot-directories and dot-files silently, so
+`.github/scripts/x.ps1` was measured on Windows and not on Linux: one tree, two answers. Both now
+measure it. **On Linux this can add units to a run**, and a unit over the ceiling there now fails
+the gate. A `workflow`, which PowerShell 7 cannot parse, and a DSC `Configuration` on a host
+without the DSC schema store (Linux by default) were skipped as "parse error", and the DSC one
+carried a whole .NET stack trace. Each is now named for what it is, in one line. The gate still
+refuses such a run.
+
 ## [0.5.2] - 2026-10-09
 
 ### For consumers
