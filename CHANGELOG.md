@@ -68,6 +68,12 @@ tree to find the units. The index pass now reads through indexers -- 51.8us a no
 file. A 28k-node file went from about 1.85s to 0.8s, and the module's own source from about 660ms
 to 360ms. Every score, unit and `-Detailed` contribution is unchanged.
 
+**The README now records how a construct in a condition is scored** (#156). `if ($x ? 1 : 2)`
+charges the ternary the `if`'s nesting, as one in its body would be. The specification does not
+decide it and SonarSource's own implementations disagree -- SonarC# charges it, SonarJava does not
+for an `if` -- so the choice and both implementations are now written down rather than left to be
+reported as a bug. Nothing about the scores changes.
+
 ## [0.5.2] - 2026-10-09
 
 ### For consumers
