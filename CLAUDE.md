@@ -46,7 +46,7 @@ CI (`.github/workflows/ci.yml`) runs:
 |---|---|
 | Lint | `tools/Invoke-PSCxAnalyzer.ps1` — **every severity**, and it throws. The same script code scanning and publish run |
 | CI parity | `tools/Test-PSCxCiParity.ps1` — the capabilities this repo and PSMutant both promise, checked over `.github/workflows/` |
-| PowerShell compatibility | `tools/Test-PSCxPowerShellCompatibility.ps1` — one leg per supported minor, 7.0 upward. Linux only |
+| PowerShell compatibility | `tools/Test-PSCxPowerShellCompatibility.ps1` — one leg per supported minor, 7.0 upward. Windows only -- see "A declared floor" |
 | Unit tests | whole `tests/` directory, 0 failures |
 | Order independence | `tools/Test-PSCxOrderIndependence.ps1` -- the same suite again, reversed, plus an environment comparison |
 | Complexity | **its own** `Test-PSComplexity` against `src/`, 15 / 15 per unit |
@@ -59,6 +59,11 @@ variable, or names a temp fixture after the process id, is then a test racing it
 `tests/` does either: no test writes `$env:`, and every fixture already carries a GUID. Both
 hazards bit PSMutant's own suite and had to be fixed there first, so this is a property to keep
 rather than one to assume.
+
+**If a leg goes inexplicably red straight after a local self-mutation run, suspect the installed
+Pester before the code.** A PSMutant run here once left Pester unable to run a trivial `1 + 1`
+test until it was reinstalled (PR #114). The bug is PSMutant's, open as Fortigi/PSMutant#156;
+remove this note when that closes.
 
 `Push-Location` is fine, checked rather than assumed: a location is per-runspace, and a child
 setting its own leaves both `$PWD` and `[Environment]::CurrentDirectory` alone in the parent.
@@ -384,7 +389,9 @@ Two subtleties worth knowing before touching `Ast.ps1`:
 - Branches: `feature/<name>` or `bugfixes/<name>`, PR into `main`. One issue per branch.
 - **Version**: bump `ModuleVersion` in `PSComplexity.psd1` in the PR; `publish.yml`
   refuses to publish when the git tag and `ModuleVersion` disagree. Update `ReleaseNotes`
-  in the same edit.
+  in the same edit. `tools/Test-PSCxRelease.ps1` checks the three agree -- `ModuleVersion`, the
+  CHANGELOG heading and `ReleaseNotes` -- which is CONSISTENCY, not completeness: an entry
+  nobody wrote is not something it can miss.
 - **Unless the change ships nothing, in which case it takes neither a bump nor a CHANGELOG
   entry.** `publish.yml` stages `PSComplexity.psd1`, `PSComplexity.psm1`, `src`, `schemas`,
   `LICENSE` and `README.md`. A branch touching only `.github/`, `tools/`, `tests/`, a config
@@ -518,15 +525,15 @@ and expensive to rebuild, and because each one has already earned its keep.
   module from inside every supported Pester, and `tools/Test-PSCxPowerShellCompatibility.ps1` proves
   the module loads and computes the same answers on every supported PowerShell.
 
-  **Do not cross them.** The product would be 12 x 6 legs to answer two questions, and it would
+  **Do not cross them.** The product would be 13 x 6 legs to answer two questions, and it would
   confound the second: Pester 6.2.0 does not load on PowerShell 7.0, so a PowerShell leg driven
   through Pester fails the floor for a reason that is not about this module. Nothing in `src/` calls
   a Pester API, which is what makes the direct assertions possible.
 
   **One leg per MINOR, and the middle is not interpolation.** `New-PesterConfiguration` arrived in
-  Pester 5.1.0 -- invisible at both ends of the range and fatal in between. The floor is tested at
-  the exact version promised, not the newest patch of that minor, because the floor is the number
-  consumers are told. A test ties the manifest's own `PowerShellVersion` to the list, so raising the
+  Pester 5.1.0 -- invisible at both ends of the range and fatal in between. Every leg, the floor's
+  included, is the newest patch of its minor (#120): a consumer does not install the `.0` when a
+  later patch exists. A test ties the manifest's own `PowerShellVersion` to the list, so raising the
   floor without adding a leg fails the suite.
 
   **Compare against the current host, not against numbers written in the gate.** A leg must
@@ -595,11 +602,11 @@ and expensive to rebuild, and because each one has already earned its keep.
   told; the real floor is whatever the newest API in `src/` needs, and they drift apart silently
   because nothing runs on the declared one.
 
-  **The floor is still asserted rather than proven**, and the obvious proof was tried and rejected:
-  `PSUseCompatibleTypes` against a 7.0 profile reports clean on `[System.DateOnly]`, `[System.Half]`
-  and `Get-Error` alike, so a clean result from it says nothing. A real proof needs a CI leg that
-  runs on the oldest supported host. Until then, when you add a `[Type]` to `src/`, check what
-  framework version it arrived in.
+  **The floor is proven by running on it** (#118): the first PowerShell compatibility leg is 7.0.
+  The static proof was tried first and rejected: `PSUseCompatibleTypes` against a 7.0 profile
+  reports clean on `[System.DateOnly]`, `[System.Half]` and `Get-Error` alike, so a clean result
+  from it says nothing. The leg runs only when the gate plan says so, so when you add a `[Type]` to
+  `src/`, still check what framework version it arrived in rather than wait for CI to say.
 
   What replaced the comparer is the guard that was always the real one: `tests/Ast.Tests.ps1` keeps
   two structurally identical trees apart. Verified it can fail -- swap the caches for a comparer
@@ -725,8 +732,8 @@ and expensive to rebuild, and because each one has already earned its keep.
 - **`Test-PSComplexity` is a thin predicate over `Measure-PSComplexity`, and should stay one.**
   It duplicates no measurement and re-parses nothing. The temptation is to make it return
   violation objects instead of a bool; resist it. Nothing in the backlog routes through it --
-  the queued features all build over `Measure-PSComplexity`'s records. What is missing is a
-  scan noun, not a richer verdict.
+  the queued features all build over `Measure-PSComplexity`'s records. Run-level facts went into
+  the scan (`Get-PSCxScan`, published through `-ReportPath`), not into a richer verdict.
 
 - **The construct vocabulary is closed against the parser, in both directions** (#32, #18).
   `tests/Vocabulary.Tests.ps1` asserts that every Ast type the parser can emit is either scored or
@@ -801,38 +808,21 @@ and expensive to rebuild, and because each one has already earned its keep.
   filter that would leave a required check pending forever. The parity rules refuse both a
   path-filtered `ci.yml` and one whose expensive steps ignore the plan.
 
-## Practices to adopt
+- **A test that pins an ABSENCE must also pin a presence in the same call** (#29, #34). A flat
+  `./src` once measured zero files, and the test pinning non-recursive scanning asserted only that
+  a nested unit was missing -- so it passed over nothing and certified the bug. When a test says
+  "X is excluded", it also asserts something else was included.
 
-Gaps, stated as rules rather than as a backlog. Each points at its issue, and moves up to the
-list above in the PR that closes it.
+- **A number anyone persists carries a version** (#20). `$script:PSCxMetricVersion` in
+  `src/Scan.ps1` is stamped on every record, report and baseline, and moves whenever a score can
+  change for source that did not. A baseline from another version is refused rather than
+  compared, because an unversioned metric re-baselines everything on upgrade, silently.
 
-- **Discovery must be proven, not assumed** (#29, #34). `-Include` without `-Recurse` matches
-  nothing, and `-Path` wildcard-parses a `[` in a directory name -- so a flat `./src` can
-  measure zero files and report success. The test that should have caught it asserts only an
-  absence and passes vacuously. When a test pins "X is excluded", it must also assert that
-  something else was **included** in the same call, or it certifies whatever the code happens
-  to do.
+- **An identity has to survive a commit and a machine** (#14). `File` is relative to the working
+  directory with forward slashes, never absolute or platform-separated, and the policy key is
+  `File` and `Unit` as two fields -- see the Layout section for why the unit name and not the line.
 
-- **A gate must refuse to measure nothing** (#15). "No unit exceeded a ceiling" and "no unit
-  existed" must never produce the same answer. `tests/SelfComplexity.Tests.ps1` already guards
-  this before calling the gate, which is the tell: the check exists, in the test, rather than
-  in the command every consumer calls.
-
-- **A number that anyone persists needs a version** (#20). Scores already moved once under a
-  minor bump with nothing recording it. A committed baseline compares two runs, so an
-  unversioned metric re-baselines everything at once on upgrade -- silently.
-
-- **An identity has to survive a commit and a machine** (#14). `Unit` is stable and not unique;
-  `Unit` + `Line` is unique and moves whenever anything above it is edited; `File` is absolute
-  and platform-separated while CI runs two OSes. Any feature that persists or compares records
-  needs an identity with neither property.
-
-- **Every gate is a committed script, not a snippet in a document** (#27). Coverage is claimed
-  at 100% in this file and measured by nobody -- the recipe lives in prose, so measuring by
-  hand and measuring in CI cannot even be compared. Hand-maintained figures in this repo have
-  already drifted.
-
-- **Anything the module says about itself is a claim someone should be able to check** (#28).
-  Five statements in the docs are not true of the code, two of them provably: load order is
-  inert, and the closure requirement above. Prefer a test to a sentence wherever one is
-  possible.
+- **Every gate is a committed script, and a figure in prose is one nobody checks** (#27, #28).
+  Coverage was claimed here at 100% long before anything measured it; it is
+  `tools/Measure-PSCxCoverage.ps1` now. Where a sentence states something checkable -- the pins
+  above are the example -- a test in `tests/Release.Tests.ps1` holds it to the source.
