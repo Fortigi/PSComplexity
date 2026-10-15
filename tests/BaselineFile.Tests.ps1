@@ -11,6 +11,9 @@
 # neither the coverage gate nor the mutation gate can tell the difference.
 
 BeforeAll {
+    # The comparison a real run makes on this platform's usual file system. Tests about case
+    # pass both values explicitly instead (#151).
+    $script:PathCmp = $IsLinux ? [System.StringComparison]::Ordinal : [System.StringComparison]::OrdinalIgnoreCase
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
     # Every src file, discovered rather than listed. A hand-kept list here is a second copy
     # of the one in PSComplexity.psm1, and this is the copy that goes stale -- a file
@@ -48,14 +51,14 @@ Describe 'Get-PSCxBaselineState' {
         # alone passes against a null return -- and that mutant survived until this line existed.
         # It matters because the result is handed to a [hashtable] parameter that rejects null,
         # so a null here fails the ordinary no-baseline run rather than this test.
-        $m = Get-PSCxBaselineState -Path '' -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
+        $m = Get-PSCxBaselineState -PathComparison $script:PathCmp -Path '' -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
         ($m -is [hashtable]) | Should-BeTrue
         $m.Count | Should-Be 0
     }
 
     It 'returns a lookup over a baseline that describes the run' {
         $p = Baseline -Units @(Entry)
-        $m = Get-PSCxBaselineState -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
+        $m = Get-PSCxBaselineState -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
         $m.Count | Should-Be 1
     }
 
@@ -64,7 +67,7 @@ Describe 'Get-PSCxBaselineState' {
         # error quoting its left operand, which contains every earlier phrase -- so an assertion
         # on one of those matches the very failure it exists to detect.
         $p = Baseline -Units @() -Metric 99
-        { Get-PSCxBaselineState -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
+        { Get-PSCxBaselineState -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
             Should-Throw -ExceptionMessage '*Cannot use the baseline*metric version 99*review the diff*'
     }
 
@@ -72,21 +75,21 @@ Describe 'Get-PSCxBaselineState' {
         # A stale entry is a fault in the policy, not a complaint about the code. Returned as a
         # failing gate it would send somebody to refactor a unit that is fine.
         $p = Baseline -Units @(Entry -Name 'Ghost')
-        { Get-PSCxBaselineState -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
+        { Get-PSCxBaselineState -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
             Should-Throw -ExceptionMessage '*no such unit was measured*ageing quietly*'
     }
 
     It 'reports every fault at once, not just the first' {
         # Fixing a stale baseline should cost one round trip rather than one per entry.
         $p = Baseline -Units @((Entry -Name 'Ghost'), (Entry -Name 'Phantom'))
-        { Get-PSCxBaselineState -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
+        { Get-PSCxBaselineState -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
             Should-Throw -ExceptionMessage '*Ghost*Phantom*'
     }
 
     It 'accepts a baseline with no entries at all' {
         # Paired with the refusals above: an empty baseline is a legitimate state -- everything
         # was fixed -- and refusing it would make the last cleanup fail the build.
-        (Get-PSCxBaselineState -Path (Baseline -Units @()) -Unit @(Unit) -Accept @() `
+        (Get-PSCxBaselineState -PathComparison $script:PathCmp -Path (Baseline -Units @()) -Unit @(Unit) -Accept @() `
                 -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1).Count | Should-Be 0
     }
 }
@@ -96,7 +99,7 @@ Describe 'Write-PSCxBaselineFile' {
         # The ordinary first run. Treating absence as an error would make the switch unusable for
         # the one job it exists to do.
         $p = NewPath
-        Write-PSCxBaselineFile -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
+        Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
         $doc = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
         @($doc.units).Count | Should-Be 1
         $doc.units[0].unit | Should-Be 'Invoke-Thing'
@@ -105,7 +108,7 @@ Describe 'Write-PSCxBaselineFile' {
 
     It 'lowers an entry whose unit improved' {
         $p = Baseline -Units @(Entry -Cyc 40 -Cog 50)
-        Write-PSCxBaselineFile -Path $p -Unit @(Unit -Cyc 20 -Cog 30) -Accept @() `
+        Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @(Unit -Cyc 20 -Cog 30) -Accept @() `
             -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
         $doc = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
         $doc.units[0].cyclomatic | Should-Be 20
@@ -115,7 +118,7 @@ Describe 'Write-PSCxBaselineFile' {
     It 'refuses to record a unit worse than the file already does' {
         # The whole ratchet, and the paired half of the case above: down is allowed, up is not.
         $p = Baseline -Units @(Entry -Cyc 20 -Cog 30)
-        { Write-PSCxBaselineFile -Path $p -Unit @(Unit -Cyc 21 -Cog 30) -Accept @() `
+        { Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @(Unit -Cyc 21 -Cog 30) -Accept @() `
                 -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
             Should-Throw -ExceptionMessage '*worse than recorded*only ever ratchets down*'
     }
@@ -126,7 +129,7 @@ Describe 'Write-PSCxBaselineFile' {
         $p = Baseline -Units @(Entry -Cyc 20 -Cog 30)
         $before = Get-Content -LiteralPath $p -Raw
         try {
-            Write-PSCxBaselineFile -Path $p -Unit @(Unit -Cyc 21 -Cog 30) -Accept @() `
+            Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @(Unit -Cyc 21 -Cog 30) -Accept @() `
                 -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
         }
         catch { $null = $_ }
@@ -138,7 +141,7 @@ Describe 'Write-PSCxBaselineFile' {
         # different question, so they are neither larger nor smaller. Refusing would leave no way
         # forward at all.
         $p = Baseline -Units @(Entry -Cyc 1 -Cog 1) -Metric 99
-        Write-PSCxBaselineFile -Path $p -Unit @(Unit -Cyc 20 -Cog 30) -Accept @() `
+        Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @(Unit -Cyc 20 -Cog 30) -Accept @() `
             -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
         $doc = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
         $doc.metricVersion | Should-Be 1
@@ -147,7 +150,7 @@ Describe 'Write-PSCxBaselineFile' {
 
     It 'regenerates wholesale across a schema version change' {
         $p = Baseline -Units @(Entry -Cyc 1 -Cog 1) -Schema 99
-        Write-PSCxBaselineFile -Path $p -Unit @(Unit -Cyc 20 -Cog 30) -Accept @() `
+        Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @(Unit -Cyc 20 -Cog 30) -Accept @() `
             -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
         (Get-Content -LiteralPath $p -Raw | ConvertFrom-Json).schemaVersion | Should-Be 1
     }
@@ -156,13 +159,13 @@ Describe 'Write-PSCxBaselineFile' {
         # An entry for an accepted unit permits nothing, and would fail the very next run.
         $p = NewPath
         $acc = @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' })
-        Write-PSCxBaselineFile -Path $p -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
+        Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
         @((Get-Content -LiteralPath $p -Raw | ConvertFrom-Json).units).Count | Should-Be 0
     }
 
     It 'leaves a compliant unit out of the file' {
         $p = NewPath
-        Write-PSCxBaselineFile -Path $p -Unit @(Unit -Cyc 1 -Cog 1) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
+        Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @(Unit -Cyc 1 -Cog 1) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
         @((Get-Content -LiteralPath $p -Raw | ConvertFrom-Json).units).Count | Should-Be 0
     }
 
@@ -170,7 +173,7 @@ Describe 'Write-PSCxBaselineFile' {
         # A NEW violation is not a regression against a recorded number, because there is no
         # recorded number. Treated as one, seeding a baseline would be impossible.
         $p = Baseline -Units @(Entry -Name 'Other' -Cyc 20 -Cog 30)
-        Write-PSCxBaselineFile -Path $p -Unit @((Unit -Name 'Other'), (Unit -Name 'Fresh')) -Accept @() `
+        Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @((Unit -Name 'Other'), (Unit -Name 'Fresh')) -Accept @() `
             -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1
         $doc = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
         (($doc.units.unit | Sort-Object) -join ',') | Should-Be 'Fresh,Other'

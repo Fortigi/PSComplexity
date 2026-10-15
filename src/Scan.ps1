@@ -78,6 +78,140 @@ function Get-PSCxWorkingRoot {
     return (Get-Location).ProviderPath
 }
 
+function Get-PSCxPathComparison {
+    # How to compare two file paths: exactly, or ignoring case. Pure; the question of WHICH is
+    # answered by the file system, in Get-PSCxRunPathComparison below.
+    [OutputType([System.StringComparison])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [bool]$CaseSensitive)
+    if ($CaseSensitive) { return [System.StringComparison]::Ordinal }
+    return [System.StringComparison]::OrdinalIgnoreCase
+}
+
+function Test-PSCxExactEntry {
+    # Whether a directory holds an entry spelled exactly so. Not Test-Path: on a case-insensitive
+    # directory that answers yes for any casing, which is the question being asked, not the answer.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Directory,
+        [Parameter(Mandatory)] [string]$Name
+    )
+    foreach ($entry in [System.IO.Directory]::EnumerateFileSystemEntries($Directory)) {
+        if ([System.IO.Path]::GetFileName($entry) -ceq $Name) { return $true }
+    }
+    return $false
+}
+
+function Test-PSCxEntryExist {
+    # Whether a name resolves to anything, file or directory, by the file system's own lookup.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string]$Path)
+    return [System.IO.File]::Exists($Path) -or [System.IO.Directory]::Exists($Path)
+}
+
+function Test-PSCxCaseSensitiveDirectory {
+    # Whether this directory tells names apart by case: $true, $false, or $null when nothing in it
+    # can answer. Asked of the FILE SYSTEM, not the platform (#151): Windows PowerShell reaching a
+    # WSL project through \\wsl.localhost is on Windows and on a case-sensitive file system, and
+    # Windows can mark any directory case-sensitive -- a clone made inside one inherits it.
+    #
+    # One existing name, looked up with its case flipped; nothing is written. Not found: the
+    # directory is case-sensitive. Found: it is not -- unless the flipped spelling is an entry of
+    # its own, which only a case-sensitive directory can hold.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string]$Path)
+    foreach ($entry in [System.IO.Directory]::EnumerateFileSystemEntries($Path)) {
+        $name = [System.IO.Path]::GetFileName($entry)
+        $flipped = $name.ToUpperInvariant()
+        if ($flipped -ceq $name) { $flipped = $name.ToLowerInvariant() }
+        # A name with no cased letter in it (123.ps1) cannot be flipped; try the next one.
+        if ($flipped -ceq $name) { continue }
+        return (-not (Test-PSCxEntryExist -Path (Join-Path $Path $flipped))) -or
+            (Test-PSCxExactEntry -Directory $Path -Name $flipped)
+    }
+    return $null
+}
+
+function Get-PSCxRunPathComparison {
+    # How THIS run compares file paths: as the working directory's file system does. Every File
+    # is relative to it and every baseline, acceptance and -ChangedFile list describes it, so one
+    # answer serves the whole run and every identity in it agrees.
+    #
+    # The platform only when the directory cannot say (nothing in it has a cased letter) -- the
+    # assumption .NET makes: Linux case-sensitive, Windows and macOS not. A parameter rather than
+    # $IsLinux in the body, so both answers are testable on the one platform the self-mutation
+    # gate runs on.
+    [OutputType([System.StringComparison])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Root,
+        [bool]$Fallback = $IsLinux
+    )
+    $probed = Test-PSCxCaseSensitiveDirectory -Path $Root
+    $caseSensitive = ($null -eq $probed) ? $Fallback : $probed
+    return Get-PSCxPathComparison -CaseSensitive $caseSensitive
+}
+
+function Test-PSCxSameEntry {
+    # Whether two paths that differ only in case reach the same file. Asked of each directory on
+    # the way down, not of the run: a case-sensitive folder can sit inside a case-insensitive
+    # tree, and only that folder knows it holds two entries where the run sees one name.
+    #
+    # Different exactly where some directory holds BOTH spellings as entries of their own. A
+    # spelling that is not an entry is the other one reached by a case-insensitive lookup.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Path,
+        [Parameter(Mandatory)] [string]$Other
+    )
+    # The root (C:\, \\server\share, /) is not a directory entry, and on every file system that
+    # has letters in it, it ignores case.
+    $parent = [System.IO.Path]::GetPathRoot($Path)
+    $mine = $Path.Substring($parent.Length).Split([System.IO.Path]::DirectorySeparatorChar)
+    $theirs = $Other.Substring([System.IO.Path]::GetPathRoot($Other).Length).Split([System.IO.Path]::DirectorySeparatorChar)
+    for ($i = 0; $i -lt $mine.Count; $i++) {
+        if ($mine[$i] -cne $theirs[$i] -and (Test-PSCxExactEntry -Directory $parent -Name $mine[$i]) -and
+            (Test-PSCxExactEntry -Directory $parent -Name $theirs[$i])) { return $false }
+        $parent = Join-Path $parent $mine[$i]
+    }
+    return $true
+}
+
+function Get-PSCxCaseTwinScan {
+    # A file the seen set refused: nothing when it is a file already measured, a SKIP when it is a
+    # different file whose name differs only in case.
+    #
+    # That second case is a case-sensitive folder inside a run that compares ignoring case. Both
+    # are real, but every identity in the run -- baseline, acceptance, -ChangedFile -- would key
+    # them as one, so measuring both would be as wrong as dropping one. Dropping one silently is
+    # how a gate passed over code it never read (#151); a skip is refused by the gate and says
+    # what to do.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$File,
+        [Parameter(Mandatory)] [System.Collections.Generic.HashSet[string]]$Seen,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+    )
+    $stored = $null
+    [void]$Seen.TryGetValue($File, [ref]$stored)
+    if ($stored -ceq $File -or (Test-PSCxSameEntry -Path $File -Other $stored)) { return }
+    $root = Get-PSCxWorkingRoot
+    $twin = Get-PSCxRelativePath -Path $stored -Root $root -PathComparison $PathComparison
+    return [pscustomobject]@{
+        File       = Get-PSCxRelativePath -Path $File -Root $root -PathComparison $PathComparison
+        Units      = @()
+        SkipReason = ("differs only in case from $twin. Both are files -- their folder is " +
+            'case-sensitive -- but the working directory is not, so a baseline, an acceptance ' +
+            'or -ChangedFile could not tell them apart. Rename one, or run from a ' +
+            'case-sensitive directory')
+    }
+}
+
 function Get-PSCxRelativePath {
     # A path two machines can agree on.
     #
@@ -99,7 +233,10 @@ function Get-PSCxRelativePath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$Path,
-        [Parameter(Mandatory)] [string]$Root
+        [Parameter(Mandatory)] [string]$Root,
+        # Whether a path is under Root is a question about the file system's names: on a
+        # case-sensitive one /REPO is not /repo (#151).
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
     )
     # A RELATIVE Path resolves against Root, not against the working directory. GetFullPath
     # alone silently uses the CWD, so the function only gave the right answer while its one
@@ -115,7 +252,7 @@ function Get-PSCxRelativePath {
     }
     # Outside the root, keep the full path. A ../../ chain says less than the absolute path
     # does and is no more portable, so pretending would only hide where the file came from.
-    if (-not $full.StartsWith($rootFull, (Get-PSCxPathComparison))) {
+    if (-not $full.StartsWith($rootFull, $PathComparison)) {
         return $full.Replace([System.IO.Path]::DirectorySeparatorChar, '/')
     }
     return $full.Substring($rootFull.Length).Replace([System.IO.Path]::DirectorySeparatorChar, '/')
@@ -130,8 +267,8 @@ function Get-PSCxChangedSet {
     # function is what makes 'src/A.ps1', './src/A.ps1', 'src\A.ps1' and an absolute path the same
     # entry.
     #
-    # Compared as the platform's file system compares names (Get-PSCxPathComparer): on Linux
-    # 'src/a.ps1' is not 'src/A.ps1', and a list naming one must not select the other (#151).
+    # Compared as the run's file system compares names: where it is case-sensitive 'src/a.ps1' is
+    # not 'src/A.ps1', and a list naming one must not select the other (#151).
     [OutputType([System.Collections.Generic.HashSet[string]])]
     [CmdletBinding()]
     param(
@@ -140,12 +277,13 @@ function Get-PSCxChangedSet {
         # as a trailing line. Without it the blank-skipping below is unreachable and the caller
         # gets a binding error instead.
         [Parameter(Mandatory)] [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ChangedFile,
-        [Parameter(Mandatory)] [string]$Root
+        [Parameter(Mandatory)] [string]$Root,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
     )
-    $set = [System.Collections.Generic.HashSet[string]]::new((Get-PSCxPathComparer))
+    $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::FromComparison($PathComparison))
     foreach ($f in $ChangedFile) {
         if ([string]::IsNullOrWhiteSpace($f)) { continue }
-        [void]$set.Add((Get-PSCxRelativePath -Path $f.Trim() -Root $Root))
+        [void]$set.Add((Get-PSCxRelativePath -Path $f.Trim() -Root $Root -PathComparison $PathComparison))
     }
     # -NoEnumerate, because a HashSet is enumerable and PowerShell unrolls it on the way out: an
     # empty one becomes $null and a one-element one becomes the STRING it holds -- both of which
@@ -391,6 +529,7 @@ function Get-PSCxFileScan {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)] [string]$File,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
         [switch]$Detailed
     )
     $errors = $null
@@ -402,7 +541,7 @@ function Get-PSCxFileScan {
     # Relative to where the caller is standing, which for a repo-scoped run is the repo. Not a
     # parameter: a root nobody passes is a root nobody gets wrong. Resolved for BOTH arms, so a
     # skipped file is named the same way a measured one is.
-    $relative = Get-PSCxRelativePath -Path $File -Root (Get-PSCxWorkingRoot)
+    $relative = Get-PSCxRelativePath -Path $File -Root (Get-PSCxWorkingRoot) -PathComparison $PathComparison
     if ($errors) {
         # The FIRST error. Later ones are usually cascade from it, and a skip that does not say
         # why is the one thing the reason string exists to prevent.
@@ -488,6 +627,8 @@ function Get-PSCxPathScan {
         # filter was asked for" are different answers -- so the public commands refuse an empty
         # list rather than passing one down.
         [System.Collections.Generic.HashSet[string]]$ChangedSet,
+        # The run's, and the one -Seen was built with -- the caller holds both.
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
         [switch]$Recurse,
         [switch]$Detailed
     )
@@ -501,15 +642,18 @@ function Get-PSCxPathScan {
             continue
         }
         foreach ($file in $files) {
-            # The path comparer: Windows and macOS reach one file under two casings, which must
-            # count once; on Linux two casings are two files, and skipping the second dropped it
-            # without a word while the gate passed (#151).
-            if (-not $Seen.Add($file)) { continue }
+            # Compared as the run's file system compares names: where it ignores case, one file
+            # reached under two casings counts once. A refusal is not dropped unexamined, though
+            # -- skipping it without a word let a gate pass over code it never read (#151).
+            if (-not $Seen.Add($file)) {
+                Get-PSCxCaseTwinScan -File $file -Seen $Seen -PathComparison $PathComparison
+                continue
+            }
             # BEFORE the parse, so a diff-scoped run over a large tree does not read every file
             # only to throw most of them away. The verdict is identical either way; the cost is
             # not, and cost is most of why anyone asks for a diff-scoped run.
             if ($null -ne $ChangedSet -and
-                -not $ChangedSet.Contains((Get-PSCxRelativePath -Path $file -Root $root))) { continue }
+                -not $ChangedSet.Contains((Get-PSCxRelativePath -Path $file -Root $root -PathComparison $PathComparison))) { continue }
             # BEFORE the parse, not after. A line written afterwards names files that are
             # already done, so a scan stuck on one file looks exactly like a scan that has
             # finished -- which is the whole complaint. Named here, the last line printed IS
@@ -519,7 +663,7 @@ function Get-PSCxPathScan {
             # CI gate calls, and a gate that chatters gets its output filtered, which takes
             # the parse errors with it.
             Write-Verbose "Measuring $file"
-            Get-PSCxFileScan -File $file -Detailed:$Detailed
+            Get-PSCxFileScan -File $file -PathComparison $PathComparison -Detailed:$Detailed
         }
     }
 }
@@ -549,16 +693,19 @@ function Get-PSCxScan {
     $units = [System.Collections.Generic.List[object]]::new()
     $skipped = [System.Collections.Generic.List[object]]::new()
     $unmatched = [System.Collections.Generic.List[object]]::new()
-    $seen = [System.Collections.Generic.HashSet[string]]::new((Get-PSCxPathComparer))
     $root = Get-PSCxWorkingRoot
+    # Read once from the working directory's file system and recorded below, so the gate keys
+    # its baseline and acceptances by the same rule the scan used to tell files apart.
+    $pathComparison = Get-PSCxRunPathComparison -Root $root
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::FromComparison($pathComparison))
     # $null when no filter was asked for, which is what tells the walk to read everything. Built
     # from $PSBoundParameters rather than from the value, so an explicitly empty list is
     # distinguishable from an absent one -- the public commands refuse the first.
     $changedSet = $null
     if ($PSBoundParameters.ContainsKey('ChangedFile')) {
-        $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root $root
+        $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root $root -PathComparison $pathComparison
     }
-    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -Recurse:$Recurse -Detailed:$Detailed)) {
+    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -PathComparison $pathComparison -Recurse:$Recurse -Detailed:$Detailed)) {
         if ($fileScan.SkipReason) {
             $skipped.Add([pscustomobject]@{ File = $fileScan.File; Reason = $fileScan.SkipReason })
             continue
@@ -588,6 +735,9 @@ function Get-PSCxScan {
             ChangedFile = $changed
         }
         MetricVersion = $script:PSCxMetricVersion
+        # How this run compared file paths. A fact about the run, read by the gate: a baseline keyed
+        # by a different rule than the scan used would match the wrong units or none.
+        PathComparison = $pathComparison
     }
 }
 

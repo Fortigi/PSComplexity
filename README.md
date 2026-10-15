@@ -126,10 +126,17 @@ caller. A green gate over a path that does not exist is the exact failure this m
 | `Cognitive` | `[int]` | |
 | `MetricVersion` | `[int]` | which metric produced these numbers |
 
-A `File` is compared the way the platform's file system compares names: **case-sensitively on
-Linux**, ignoring case on Windows and macOS. That covers measuring, `-ChangedFile`, `-Accept` and
-the baseline alike, so on Linux `src/A.ps1` and `src/a.ps1` are two files, both measured and each
-with its own entries. A `Unit` name always ignores case, as PowerShell does.
+A `File` is compared the way the **working directory's file system** compares names: read once per
+run by looking up an existing name with its case flipped. So a project on Linux, inside WSL (even
+from Windows PowerShell, through `\\wsl.localhost`) or in a case-sensitive Windows directory is
+compared case-sensitively, and `src/A.ps1` and `src/a.ps1` are two files, both measured and each
+with its own entries. That one rule covers measuring, `-ChangedFile`, `-Accept` and the baseline
+alike. Only when the directory holds no name with a letter in it does the platform decide: Linux
+case-sensitive, Windows and macOS not. A `Unit` name always ignores case, as PowerShell does.
+
+A case-sensitive folder *inside* a case-insensitive project is the one case the run cannot key: two
+files there differing only in case would be one entry in any baseline. Neither is dropped -- the
+second is reported as skipped, naming the first, and the gate refuses the run until one is renamed.
 
 `MetricVersion` increments whenever a score can change for source that did not -- a narrower
 rule than the module version, so a bug fix that only affects messages, or a new field on this
