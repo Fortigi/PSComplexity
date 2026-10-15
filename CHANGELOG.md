@@ -5,6 +5,18 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-10-15
+
+### For consumers
+
+**A large baseline no longer slows the gate down** (#153). Each baseline entry and each acceptance
+was checked by searching the whole list of measured units, so the check took entries x units: a
+2,000-entry baseline over 2,200 units took a gate from 9 seconds to 31. The units are now indexed
+once per run and each entry is a single lookup -- measured on that size, 12.3 seconds of checking
+becomes 0.3.
+
+Matching is unchanged: file and unit, ignoring case. No score moves and no command changed.
+
 ## [0.5.2] - 2026-10-09
 
 ### For consumers
