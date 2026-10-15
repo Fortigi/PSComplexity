@@ -59,6 +59,33 @@ Describe 'Get-PSCxConsumerNotes' {
     }
 }
 
+Describe 'the real CHANGELOG, as the gallery will see it' {
+    # The consumer block becomes the manifest's ReleaseNotes, which the gallery prints as text.
+    # An issue reference there renders as "(#159)" pointing nowhere -- 0.6.0 carried sixteen of
+    # them before this test. The sibling module's release tests hold the same rule.
+    BeforeAll {
+        $root = Split-Path -Parent $PSScriptRoot
+        $version = (Import-PowerShellDataFile (Join-Path $root 'PSComplexity.psd1')).ModuleVersion
+        $script:RealConsumer = Get-PSCxConsumerNotes -Lines (Get-Content (Join-Path $root 'CHANGELOG.md')) -Version $version
+    }
+
+    It 'has a consumer block for the version in the manifest' {
+        Should-NotBeNull -Actual $script:RealConsumer
+    }
+
+    It 'carries no issue reference a gallery reader cannot follow' {
+        # Not preceded by a word character or a backtick, so a unit ordinal written as code --
+        # `Get-Thing#1` -- is left alone. Every match is listed, so the failure names them.
+        $refs = @([regex]::Matches($script:RealConsumer, '(?<![\w`])#\d+') | ForEach-Object Value)
+        ($refs -join ', ') | Should-Be ''
+    }
+
+    It 'would catch one, so the check above is not vacuous' {
+        $planted = 'A fix (#159). And `Get-Thing#1` is code.'
+        @([regex]::Matches($planted, '(?<![\w`])#\d+') | ForEach-Object Value) -join ',' | Should-Be '#159'
+    }
+}
+
 Describe 'Get-PSCxExpectedReleaseNotes' {
     It 'prefixes the version and appends the link' {
         Get-PSCxExpectedReleaseNotes -Version '1.2.3' -Notes 'A thing.' -DetailUrl 'https://x/CHANGELOG.md' |
