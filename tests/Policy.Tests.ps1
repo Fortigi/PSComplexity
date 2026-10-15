@@ -220,10 +220,10 @@ Describe 'Get-PSCxAcceptanceFault' {
         # The -and in that guard: over on one metric and under on the other is still a breach,
         # so the acceptance is still doing work and must not be called stale.
         #
-        # BOTH directions, because each half of that guard reads a different index into the
-        # matched units and only one of the two is exercised by either case. Written with only
-        # the cyclomatic case, a mutant that replaced the cognitive lookup with an out-of-range
-        # index -- which yields $null, and $null -le 15 is $true -- survived the whole suite.
+        # BOTH directions, because each half of that guard reads a different score and only one
+        # of the two is exercised by either case. Written with only the cyclomatic case, a mutant
+        # that broke the cognitive read -- yielding $null, and $null -le 15 is $true -- survived
+        # the whole suite.
         @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' } |
                 Get-PSCxAcceptanceFault -Unit @(Unit -Cyc 16 -Cog 1) -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 0
@@ -307,8 +307,8 @@ Describe 'Get-PSCxBaselineFault' {
     }
 
     It 'does not treat an acceptance for a DIFFERENT unit in the same file as a clash' {
-        # The -and in that lookup. With -or, any acceptance anywhere in the same file would count
-        # as excusing this unit, and its entry would be deleted as redundant.
+        # Both halves of the identity. Matching on the file alone, any acceptance anywhere in the
+        # same file would count as excusing this unit, and its entry would be deleted as redundant.
         $acc = @(@{ File = 'src/A.ps1'; Unit = 'Something-Else'; Reason = 'r' })
         @(Entry | Get-PSCxBaselineFault -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 0
@@ -328,6 +328,63 @@ Describe 'Get-PSCxBaselineFault' {
     It 'passes the score rules on to the score fault' {
         (Entry -Cyc 20 -Cog 30 | Get-PSCxBaselineFault -Unit @(Unit -Cyc 19 -Cog 30) -Accept @() `
                 -MaxCyclomatic 15 -MaxCognitive 15) | Should-BeLikeString '*improved to cyclomatic*'
+    }
+}
+
+Describe 'Get-PSCxPolicyLookup' {
+    It 'finds a unit by file and unit, ignoring case as the -eq it replaced did' {
+        $lookup = Get-PSCxPolicyLookup -Record @((Unit), (Unit -Name 'Other' -Cyc 3))
+        $found = $null
+        $lookup.TryGetValue((Get-PSCxPolicyKey -File 'SRC/a.ps1' -Unit 'invoke-thing'), [ref]$found) | Should-BeTrue
+        $found.Cyclomatic | Should-Be 20
+        $lookup.Count | Should-Be 2
+    }
+
+    It 'keys an acceptance, which is a hashtable, the same way' {
+        $lookup = Get-PSCxPolicyLookup -Record @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' })
+        $lookup.ContainsKey((Get-PSCxPolicyKey -File 'src/A.ps1' -Unit 'Invoke-Thing')) | Should-BeTrue
+    }
+
+    It 'is an empty lookup over no records, not nothing' {
+        (Get-PSCxPolicyLookup -Record @()).Count | Should-Be 0
+    }
+}
+
+Describe 'Policy checks over many entries' {
+    # Each check pipes its entries one at a time, and the unit list is built into a lookup ONCE
+    # in begin. Searched per entry instead it cost entries x units: a 2,000-entry baseline took
+    # a gate from 9s to 31s (#153).
+
+    It 'answers each piped entry against the same lookup' {
+        # Two entries through one pipeline: the lookup built in begin must serve both, and each
+        # gets its own answer rather than the first one's.
+        $faults = @((Entry), (Entry -Name 'Ghost') |
+                Get-PSCxBaselineFault -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15)
+        $faults.Count | Should-Be 1
+        $faults[0] | Should-BeLikeString '*Ghost is recorded but no such unit*'
+    }
+
+    It 'takes time that does not grow with the number of units per entry' {
+        # A RATIO rather than a time limit, so the machine's speed cancels out. Ten times the
+        # units: the per-entry search took ten times as long, about 8x measured with the
+        # pipeline overhead included, and the lookup takes about the same. 3 sits between the two
+        # with room for noise on a busy runner.
+        $entries = foreach ($i in 0..1999) { Entry -File "src/F$($i % 200).ps1" -Name "Invoke-U$i" }
+        $accept = foreach ($i in 0..1999) { @{ File = "src/F$($i % 200).ps1"; Unit = "Invoke-U$i"; Reason = 'r' } }
+        $small = foreach ($i in 0..219) { Unit -File "src/F$($i % 200).ps1" -Name "Invoke-U$i" }
+        $large = foreach ($i in 0..2199) { Unit -File "src/F$($i % 200).ps1" -Name "Invoke-U$i" }
+        # A stopwatch rather than Measure-Command: the analyzer cannot see a parameter used
+        # inside a nested script block, and reports it unused.
+        $time = {
+            param($Unit)
+            $clock = [System.Diagnostics.Stopwatch]::StartNew()
+            $null = $entries | Get-PSCxBaselineFault -Unit $Unit -Accept @() -MaxCyclomatic 15 -MaxCognitive 15
+            $null = $accept | Get-PSCxAcceptanceFault -Unit $Unit -MaxCyclomatic 15 -MaxCognitive 15
+            return $clock.Elapsed.TotalMilliseconds
+        }
+        $null = & $time $small  # warm-up, so neither side pays for compilation
+        $ratio = (& $time $large) / (& $time $small)
+        $ratio | Should-BeLessThan 3
     }
 }
 

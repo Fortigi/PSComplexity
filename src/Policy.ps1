@@ -48,6 +48,27 @@ function Get-PSCxPolicyKey {
     return "$File`u{241F}$Unit"
 }
 
+function Get-PSCxPolicyLookup {
+    # Records keyed by policy identity -- measured units, or acceptances, which carry the same
+    # File and Unit -- built once per run so every entry is one lookup. Searching a list per
+    # entry costs entries x units: measured, a 2,000-entry baseline over 2,200 units took a gate
+    # from 9s to 31s (#153). One builder for both, so the gate and the baseline check cannot come
+    # to disagree about which units are accepted.
+    #
+    # OrdinalIgnoreCase, matching the -eq it replaced and every other identity set in this module.
+    # Two units cannot collide: files are deduplicated ignoring case, and same-named units in one
+    # file carry ordinals assigned through a case-insensitive table. TryAdd keeps the first
+    # anyway, which is what the search it replaced returned.
+    [OutputType([System.Collections.Generic.Dictionary[string, object]])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Record
+    )
+    $lookup = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($r in $Record) { [void]$lookup.TryAdd((Get-PSCxPolicyKey -File ([string]$r.File) -Unit ([string]$r.Unit)), $r) }
+    return $lookup
+}
+
 function Get-PSCxAcceptanceFault {
     # Why ONE acceptance fails to describe this run, as text. Nothing when it holds.
     #
@@ -79,6 +100,8 @@ function Get-PSCxAcceptanceFault {
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive
     )
+    # In begin, once for the whole pipeline: each acceptance arrives as its own run of process.
+    begin { $lookup = Get-PSCxPolicyLookup -Record $Unit }
     process {
         $file = [string]$Acceptance.File
         $name = [string]$Acceptance.Unit
@@ -89,11 +112,11 @@ function Get-PSCxAcceptanceFault {
         if (-not $reason.Trim()) {
             return "$file $name is accepted with no reason -- an acceptance carries the argument for it, or it is a mute button"
         }
-        $found = @($Unit | Where-Object { $_.File -eq $file -and $_.Unit -eq $name })
-        if ($found.Count -eq 0) {
+        $found = $null
+        if (-not $lookup.TryGetValue((Get-PSCxPolicyKey -File $file -Unit $name), [ref]$found)) {
             return "$file $name is accepted but no such unit was measured -- it was renamed, moved, or is outside the path being gated"
         }
-        if ($found[0].Cyclomatic -le $MaxCyclomatic -and $found[0].Cognitive -le $MaxCognitive) {
+        if ($found.Cyclomatic -le $MaxCyclomatic -and $found.Cognitive -le $MaxCognitive) {
             return "$file $name is accepted but is within both ceilings -- delete the acceptance, it is no longer an argument about anything"
         }
     }
@@ -116,14 +139,13 @@ function Get-PSCxUnacceptedUnit {
         [Parameter(Mandatory)] [int]$MaxCognitive,
         [AllowEmptyCollection()] [hashtable]$BaselineMap = @{}
     )
-    $accepted = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($a in $Accept) { [void]$accepted.Add((Get-PSCxPolicyKey -File ([string]$a.File) -Unit ([string]$a.Unit))) }
+    $accepted = Get-PSCxPolicyLookup -Record $Accept
     # Emitted rather than returned as an array, so the declared OutputType describes what a
     # caller actually receives -- one record at a time. The gate wraps the result in @() and
     # gets an empty array when nothing breaches, which is the same answer either way.
     $Unit | Where-Object {
         ($_.Cyclomatic -gt $MaxCyclomatic -or $_.Cognitive -gt $MaxCognitive) -and
-        -not $accepted.Contains((Get-PSCxPolicyKey -File $_.File -Unit $_.Unit)) -and
+        -not $accepted.ContainsKey((Get-PSCxPolicyKey -File $_.File -Unit $_.Unit)) -and
         -not (Test-PSCxWithinBaseline -Unit $_ -Map $BaselineMap)
     }
 }
@@ -255,6 +277,12 @@ function Get-PSCxBaselineFault {
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive
     )
+    # In begin, once for the whole pipeline: each entry arrives as its own run of process, and
+    # searching both lists from there is what made this cost entries x units (#153).
+    begin {
+        $lookup = Get-PSCxPolicyLookup -Record $Unit
+        $accepted = Get-PSCxPolicyLookup -Record $Accept
+    }
     process {
         $file = [string]$Entry.file
         $name = [string]$Entry.unit
@@ -267,14 +295,15 @@ function Get-PSCxBaselineFault {
                 'different function. Rename one of the duplicates -- the later definition ' +
                 'shadows the earlier at run time anyway')
         }
-        if ($Accept | Where-Object { [string]$_.File -eq $file -and [string]$_.Unit -eq $name }) {
+        $key = Get-PSCxPolicyKey -File $file -Unit $name
+        if ($accepted.ContainsKey($key)) {
             return "$file $name is both accepted and recorded in the baseline -- the acceptance already excuses it, so the entry permits nothing"
         }
-        $found = @($Unit | Where-Object { $_.File -eq $file -and $_.Unit -eq $name })
-        if ($found.Count -eq 0) {
+        $found = $null
+        if (-not $lookup.TryGetValue($key, [ref]$found)) {
             return "$file $name is recorded but no such unit was measured -- it was renamed, moved, or is outside the path being gated"
         }
-        return Get-PSCxBaselineScoreFault -Entry $Entry -Unit $found[0] `
+        return Get-PSCxBaselineScoreFault -Entry $Entry -Unit $found `
             -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive
     }
 }
