@@ -70,7 +70,7 @@ as such.
 
 | Rule | Effect |
 |---|---|
-| B1 structural (+1 each) | `if`, `else`/`elseif`, `switch`, loops, `catch`/`trap`, ternary, a **labelled** `break`/`continue`, each maximal run of `-and`/`-or`, each direct recursive call |
+| B1 structural (+1 each) | `if`, `else`/`elseif`, `switch`, loops, `catch`/`trap`, ternary, a **labelled** `break`/`continue`, each maximal run of `-and`/`-or`, each direct recursive call (see [Recursion](#recursion)) |
 | B2 nesting (+depth) | added to `if` (leading clause), `switch`, loops, `catch`/`trap`, ternary — **not** to `else`/`elseif`, boolean runs, labelled jumps, or recursion |
 | B3 nesting level | raised by the structures above **and** by nested script-block lambdas (e.g. a `ForEach-Object { }` body) |
 
@@ -633,7 +633,8 @@ the ones that do are attributed in the test suite.
   a parse-time failure, so an older host cannot load the module at all rather than degrading.
 - Cognitive complexity is computed via ancestor-based nesting analysis; it reproduces the
   SonarSource reference scores. Mutual (indirect) recursion is not counted — only direct
-  self-recursion, matching the common implementation.
+  self-recursion, matching the common implementation. [Recursion](#recursion) lists the forms
+  recognised.
 - **Some files cannot be parsed on some hosts, and are skipped with that reason rather than as a
   syntax error.** A `workflow` cannot be parsed by PowerShell 7 at all. A DSC `Configuration`
   cannot be parsed where the DSC schema store is missing, which is Linux by default; Windows parses
@@ -662,6 +663,38 @@ parse to different AST nodes entirely, so there is no ambiguity.
 
 If you need the specification's numbers exactly and nothing more, pin `0.2.0`; every score
 here is greater than or equal to the one it produced.
+
+### Recursion
+
+The specification counts a method calling itself. A static walk cannot resolve what a call
+runs, so recursion is recognised by the **spelling** of the call, and the line is drawn here
+rather than left to be discovered from a number. Each recognised call is +1, with no nesting.
+
+| Unit | Recognised as calling itself |
+|---|---|
+| A function | its own name, with or without a module qualifier (`MyMod\Get-Fact`) or a scope modifier (`script:Get-Fact`); `& ${function:Get-Fact}`; `& $MyInvocation.MyCommand` and `& $MyInvocation.MyCommand.Name` |
+| A class method | `$this.Method()`, or `[Class]::Method()` for a static one |
+| A script file (`<script-body>`) | `& $PSCommandPath`; `& $MyInvocation.MyCommand` and `& $MyInvocation.MyCommand.Path`; its own file name as `.\Name.ps1` or `$PSScriptRoot\Name.ps1`, either separator, quoted or not |
+
+A **script calling itself** is an extension, as the constructs above are: the specification's
+unit is a method, and here a file is a unit too. `.\Name.ps1` is relative to the current
+location rather than the script's folder, so it is the same file only by convention -- the one
+a script written to call itself follows.
+
+**Not counted**, deliberately:
+
+- A path to anything else, including the function's own name as a path (`.\Get-Fact`): a path
+  runs a script, not the function.
+- A command held in a variable (`& $cmd`), or run through `Invoke-Command`: what they run is a
+  value, not a spelling.
+- `$MyInvocation` inside a script block. `& { & $MyInvocation.MyCommand }` runs the block, which
+  has an invocation of its own; a block handed to `ForEach-Object` shares its caller's, but a
+  static walk cannot tell which command a block will be given, so none is counted.
+- `$PSCommandPath` inside a function. It runs the script, not the function, and that is mutual
+  recursion.
+- Mutual recursion of any kind.
+- `& $function:Get-Fact`. It is not a self-call at all: it parses as `$function:Get` followed by
+  the text `-Fact`, and fails when run. A hyphenated name needs the braced form.
 
 ### Constructs inside a condition
 
