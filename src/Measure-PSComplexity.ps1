@@ -121,9 +121,9 @@ function Measure-PSComplexity {
         # filters -- bound to nothing and measured NOTHING, silently. This makes the working case
         # work by contract and the failing case work at all.
         #
-        # FullName only, deliberately, and NOT PSPath: PSPath is provider-qualified
-        # (Microsoft.PowerShell.Core\FileSystem::/x), which [System.IO.Path]::GetFullPath in
-        # Get-PSCxRelativePath would turn into a path no other run could match against.
+        # FullName only, NOT PSPath: every FileInfo/DirectoryInfo carries both, so PSPath would be a
+        # second route for input that already binds. (The old reason, that a provider-qualified
+        # path could not be resolved, stopped being true with #171.)
         [Parameter(Mandatory, ValueFromPipeline, ValueFromPipelineByPropertyName, Position = 0)]
         [ValidateNotNullOrEmpty()]
         [Alias('FullName')]
@@ -161,7 +161,7 @@ function Measure-PSComplexity {
         $changedSet = $null
         if ($PSBoundParameters.ContainsKey('ChangedFile')) {
             Assert-PSCxChangedFile -ChangedFile $ChangedFile
-            $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root (Get-Location).Path
+            $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root (Get-PSCxWorkingRoot)
         }
     }
     process {

@@ -93,8 +93,9 @@ Get-ChildItem ./src -Recurse | Where-Object Length -gt 4kb | Measure-PSComplexit
 
 The third worked before only by coercion -- a `FileInfo` has no `Path` property, so it reached the
 parameter through `ToString()`. Anything carrying its path as a property, which is what the fourth
-produces, bound to nothing and measured **nothing, silently**. `PSPath` is deliberately *not*
-aliased: it is provider-qualified, and normalising one would undo the portable `File` identity.
+produces, bound to nothing and measured **nothing, silently**. `PSPath` is not aliased: every
+file and directory object already carries `FullName`, so it would add no input that does not
+already bind. A provider-qualified path passed as `-Path` is resolved like any other.
 
 Script blocks and AST objects are not accepted. This measures files on disk, and anything else is
 reported as a path that matched nothing.

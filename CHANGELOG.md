@@ -29,6 +29,16 @@ becomes 0.3.
 
 Matching is unchanged: file and unit, ignoring case. This one moves no score.
 
+**A path on a UNC share is measured, and named, like a local one** (#171). PowerShell writes a
+share path with a `Microsoft.PowerShell.Core\FileSystem::` prefix, and two places kept it. A FILE
+on a share -- `Measure-PSComplexity \\server\share\src\A.ps1`, or `./A.ps1` with the current
+location on a share -- was skipped as "could not be read", and the gate refused the run. Worse,
+quietly: with the current location on a share, a measured DIRECTORY named every file by its full
+path rather than relative to that location, so baseline and acceptance entries no longer matched,
+and a `-ChangedFile` list matched nothing -- which the gate reads as "no PowerShell changed" and
+passes. Paths are now resolved to the plain file-system form, so a share, or any path written
+provider-qualified, behaves exactly as a local path does. This one moves no score either.
+
 ## [0.5.2] - 2026-10-09
 
 ### For consumers
