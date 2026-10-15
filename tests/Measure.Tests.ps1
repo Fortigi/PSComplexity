@@ -1819,3 +1819,23 @@ Describe 'the gate ceilings a caller gets without asking' {
         Test-PSComplexity -Path $script:cog16 3>$null | Should-BeFalse
     }
 }
+
+Describe 'two files whose names differ only in case, on Linux (#151)' {
+    # The failure exactly as reported: the second file was skipped as already seen, so a gate
+    # passed over the one complex file in the pair. Linux only -- on Windows and macOS the two
+    # names are one file and cannot be created side by side.
+    It 'fails the gate on the complex one, which used to be dropped' -Skip:(-not $IsLinux) {
+        $dir = Join-Path ([System.IO.Path]::GetTempPath()) "cxcase-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        try {
+            Set-Content -LiteralPath (Join-Path $dir 'A.ps1') -Value 'function Get-Simple { 1 }' -Encoding utf8
+            Set-Content -LiteralPath (Join-Path $dir 'a.ps1') -Encoding utf8 `
+                -Value 'function Get-Deep { param($a) if ($a) { if ($a) { if ($a) { 1 } } } }'
+            # -CaseSensitive: Sort-Object -Unique ignores case by default, and would merge the
+            # very pair this exists to keep apart.
+            @(Measure-PSComplexity -Path $dir | ForEach-Object File | Sort-Object -Unique -CaseSensitive).Count | Should-Be 2
+            Test-PSComplexity -Path $dir -MaxCognitive 3 3>$null | Should-BeFalse
+        }
+        finally { Remove-Item -LiteralPath $dir -Recurse -Force }
+    }
+}

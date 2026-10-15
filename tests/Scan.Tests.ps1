@@ -118,6 +118,16 @@ Describe 'Get-PSCxRelativePath' {
         Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'src/A.ps1'
     }
 
+    It 'decides what is under the root as the platform file system does (#151)' {
+        # /REPO is not /repo on Linux, so a file there is outside the root and keeps its full
+        # path. Elsewhere it is the same directory, the file is relative to it, and a config
+        # spelling the root in another case does not report one file under two names.
+        $root = [System.IO.Path]::GetFullPath('/repo')
+        $file = Join-Path ([System.IO.Path]::GetFullPath('/REPO')) 'A.ps1'
+        $expected = $IsLinux ? $file.Replace([System.IO.Path]::DirectorySeparatorChar, '/') : 'A.ps1'
+        Get-PSCxRelativePath -Path $file -Root $root | Should-BeString $expected -CaseSensitive
+    }
+
     It 'resolves a RELATIVE path against Root, not the working directory' {
         # GetFullPath alone silently uses the CWD, so the function only gave the right answer
         # while its caller happened to pass an absolute path AND a Root equal to the CWD -- two
@@ -141,14 +151,6 @@ Describe 'Get-PSCxRelativePath' {
         $file = Join-Path $root (Join-Path 'src' 'A.ps1')
         (Get-PSCxRelativePath -Path $file -Root $root) |
             Should-Be (Get-PSCxRelativePath -Path $file -Root ($root + $sep))
-    }
-
-    It 'matches the root case-insensitively' {
-        # A config may spell a drive or directory in either case, and a run that reported one
-        # file twice under two spellings would double it in any per-file total.
-        $root = [System.IO.Path]::GetFullPath('/Repo')
-        $file = Join-Path ([System.IO.Path]::GetFullPath('/repo')) 'A.ps1'
-        Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'A.ps1'
     }
 
     It 'separates every level with a forward slash' {
@@ -342,6 +344,26 @@ Describe 'Get-PSCxScan' {
         [string]$scan.Skipped[0].Reason | Should-BeLikeString '*parse error*'
     }
 
+    It 'measures BOTH of two files whose names differ only in case, on Linux (#151)' -Skip:(-not $IsLinux) {
+        # On Windows and macOS these are one file and cannot be created side by side. On Linux
+        # the second was skipped as already seen, and the gate passed over code it never read.
+        $pair = Join-Path $script:work "case-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $pair -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $pair 'A.ps1') -Value 'function Get-Upper { 1 }' -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $pair 'a.ps1') -Value 'function Get-Lower { 1 }' -Encoding utf8
+        $scan = Get-PSCxScan -Path @($pair)
+        (@($scan.Units | Where-Object Unit -ne '<script-body>' | ForEach-Object Unit | Sort-Object) -join ',') |
+            Should-Be 'Get-Lower,Get-Upper'
+    }
+
+    It 'measures one file reached under two casings ONCE, where the file system ignores case' -Skip:$IsLinux {
+        # The other half of the same comparer: on Windows and macOS the directory and the
+        # upper-cased literal are one file, and counting it twice doubles its rows.
+        $upper = Join-Path $script:work 'FLAT.PS1'
+        $scan = Get-PSCxScan -Path @($script:work, $upper)
+        @($scan.Units | Where-Object Unit -eq 'Get-Flat').Count | Should-Be 1
+    }
+
     It 'merges several paths into one scan' {
         $scan = Get-PSCxScan -Path @($script:flat, (Join-Path $script:work 'nested')) -Recurse
         $names = @($scan.Units | ForEach-Object Unit)
@@ -435,9 +457,11 @@ Describe 'Get-PSCxChangedSet' {
         $set.Contains('src/A.ps1') | Should-BeTrue
     }
 
-    It 'matches case-insensitively' {
+    It 'matches case as the platform file system does (#151)' {
+        # On Linux a list naming SRC/A.PS1 names a different file from src/a.ps1.
         $set = Get-PSCxChangedSet -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @('SRC/A.PS1')
-        $set.Contains('src/a.ps1') | Should-BeTrue
+        $set.Contains('src/a.ps1') | Should-Be (-not $IsLinux)
+        $set.Contains('SRC/A.PS1') | Should-BeTrue
     }
 
     It 'ignores blank entries, which a diff can emit as a trailing line' {

@@ -126,6 +126,11 @@ caller. A green gate over a path that does not exist is the exact failure this m
 | `Cognitive` | `[int]` | |
 | `MetricVersion` | `[int]` | which metric produced these numbers |
 
+A `File` is compared the way the platform's file system compares names: **case-sensitively on
+Linux**, ignoring case on Windows and macOS. That covers measuring, `-ChangedFile`, `-Accept` and
+the baseline alike, so on Linux `src/A.ps1` and `src/a.ps1` are two files, both measured and each
+with its own entries. A `Unit` name always ignores case, as PowerShell does.
+
 `MetricVersion` increments whenever a score can change for source that did not -- a narrower
 rule than the module version, so a bug fix that only affects messages, or a new field on this
 record, leaves it alone. It has happened twice: 0.3.0 taught the metric PowerShell's own flow

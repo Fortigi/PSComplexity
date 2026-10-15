@@ -39,6 +39,14 @@ and a `-ChangedFile` list matched nothing -- which the gate reads as "no PowerSh
 passes. Paths are now resolved to the plain file-system form, so a share, or any path written
 provider-qualified, behaves exactly as a local path does. This one moves no score either.
 
+**On Linux, two files whose names differ only in case are both measured** (#151). The scan
+compared paths ignoring case on every platform, so next to `src/A.ps1` the file `src/a.ps1` was
+skipped as already seen -- without a word -- and the gate passed over code it never read. File
+names are now compared as the platform's file system compares them: case-sensitively on Linux,
+ignoring case on Windows and macOS, where one file reached under two casings must still count
+once. `-ChangedFile`, `-Accept` and the baseline follow the same rule, so on Linux an entry must
+name a file in its exact case; a unit name still ignores case everywhere.
+
 ## [0.5.2] - 2026-10-09
 
 ### For consumers

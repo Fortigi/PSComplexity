@@ -38,6 +38,11 @@ BeforeAll {
         'Scan.ps1 -> Cognitive.ps1'
         'Scan.ps1 -> Cyclomatic.ps1'
 
+        # The scan and the policy must agree on when two paths name the same file, or a file the
+        # scan measured twice -- or dropped -- would be keyed by the policy as one (#151). So the
+        # scan asks the policy layer, which already owns identity, rather than keeping a copy.
+        'Scan.ps1 -> Policy.ps1'
+
         # The composition root. It owns most of the graph on purpose: it is wiring, so it is
         # allowed to know about everything, and nothing is allowed to know about it. It no longer
         # reaches a metric directly -- it asks the scan.
