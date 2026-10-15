@@ -415,7 +415,7 @@ function Get-PSCxScanFault {
 }
 
 function Assert-PSCxChangedFile {
-    # Refuse a changed-file list that is empty, naming why.
+    # Refuse a changed-file list that is empty, or that names PowerShell files not there, naming why.
     #
     # An empty list means "nothing changed", and taken at face value it produces a confident pass
     # over zero units -- the vacuous score this module exists to find in other people's code,
@@ -425,6 +425,13 @@ function Assert-PSCxChangedFile {
     #
     # A caller who genuinely has no changed files wants to SKIP the gate, and that is a decision
     # only they can make -- so it is theirs to make, in their own script, where it is visible.
+    #
+    # A listed .ps1 or .psm1 that does not exist is refused too (#160). The list is resolved
+    # against the current directory and git prints it relative to the repository root, so a gate
+    # run from a subdirectory matched nothing, measured 0 units and PASSED -- a filtered run that
+    # measures nothing is ordinary, so nothing downstream could object. Only PowerShell entries are
+    # checked: a missing README changes no answer. Checked here, before any route scans, so
+    # Measure-PSComplexity refuses the list too: its scope would name files it never read.
     [OutputType([void])]
     [CmdletBinding()]
     param(
@@ -433,12 +440,22 @@ function Assert-PSCxChangedFile {
         # function exists to make into a message about parameter binding.
         [Parameter(Mandatory)] [AllowEmptyCollection()] [AllowNull()] [AllowEmptyString()] [string[]]$ChangedFile
     )
-    if (@($ChangedFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) { return }
-    throw ('-ChangedFile was given no files. An empty list would restrict the run to nothing and ' +
-        'report a pass over zero units, which is the failure this module exists to find -- and it ' +
-        'is what a diff command prints when it fails, matches nothing, or runs against a shallow ' +
-        'clone whose base ref is missing. If nothing changed, skip the gate rather than asking it ' +
-        'to measure an empty set.')
+    $listed = @($ChangedFile | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object Trim)
+    if ($listed.Count -eq 0) {
+        throw ('-ChangedFile was given no files. An empty list would restrict the run to nothing and ' +
+            'report a pass over zero units, which is the failure this module exists to find -- and it ' +
+            'is what a diff command prints when it fails, matches nothing, or runs against a shallow ' +
+            'clone whose base ref is missing. If nothing changed, skip the gate rather than asking it ' +
+            'to measure an empty set.')
+    }
+    $missing = @($listed | Where-Object {
+            [System.IO.Path]::GetExtension($_) -in '.ps1', '.psm1' -and -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($missing.Count -eq 0) { return }
+    throw ("-ChangedFile names $($missing.Count) PowerShell file(s) that do not exist from " +
+        "'$(Get-PSCxWorkingRoot)': " + ($missing -join ', ') + '. The list is resolved against the ' +
+        'current directory, and git prints paths relative to the repository root -- run from the ' +
+        'root. A file the change deleted has nothing left to measure: list changes with ' +
+        '`git diff --name-only --diff-filter=d`.')
 }
 
 function Write-PSCxUnmatchedPath {

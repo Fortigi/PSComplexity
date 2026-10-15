@@ -1618,6 +1618,16 @@ Describe 'measuring only what changed' {
         { Measure-PSComplexity -Path $script:work -Recurse -ChangedFile @() } |
             Should-Throw -ExceptionMessage '*measure an empty set*'
     }
+
+    It 'refuses a list naming files that are not there, on both routes (#160)' {
+        # Its scope would name files it never read. Refused before either route scans, so a
+        # report path makes no difference to the answer.
+        $rp = Join-Path $script:work 'missing-changed-report.json'
+        { Measure-PSComplexity -Path $script:work -Recurse -ChangedFile @('no-such-160.ps1') } |
+            Should-Throw -ExceptionMessage '*do not exist from*no-such-160.ps1*'
+        { Measure-PSComplexity -Path $script:work -Recurse -ChangedFile @('no-such-160.ps1') -ReportPath $rp } |
+            Should-Throw -ExceptionMessage '*do not exist from*no-such-160.ps1*'
+    }
 }
 
 Describe 'the gate, measuring only what changed' {
@@ -1671,6 +1681,27 @@ Describe 'the gate, measuring only what changed' {
     It 'refuses an empty list' {
         { Test-PSComplexity -Path $script:work -Recurse -ChangedFile @() `
                 -WarningAction SilentlyContinue } | Should-Throw -ExceptionMessage '*measure an empty set*'
+    }
+
+    It 'refuses a list resolved from the wrong directory rather than passing over nothing (#160)' {
+        # The reported case. git prints a.ps1 relative to the root; from a subdirectory it names
+        # nothing, and the gate measured 0 units and returned $true with only the subset notice.
+        $sub = Join-Path $script:work 'sub-160'
+        New-Item -ItemType Directory -Path $sub -Force | Out-Null
+        Push-Location $sub
+        try {
+            { Test-PSComplexity -Path $script:work -Recurse -ChangedFile @('a.ps1') `
+                    -WarningAction SilentlyContinue } |
+                Should-Throw -ExceptionMessage "*do not exist from*sub-160': a.ps1.*run from the root*"
+        }
+        finally { Pop-Location }
+        # The same list from the root is the ordinary run, so the refusal is about the directory.
+        Push-Location $script:work
+        try {
+            Test-PSComplexity -Path $script:work -Recurse -ChangedFile @('a.ps1') `
+                -WarningAction SilentlyContinue | Should-BeTrue
+        }
+        finally { Pop-Location }
     }
 }
 

@@ -53,7 +53,7 @@ steps:
       # (a failed git command prints nothing) is refused by the module, not taken as a pass.
       if ('$(Build.Reason)' -eq 'PullRequest') {
           $target = '$(System.PullRequest.TargetBranch)' -replace '^refs/heads/', ''
-          $gate.ChangedFile = @(git diff --name-only "origin/$target...HEAD")
+          $gate.ChangedFile = @(git diff --name-only --diff-filter=d "origin/$target...HEAD")
       }
 
       if (-not (Test-PSComplexity @gate)) {
