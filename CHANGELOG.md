@@ -83,6 +83,12 @@ own `+1` row at its own line, construct `elseif` or `else`. A class method calli
 reported as construct `unknown`; it is `recursion`, as a function calling itself already was.
 Every total is unchanged; only the rows that make it up are split and named.
 
+**`-Detailed` rows on one line are in the order they are written** (#186). Rows were sorted by line
+and then by construct NAME, so a chain on one line read `else, elseif, if`, and an `if` came after
+the boolean run in its own condition. They are now ordered left to right within a line, as the
+README already promised. No number changes, but rows that share a line may come out in a different
+order than before.
+
 **Recursion is counted through a module qualifier or a scope modifier, and a scope modifier is no
 longer part of a unit's name** (#158). Recursion was an exact match on the command text, so
 `MyMod\Get-Fact` or `script:Get-Fact` inside `Get-Fact`, and `Get-Fact` inside

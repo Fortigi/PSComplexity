@@ -46,13 +46,13 @@ function Get-PSCxCogIfRow {
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'IfStatementAst')) {
         $key = Get-PSCxUnitKey -Node $n
-        [pscustomobject]@{ Key = $key; Construct = 'if'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
+        [pscustomobject]@{ Key = $key; Construct = 'if'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
         # Clauses[0] is the if itself.
         for ($i = 1; $i -lt $n.Clauses.Count; $i++) {
-            [pscustomobject]@{ Key = $key; Construct = 'elseif'; Line = $n.Clauses[$i].Item1.Extent.StartLineNumber; Amount = 1 }
+            [pscustomobject]@{ Key = $key; Construct = 'elseif'; Line = $n.Clauses[$i].Item1.Extent.StartLineNumber; Column = $n.Clauses[$i].Item1.Extent.StartColumnNumber; Amount = 1 }
         }
         if ($n.ElseClause) {
-            [pscustomobject]@{ Key = $key; Construct = 'else'; Line = $n.ElseClause.Extent.StartLineNumber; Amount = 1 }
+            [pscustomobject]@{ Key = $key; Construct = 'else'; Line = $n.ElseClause.Extent.StartLineNumber; Column = $n.ElseClause.Extent.StartColumnNumber; Amount = 1 }
         }
     }
 }
@@ -66,7 +66,7 @@ function Get-PSCxCogBlockRow {
     # repeated walk in the module.
     foreach ($tn in 'SwitchStatementAst', 'ForEachStatementAst', 'ForStatementAst', 'WhileStatementAst', 'DoWhileStatementAst', 'DoUntilStatementAst', 'CatchClauseAst', 'TrapStatementAst') {
         foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName $tn)) {
-            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'block'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'block'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
         }
     }
 }
@@ -76,7 +76,7 @@ function Get-PSCxCogTernaryRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'TernaryExpressionAst')) {
-        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'ternary'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
+        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'ternary'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
     }
 }
 
@@ -90,7 +90,7 @@ function Get-PSCxCogFlowCommandRow {
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst], [System.Management.Automation.Language.InvokeMemberExpressionAst]))) {
         if (-not (Test-PSCxFlowCommand -Node $n)) { continue }
-        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'flow-command'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
+        [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'flow-command'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
     }
 }
 
@@ -102,12 +102,12 @@ function Get-PSCxCogNullCoalesceRow {
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'BinaryExpressionAst')) {
         if ($n.Operator -eq 'QuestionQuestion') {
-            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'null-coalesce'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'null-coalesce'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
         }
     }
     foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'AssignmentStatementAst')) {
         if ($n.Operator -eq 'QuestionQuestionEquals') {
-            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'null-coalesce'; Line = $n.Extent.StartLineNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'null-coalesce'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 + (Get-PSCxNesting -Node $n) }
         }
     }
 }
@@ -123,7 +123,7 @@ function Get-PSCxCogPipelineChainRow {
     foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'PipelineChainAst')) {
         if ($n.Parent -isnot [System.Management.Automation.Language.PipelineChainAst] -or
             $n.Parent.Operator -ne $n.Operator) {
-            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'pipeline-chain'; Line = $n.Extent.StartLineNumber; Amount = 1 }
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'pipeline-chain'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 }
         }
     }
 }
@@ -134,7 +134,7 @@ function Get-PSCxCogBooleanRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'BinaryExpressionAst')) {
-        if (Test-PSCxLogicalRunStart -Node $n) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'boolean-run'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
+        if (Test-PSCxLogicalRunStart -Node $n) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'boolean-run'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 } }
     }
 }
 
@@ -147,7 +147,7 @@ function Get-PSCxCogJumpRow {
     # break and continue interleaved in document order. Two bucket reads end-to-end would group
     # them by type, which -Detailed publishes and a reader reads top to bottom.
     foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.BreakStatementAst], [System.Management.Automation.Language.ContinueStatementAst]))) {
-        if ($n.Label) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'labelled-jump'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
+        if ($n.Label) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'labelled-jump'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 } }
     }
 }
 
@@ -157,7 +157,7 @@ function Get-PSCxCogRecursionRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'CommandAst')) {
-        if (Test-PSCxSelfCall -Node $n) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
+        if (Test-PSCxSelfCall -Node $n) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 } }
     }
 }
 
@@ -189,7 +189,7 @@ function Get-PSCxCogMethodRecursionRow {
         if (-not $method) { continue }
         if ($n.Member.Value -ne $method.Name) { continue }
         if (Test-PSCxSelfInvocation -Node $n -Method $method) {
-            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Amount = 1 }
+            [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Column = $n.Extent.StartColumnNumber; Amount = 1 }
         }
     }
 }
@@ -233,12 +233,20 @@ function Get-PSCxContributionMap {
         if (-not $byUnit.ContainsKey($row.Key)) {
             $byUnit[$row.Key] = [System.Collections.Generic.List[object]]::new()
         }
-        $byUnit[$row.Key].Add([pscustomobject]@{ Line = $row.Line; Construct = $row.Construct; Amount = $row.Amount })
+        $byUnit[$row.Key].Add([pscustomobject]@{ Line = $row.Line; Column = $row.Column; Construct = $row.Construct; Amount = $row.Amount })
     }
     # Sorted here rather than at the call site: the question this answers is "where did 23 come
-    # from", and a reader scans a unit top to bottom.
+    # from", and a reader scans a unit top to bottom -- and, within a line, left to right (#186).
+    # By line alone the tie fell to the construct NAME, so a one-line chain read `else, elseif,
+    # if`. The column is a sort key and nothing more: the published row stays Line, Construct,
+    # Amount. Two rows can start at one column -- a ternary whose condition is a boolean run --
+    # and the name still decides those, so the order never depends on which collector ran first.
     $out = @{}
-    foreach ($k in $byUnit.Keys) { $out[$k] = @($byUnit[$k] | Sort-Object Line, Construct) }
+    foreach ($k in $byUnit.Keys) {
+        $out[$k] = @(foreach ($r in ($byUnit[$k] | Sort-Object Line, Column, Construct)) {
+                [pscustomobject]@{ Line = $r.Line; Construct = $r.Construct; Amount = $r.Amount }
+            })
+    }
     return $out
 }
 

@@ -860,9 +860,9 @@ function Invoke-Thing {
 
     It 'names the construct and the line for each point' {
         $unit = @(Measure-PSComplexity -Path $script:DetailFile -Detailed | Where-Object Unit -eq 'Invoke-Thing')[0]
-        # foreach at 3, if at 4 (+1 nesting), then the boolean run and the if at 5.
+        # foreach at 3, if at 4 (+1 nesting), then the if at 5 and the boolean run in its condition.
         (($unit.Contributions | ForEach-Object { "$($_.Construct)@$($_.Line)+$($_.Amount)" }) -join ' ') |
-            Should-Be 'block@3+1 if@4+2 boolean-run@5+1 if@5+2'
+            Should-Be 'block@3+1 if@4+2 if@5+2 boolean-run@5+1'
     }
 
     It 'orders them by line, because that is how the unit is read' {
