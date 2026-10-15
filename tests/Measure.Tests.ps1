@@ -1446,6 +1446,34 @@ function Invoke-Twice { param($a, $b) if ($a) { if ($b) { 2 } } }
     }
 
     Context '-UpdateBaseline' {
+        It 'refuses to record a unit renamed AND made worse, or a new breach, without -AllowNew (#152)' {
+            # The case as reported: A recorded, then renamed to A2 and made worse, and a new B
+            # beside it. The gate refused, and the update used to write both in without a word --
+            # a regression absorbed by re-running the tool.
+            $dir = Join-Path $script:blDir "rename-$([System.Guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+            $src = Join-Path $dir 'A.ps1'
+            $bl = Join-Path $dir 'bl.json'
+            Set-Content -LiteralPath $src -Value 'function A { param($a) if ($a) { if ($a) { 1 } } }' -Encoding utf8
+            Test-PSComplexity -Path $src -MaxCyclomatic 2 -MaxCognitive 2 -BaselineFile $bl -UpdateBaseline 3>$null | Out-Null
+            Set-Content -LiteralPath $src -Encoding utf8 -Value @(
+                'function A2 { param($a) if ($a) { if ($a) { if ($a) { if ($a) { 1 } } } } }'
+                'function B { param($a) if ($a) { if ($a) { 1 } } }')
+            $before = Get-Content -LiteralPath $bl -Raw
+            { Test-PSComplexity -Path $src -MaxCyclomatic 2 -MaxCognitive 2 -BaselineFile $bl -UpdateBaseline 3>$null } |
+                Should-Throw -ExceptionMessage '*A2 (cyclomatic 5, cognitive 10)*B (cyclomatic 3, cognitive 3)*not in the baseline*'
+            (Get-Content -LiteralPath $bl -Raw) | Should-Be $before
+
+            Test-PSComplexity -Path $src -MaxCyclomatic 2 -MaxCognitive 2 -BaselineFile $bl -UpdateBaseline -AllowNew 3>$null |
+                Should-BeTrue
+            ((Get-Content -LiteralPath $bl -Raw | ConvertFrom-Json).units.unit -join ',') | Should-Be 'A2,B'
+        }
+
+        It 'refuses -AllowNew without -UpdateBaseline, before measuring anything' {
+            { Test-PSComplexity -Path $script:blPath -AllowNew 3>$null } |
+                Should-Throw -ExceptionMessage '*-AllowNew only applies with -UpdateBaseline*'
+        }
+
         It 'seeds a file that then lets the gate pass' {
             $bl = Join-Path $script:blDir "seed-$([System.Guid]::NewGuid().ToString('N')).json"
             Test-PSComplexity -Path $script:blPath -MaxCyclomatic 1 -MaxCognitive 1 -BaselineFile $bl `

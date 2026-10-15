@@ -301,6 +301,20 @@ the file already does, naming the units that regressed. Without that refusal, re
 would absorb whatever the gate had just caught, and the baseline would be a suppression list that
 updates itself.
 
+**Nor does it add a unit it has never recorded, unless you say so.** A unit new to the baseline is
+new code, which should meet the ceilings, or a renamed one -- and a rename that also got worse is
+exactly the regression above, under a name the file has no number for. So `-UpdateBaseline` refuses
+an existing baseline any breaching unit it has not seen, naming each with its scores. Fix it,
+accept it with an argument, or record it on purpose:
+
+```powershell
+Test-PSComplexity ./src -Recurse -BaselineFile ./complexity-baseline.json -UpdateBaseline -AllowNew
+```
+
+Each unit added that way is still named in a warning, so the build log says what the diff says.
+Seeding a baseline, or regenerating one across a metric version change, needs no `-AllowNew`:
+there is nothing to add to.
+
 **It is a checkable claim, like an acceptance.** The gate **throws** when an entry stops describing
 the run:
 
