@@ -70,15 +70,18 @@ $script:PSCxUnitBoundaryTypes = @(
     'FunctionDefinitionAst', 'FunctionMemberAst', 'PropertyMemberAst'
 )
 
-# The same two vocabularies as HashSets, built once at load. The lists above stay as the
+# The same two vocabularies as lookup tables, built once at load. The lists above stay as the
 # declaration -- they carry the reasons, and the vocabulary test reads them -- but the INDEX
-# consults them once per node over a whole tree, and `-in` over an array is a linear scan of
-# string comparisons. Measured over 259,144 nodes: 138ms for `-in` against 69ms for
-# HashSet.Contains, per list.
-$script:PSCxNestingTypeSet = [System.Collections.Generic.HashSet[string]]::new(
-    [string[]]$script:PSCxNestingTypes, [System.StringComparer]::Ordinal)
-$script:PSCxUnitBoundaryTypeSet = [System.Collections.Generic.HashSet[string]]::new(
-    [string[]]$script:PSCxUnitBoundaryTypes, [System.StringComparer]::Ordinal)
+# consults them once per node over a whole tree, so how it asks matters.
+#
+# A hashtable read, not HashSet.Contains: PowerShell reaches an INDEXER through a fast path, and
+# a .NET METHOD through its general binder, which costs several microseconds a call (#154).
+# Case-insensitive like every hashtable literal, which is harmless here: no two Ast type names
+# differ only in case.
+$script:PSCxNestingTypeIndex = @{}
+foreach ($t in $script:PSCxNestingTypes) { $script:PSCxNestingTypeIndex[$t] = $true }
+$script:PSCxUnitBoundaryTypeIndex = @{}
+foreach ($t in $script:PSCxUnitBoundaryTypes) { $script:PSCxUnitBoundaryTypeIndex[$t] = $true }
 
 
 # Per-node answers, remembered for the file being measured.
@@ -192,39 +195,48 @@ function Initialize-PSCxAstIndex {
     $script:PSCxOrderCache.Clear()
     $script:PSCxBoundaryCache[$Root] = $null
     $script:PSCxNestingCache[$Root] = 0
+    # Each node's type, so a child reads its parent's from here rather than asking the parent.
+    $typeOf = [System.Collections.Generic.Dictionary[object, object]]::new()
+    # Materialised once: the loop and the grouping below both walk it.
+    $all = [object[]]@($Root.FindAll({ $true }, $true))
     $position = 0
-    foreach ($n in $Root.FindAll({ $true }, $true)) {
-        # BEFORE the parent test below, which skips the root: FindAll returns the root itself, and
-        # a bucket that silently omitted it would be a whole-tree query that is not one.
+    foreach ($n in $all) {
         # INLINE, not a call per node, and this is why the index was expensive. A PowerShell
         # function with [CmdletBinding()] and mandatory parameters costs about 9us to invoke;
         # over 259,144 nodes that is 2.4s against 62ms for the same work written here -- 39x,
         # measured. Nothing else in this module runs a function once per AST node.
-        $script:PSCxOrderCache[$n] = $position
-        $nodeType = $n.GetType()
-        $bucket = $null
-        if (-not $script:PSCxTypeCache.TryGetValue($nodeType, [ref]$bucket)) {
-            $bucket = [System.Collections.Generic.List[object]]::new()
-            $script:PSCxTypeCache[$nodeType] = $bucket
-            $script:PSCxTypeNameCache[$nodeType.Name] = $bucket
-        }
-        $bucket.Add($n)
-        $position++
+        #
+        # And INDEXERS rather than .NET METHODS, for the same kind of reason one level down (#154).
+        # PowerShell reaches an indexer or a property through a fast path and a method through its
+        # general binder: measured per call, a dictionary read or write well under 1us, while
+        # TryGetValue with a [ref] cost 17us, HashSet.Contains 7.6us, List.Add 8.7us and
+        # GetType() 4us. This loop made six of those per node; it now makes one GetType(), and
+        # the pass went from 51.8us to 12.7us a node with every answer identical.
+        $script:PSCxOrderCache[$n] = $position++
+        $typeOf[$n] = $n.GetType()
         $p = $n.Parent
         # The root itself comes back from FindAll and is already seeded; anything with no parent
-        # is a root by definition.
+        # is a root by definition. The root is still grouped below: a bucket that silently
+        # omitted it would be a whole-tree query that is not one.
         if ($null -eq $p) { continue }
-        # Once per node, not twice: both tests below want it, and it was recomputed for
-        # every node that is not a boundary.
-        $parentType = $p.GetType().Name
-        if ($script:PSCxUnitBoundaryTypeSet.Contains($parentType)) {
+        # A parent the walk never returned is asked directly. There is one: the base() call
+        # PowerShell synthesises for a class constructor -- FindAll yields its arguments but not
+        # the call itself, so this table has never heard of it.
+        $parentType = ($typeOf[$p] ?? $p.GetType()).Name
+        if ($script:PSCxUnitBoundaryTypeIndex[$parentType]) {
             $script:PSCxBoundaryCache[$n] = Resolve-PSCxUnitBoundary -Boundary $p
             $script:PSCxNestingCache[$n] = 0
             continue
         }
         $script:PSCxBoundaryCache[$n] = $script:PSCxBoundaryCache[$p]
-        $raises = $script:PSCxNestingTypeSet.Contains($parentType) ? 1 : 0
+        $raises = $script:PSCxNestingTypeIndex[$parentType] ? 1 : 0
         $script:PSCxNestingCache[$n] = [int]$script:PSCxNestingCache[$p] + $raises
+    }
+    # The buckets, in ONE call rather than a List.Add per node. A lookup keeps each group in
+    # source order, which is document order -- the order every query and -Detailed rely on.
+    foreach ($group in [System.Linq.Enumerable]::ToLookup($all, [System.Func[object, object]] { param($node) $typeOf[$node] })) {
+        $script:PSCxTypeCache[$group.Key] = $group
+        $script:PSCxTypeNameCache[$group.Key.Name] = $group
     }
     # LAST, so a walk that throws part-way leaves the root unmarked and the next ask rebuilds it
     # rather than reading a half-filled index. Nothing in the loop throws today; the ordering costs

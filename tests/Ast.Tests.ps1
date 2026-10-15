@@ -366,6 +366,22 @@ Describe 'the AST index' {
     # depth grow together. One pre-order pass now computes both for every node, because each is
     # defined against the node's PARENT.
 
+    It 'indexes a class constructor, whose synthesised base() call FindAll never returns (#154)' {
+        # The one parent the walk does not visit before its children: PowerShell gives every
+        # constructor an implicit base() call, and FindAll yields that call's arguments without
+        # the call. Reading the parent's type from what the walk recorded found nothing there,
+        # and indexing by that nothing threw -- on the first class with a constructor.
+        $t = Tree 'class C { C() { if ($a) { 1 } } }'
+        Initialize-PSCxAstIndex -Root $t
+        $orphans = @($t.FindAll({ param($x) $x.Parent -is [System.Management.Automation.Language.BaseCtorInvokeMemberExpressionAst] }, $true))
+        $orphans.Count | Should-BeGreaterThan 0
+        # The constructor's real body is indexed like any other. The orphans themselves are
+        # generated arguments that score nothing; their unit is whatever it always was, and a
+        # change made for speed is not the place to move it.
+        Get-PSCxUnitKey -Node @(Nodes $t 'IfStatementAst')[0] | Should-BeLikeString 'C.C@*'
+        Get-PSCxNesting -Node @(Nodes $t 'ConstantExpressionAst')[0] | Should-Be 1
+    }
+
     It 'finds the root from a node buried deep in the tree' {
         $t = Tree 'function F { if ($a) { if ($b) { if ($c) { 1 } } } }'
         $inner = @(Nodes $t 'IfStatementAst')[-1]

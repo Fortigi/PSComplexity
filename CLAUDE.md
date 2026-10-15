@@ -317,6 +317,24 @@ for every node except the one asked about -- which reported cognitive **200 wher
 totals over a deep one. Anything touching this needs a before/after comparison of real totals, not
 a green suite.
 
+**In a per-node loop, a .NET METHOD call is the cost -- not PowerShell being interpreted** (#154).
+The index pass was 80% of per-file time, about 50us a node, and the proposed fix was a C# `AstVisitor`
+compiled with `Add-Type`, which would have sat outside the 100%-self-mutation rule. Profiling the
+loop body settled it the other way. PowerShell reaches an indexer or a property through a fast path,
+under 1us, and a .NET method through its general binder: measured per call, `TryGetValue` with a
+`[ref]` 17us, `HashSet.Contains` 7.6us, `List.Add` 8.7us, `GetType()` 4us. Rewritten with indexers
+(hashtable reads for the type sets, each node's type recorded so a child reads its parent's) and one
+`ToLookup` for the buckets instead of a `List.Add` per node, the pass went from 51.8us to 12.7us a
+node -- the module 38-47% faster end to end, every record byte-identical. So the C# question is
+closed: there is no exception to the self-mutation rule here, and none needed. A compiled LINQ
+expression tree is not a way round it either -- its logic is data PSMutant cannot mutate.
+
+**`FindAll` does not visit every parent before its children.** The `base()` call PowerShell
+synthesises for a class constructor (`BaseCtorInvokeMemberExpressionAst`) is never returned, while
+its arguments are. Reading a parent's type from what the walk recorded therefore needs a fallback,
+and only a constructor exercises it -- which is why the failure showed in `Measure.Tests.ps1` alone
+and why `tests/Ast.Tests.ps1` now builds one.
+
 **Measure a performance claim by interleaving, and check the direction before believing it.** The
 issue behind this reported ~18%. Two wall-clock A/B attempts here disagreed about the SIGN -- the
 change looked 32% slower when its process ran second and 6% faster when it ran first -- because

@@ -61,6 +61,11 @@ with its scores; the new **`-AllowNew`** switch records them deliberately, and e
 named in a warning. Seeding a baseline, or regenerating one across a metric version change, is
 unchanged and needs no switch.
 
+**Measuring is 38-47% faster** (#154). The per-file index pass was most of the cost, and nearly
+all of that was PowerShell's price for calling a .NET method once per syntax node. It now reads
+through indexers instead: 51.8us a node down to 12.7us. Every score, unit and `-Detailed`
+contribution is unchanged.
+
 ## [0.5.2] - 2026-10-09
 
 ### For consumers
