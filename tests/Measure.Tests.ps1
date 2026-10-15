@@ -669,6 +669,28 @@ Describe 'Measure-PSComplexity - script-level code outside any function' {
     }
 }
 
+Describe 'Measure-PSComplexity - a scope modifier is not part of a unit (#158)' {
+    It 'names a function defined with a modifier without it, and counts its recursion' {
+        # The name is the baseline and acceptance key, so adding `global:` used to rename the
+        # unit; and its self-call `Get-Fact` never matched `global:Get-Fact`, so it scored 1.
+        $p = Join-Path $script:work 'scoped-recursion.ps1'
+        Set-Content $p 'function global:Get-Fact { param($n) if ($n -gt 1) { $n * (Get-Fact ($n - 1)) } else { 1 } }' -Encoding utf8
+        $unit = @(Measure-PSComplexity -Path $p | Where-Object Unit -ne '<script-body>')
+        $unit.Unit | Should-Be 'Get-Fact'
+        # if(1) + else(1) + recursion(1)
+        $unit.Cognitive | Should-Be 3
+    }
+
+    It 'tells a scoped definition and a plain one of the same name apart by ordinal' {
+        # The cost of the decision, pinned: they are now the same NAME, so they number like any
+        # duplicate -- and a baseline refuses an ordinal rather than guess which one it meant.
+        $p = Join-Path $script:work 'scoped-duplicate.ps1'
+        Set-Content $p "function global:Get-Twin { 1 }`nfunction Get-Twin { 2 }" -Encoding utf8
+        ((Measure-PSComplexity -Path $p | Where-Object Unit -ne '<script-body>' | ForEach-Object Unit) -join ',') |
+            Should-Be 'Get-Twin#1,Get-Twin#2'
+    }
+}
+
 Describe 'Measure-PSComplexity - reporting details that the suite never pinned' {
 
     It 'reports the script body as starting at line 1' {

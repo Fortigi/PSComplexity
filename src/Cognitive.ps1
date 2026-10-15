@@ -157,8 +157,7 @@ function Get-PSCxCogRecursionRow {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
     foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'CommandAst')) {
-        $fn = Get-PSCxEnclosingFunctionName -Node $n
-        if ($fn -and $n.GetCommandName() -eq $fn) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
+        if (Test-PSCxSelfCall -Node $n) { [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'recursion'; Line = $n.Extent.StartLineNumber; Amount = 1 } }
     }
 }
 

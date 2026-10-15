@@ -56,6 +56,11 @@ in any per-unit baseline built from it. A class property is a unit only when it 
 initialiser: that is code which runs, and it belongs to the property rather than to the
 enclosing script body.
 
+A function's scope modifier is not part of its name: `function global:Get-Fact` is the unit
+`Get-Fact`, so adding or removing `global:` does not orphan its baseline entry or acceptance. The
+cost is that a `global:` and a plain definition of one name in one file are duplicates, and number
+as such.
+
 ## The two metrics
 
 **Cyclomatic** = 1 + decision points (each `if`/`elseif`/`switch` clause, each

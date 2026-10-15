@@ -218,6 +218,31 @@ class C { static [int] Helper($o) { if ($o) { return [D]::Helper(1) } return 0 }
     }
 }
 
+Describe 'recursion through a qualified name (#158)' {
+    # Recursion was an exact match on the command text, so a self-call written with a module
+    # qualifier or a scope modifier, or from a function DEFINED with one, scored nothing. Each
+    # case is if(1) + recursion(1) = 2; a missed recursion reads 1.
+    It 'counts <Name>' -ForEach @(
+        @{ Name = 'a module-qualified self-call'; Code = 'function Get-Fq { param($n) if ($n) { MyMod\Get-Fq ($n - 1) } }' }
+        @{ Name = 'a self-call with a scope modifier'; Code = 'function Get-Fq { param($n) if ($n) { script:Get-Fq ($n - 1) } }' }
+        @{ Name = 'a bare self-call from a function defined with a scope modifier'; Code = 'function global:Get-Fq { param($n) if ($n) { Get-Fq ($n - 1) } }' }
+        @{ Name = 'a module whose name has dots'; Code = 'function Get-Fq { param($n) if ($n) { My.Module\Get-Fq ($n - 1) } }' }
+    ) {
+        Get-CognitiveOf -Code $Code | Should-Be 2
+    }
+
+    # A PATH runs a script, not this function, however its leaf reads.
+    It 'does not count <Name>' -ForEach @(
+        @{ Name = 'a relative script path'; Code = 'function Get-Fq { param($n) if ($n) { .\Get-Fq ($n - 1) } }' }
+        @{ Name = 'a rooted script path'; Code = 'function Get-Fq { param($n) if ($n) { C:\Get-Fq ($n - 1) } }' }
+        @{ Name = 'a path of two segments'; Code = 'function Get-Fq { param($n) if ($n) { a\b\Get-Fq ($n - 1) } }' }
+        @{ Name = 'a home-relative path'; Code = 'function Get-Fq { param($n) if ($n) { ~\Get-Fq ($n - 1) } }' }
+        @{ Name = 'a forward-slash path'; Code = 'function Get-Fq { param($n) if ($n) { a/Get-Fq ($n - 1) } }' }
+    ) {
+        Get-CognitiveOf -Code $Code | Should-Be 1
+    }
+}
+
 Describe 'Test-PSCxFlowCommand' {
     BeforeAll {
         function Get-Node { param([string]$Code, [string]$Type)

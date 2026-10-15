@@ -134,6 +134,20 @@ Describe 'Get-PSCxUnitOwnName' {
         Get-PSCxUnitOwnName -Boundary $fn | Should-Be 'Get-Thing'
     }
 
+    # Adding `global:` must not rename the unit: the name is its baseline and acceptance key.
+    It 'drops the <Prefix> scope modifier from a function name (#158)' -ForEach @(
+        @{ Prefix = 'global:' }, @{ Prefix = 'script:' }, @{ Prefix = 'local:' }, @{ Prefix = 'private:' }, @{ Prefix = 'GLOBAL:' }
+    ) {
+        $fn = FirstNode (Tree "function $($Prefix)Get-Thing { 1 }") 'FunctionDefinitionAst'
+        Get-PSCxUnitOwnName -Boundary $fn | Should-Be 'Get-Thing'
+    }
+
+    It 'leaves a name merely starting like a scope modifier as written' {
+        # Anchored on the whole word and its colon: 'globalish:' is not a scope.
+        $fn = FirstNode (Tree 'function globalish:Get-Thing { 1 }') 'FunctionDefinitionAst'
+        Get-PSCxUnitOwnName -Boundary $fn | Should-Be 'globalish:Get-Thing'
+    }
+
     It 'qualifies a class member with its class' {
         $m = FirstNode (Tree 'class Widget { [int] Render() { return 1 } }') 'FunctionMemberAst'
         Get-PSCxUnitOwnName -Boundary $m | Should-Be 'Widget.Render'
@@ -276,21 +290,52 @@ Describe 'Get-PSCxUnitTable' {
     }
 }
 
-Describe 'Get-PSCxEnclosingFunctionName' {
-    It 'names the nearest enclosing function' {
-        $t = Tree 'function Get-Thing { Get-Thing }'
-        Get-PSCxEnclosingFunctionName -Node (FirstNode $t 'CommandAst') | Should-Be 'Get-Thing'
+Describe 'Test-PSCxSelfCall' {
+    It 'is true for a call to the enclosing function' {
+        Test-PSCxSelfCall -Node (FirstNode (Tree 'function Get-Thing { Get-Thing }') 'CommandAst') | Should-BeTrue
     }
 
-    It 'is null inside a class method, so recursion is not attributed to an outer function' {
+    It 'is false for a call to another command' {
+        Test-PSCxSelfCall -Node (FirstNode (Tree 'function Get-Thing { Get-Other }') 'CommandAst') | Should-BeFalse
+    }
+
+    # The function each side NAMES, not the text (#158).
+    It 'is true for <Name>' -ForEach @(
+        @{ Name = 'a module-qualified call'; Code = 'function Get-Thing { MyMod\Get-Thing }' }
+        @{ Name = 'a module whose name has dots'; Code = 'function Get-Thing { My.Module\Get-Thing }' }
+        @{ Name = 'a call with a scope modifier'; Code = 'function Get-Thing { script:Get-Thing }' }
+        @{ Name = 'a bare call inside a function defined with one'; Code = 'function global:Get-Thing { Get-Thing }' }
+        @{ Name = 'a qualified, scoped call inside a scoped function'; Code = 'function private:Get-Thing { MyMod\local:Get-Thing }' }
+    ) {
+        Test-PSCxSelfCall -Node (FirstNode (Tree $Code) 'CommandAst') | Should-BeTrue
+    }
+
+    # A PATH runs a script, not this function, however its leaf reads.
+    It 'is false for <Name>' -ForEach @(
+        @{ Name = 'a relative script path'; Code = 'function Get-Thing { .\Get-Thing }' }
+        @{ Name = 'a rooted script path'; Code = 'function Get-Thing { C:\Get-Thing }' }
+        @{ Name = 'a path of two segments'; Code = 'function Get-Thing { a\b\Get-Thing }' }
+        @{ Name = 'a home-relative path'; Code = 'function Get-Thing { ~\Get-Thing }' }
+        @{ Name = 'a forward-slash path'; Code = 'function Get-Thing { a/Get-Thing }' }
+    ) {
+        Test-PSCxSelfCall -Node (FirstNode (Tree $Code) 'CommandAst') | Should-BeFalse
+    }
+
+    It 'is false inside a class method, so recursion is not attributed to an outer function' {
         # A bare command inside a method is a command lookup, never a call to the method.
         $t = Tree 'function Outer { class W { [int] M() { Outer ; return 1 } } }'
-        Get-PSCxEnclosingFunctionName -Node (FirstNode $t 'CommandAst') | Should-BeNull
+        Test-PSCxSelfCall -Node (FirstNode $t 'CommandAst') | Should-BeFalse
     }
 
-    It 'is null at file scope' {
-        Get-PSCxEnclosingFunctionName -Node (FirstNode (Tree 'Get-Thing') 'CommandAst') |
-            Should-BeNull
+    It 'is false at file scope, even for a command with no readable name' {
+        # Neither side has a name there: `& $cmd` names nothing and file scope is no function, and
+        # two absent names must not read as the same name.
+        Test-PSCxSelfCall -Node (FirstNode (Tree 'Get-Thing') 'CommandAst') | Should-BeFalse
+        Test-PSCxSelfCall -Node (FirstNode (Tree '& $cmd') 'CommandAst') | Should-BeFalse
+    }
+
+    It 'is false for a command with no readable name inside a function' {
+        Test-PSCxSelfCall -Node (FirstNode (Tree 'function Get-Thing { & $cmd }') 'CommandAst') | Should-BeFalse
     }
 }
 
