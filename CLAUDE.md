@@ -27,9 +27,14 @@ a change that drops any of the three is not finished.
 **What the self-mutation 100% covers.** PSMutant mutates only lines the baseline executed, and
 since its 0.6.0 a line counts as executed when the innermost command spanning it ran -- so the
 continuation lines of a multi-line statement are in the set, where before they were silently left
-out. A `param()` default is still out: no command spans it, so nothing can say it ran. The two that
-matter here, the gate's 15 / 15 ceilings, are pinned instead by a test in `tests/Measure.Tests.ps1`
-that sits a unit on each side of each ceiling.
+out. A line no command spans -- a parameter declaration -- can never count as executed, so the
+self config sets **`coveredLinesOnly: false`** and mutates every line. That is safe only because
+coverage is gated at 100%: the lines it adds are exactly the parameter declarations, four of them,
+not code nothing ran. The gate's 15 / 15 ceiling defaults are among them and die to the test in
+`tests/Measure.Tests.ps1` that sits a unit on each side of each ceiling. The other two are
+`Position = 0 -> 1` on `-Path`, **declared equivalent** in the config: `-Path` is each command's
+only positional parameter, so 0 and 1 bind identically. If coverage ever drops below 100%,
+`coveredLinesOnly` has to come back on first, or every uncovered mutant becomes a survivor.
 
 ---
 

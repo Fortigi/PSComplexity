@@ -1722,6 +1722,24 @@ Describe 'paths arrive by property as well as by value' {
         Get-ChildItem $script:work -Filter *.ps1 | Test-PSComplexity -MaxCyclomatic 99 -MaxCognitive 99 |
             Should-BeTrue
     }
+
+    It 'binds a POSITIONAL path, the form every README example uses' {
+        # `Measure-PSComplexity ./src -Recurse` is how the README calls both commands, and every
+        # other test here spells -Path out. Asserted as the same measurement, not merely a count.
+        $file = Join-Path $script:work 'a.ps1'
+        $positional = @(Measure-PSComplexity $file | ForEach-Object { "$($_.File)|$($_.Unit)|$($_.Cyclomatic)" })
+        $named = @(Measure-PSComplexity -Path $file | ForEach-Object { "$($_.File)|$($_.Unit)|$($_.Cyclomatic)" })
+        $positional.Count | Should-BeGreaterThan 0
+        ($positional -join ';') | Should-Be ($named -join ';')
+    }
+
+    It 'binds a positional path to the gate, which then judges THAT path' {
+        # Both verdicts, so a gate that ignored the path -- or never received it -- cannot pass:
+        # every unit is at least cyclomatic 1, so a ceiling of 0 must fail it.
+        $file = Join-Path $script:work 'a.ps1'
+        Test-PSComplexity $file -MaxCyclomatic 99 -MaxCognitive 99 3>$null | Should-BeTrue
+        Test-PSComplexity $file -MaxCyclomatic 0 -MaxCognitive 99 3>$null | Should-BeFalse
+    }
 }
 
 Describe 'a path that produced nothing is reported, not swallowed' {
@@ -1758,9 +1776,10 @@ Describe 'a path that produced nothing is reported, not swallowed' {
 
 Describe 'the gate ceilings a caller gets without asking' {
     # Both default to 15, and the README says so. A param() default is never a command, so no
-    # coverage tracer can say it ran and the mutation gate never generates a mutant for it: this
-    # test is the only thing that notices if either number moves. Each case sits exactly on one
-    # side of ONE ceiling with the other well clear, so a moved default fails exactly one case.
+    # coverage tracer can say it ran: the self-mutation config sets coveredLinesOnly off so that
+    # these two defaults are mutated anyway, and this test is what kills them. Each case sits
+    # exactly on one side of ONE ceiling with the other well clear, so a moved default fails
+    # exactly one case.
     BeforeAll {
         $script:ceil = Join-Path ([System.IO.Path]::GetTempPath()) "cxceil-$([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $script:ceil -Force | Out-Null
