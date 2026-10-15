@@ -83,6 +83,23 @@ Describe 'Get-PSCxSourceFile' {
         $deep | Should-ContainCollection 'deep.ps1'
     }
 
+    It 'walks a dot-directory and takes a dot-file, on every OS (#161)' {
+        # Linux treats a dot-name as hidden and Get-ChildItem skips it without -Force; Windows
+        # hides by attribute and did not. The same tree measured differently per platform, and
+        # `.github/scripts/x.ps1` vanished from a Linux gate without a word. Its own directory,
+        # so the counts other tests take over the shared fixture do not move.
+        $root = Join-Path ([System.IO.Path]::GetTempPath()) "cxdot-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path (Join-Path $root '.hidden') -Force | Out-Null
+        Set-Content (Join-Path $root '.hidden/inner.ps1') 'function Get-Inner { 1 }' -Encoding utf8
+        Set-Content (Join-Path $root '.dotfile.ps1') 'function Get-Dot { 1 }' -Encoding utf8
+        Set-Content (Join-Path $root 'plain.ps1') 'function Get-Plain { 1 }' -Encoding utf8
+        try {
+            $names = @((Get-PSCxSourceFile -Path $root -Recurse) | ForEach-Object { Split-Path $_ -Leaf } | Sort-Object)
+            ($names -join ',') | Should-Be '.dotfile.ps1,inner.ps1,plain.ps1'
+        }
+        finally { Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
     It 'takes an existing path LITERALLY, so a bracket in a directory name still resolves' {
         # -Path glob-parses '[', so a real directory named 'my[1]proj' matches nothing and the
         # scan reports a clean zero over code it never opened.
@@ -815,14 +832,99 @@ Describe 'Get-PSCxSkipReason' {
         $null = [System.Management.Automation.Language.Parser]::ParseFile(
             (Join-Path $script:work 'no-such-file.ps1'), [ref]$null, [ref]$e)
         @($e)[0].ErrorId | Should-Be 'FileReadError'
-        Get-PSCxSkipReason -ParseError @($e)[0] | Should-BeLikeString 'could not be read: *'
+        Get-PSCxSkipReason -ParseError @($e)[0] -Token @() | Should-BeLikeString 'could not be read: *'
     }
 
     It 'still calls a syntax error a parse error' {
         $e = $null
         $null = [System.Management.Automation.Language.Parser]::ParseFile(
             (Join-Path $script:broken 'bad.ps1'), [ref]$null, [ref]$e)
-        Get-PSCxSkipReason -ParseError @($e)[0] | Should-BeLikeString 'parse error: *'
+        Get-PSCxSkipReason -ParseError @($e)[0] -Token @() | Should-BeLikeString 'parse error: *'
+    }
+
+    It 'calls a workflow what it is, not a parse error (#161)' {
+        # PowerShell 7 parses no workflow, on any OS. The source is fine; the host is not.
+        $e = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseInput('workflow Test-Wf { 1 }', [ref]$null, [ref]$e)
+        Get-PSCxSkipReason -ParseError @($e)[0] -Token @() |
+            Should-BeLikeString 'a workflow, which PowerShell 7 cannot parse: Workflow is not supported*'
+    }
+
+    It 'calls a DSC Configuration the host cannot load what it is, keeping one line (#161)' {
+        # Constructed rather than parsed, so it reads the same on every OS: Windows parses the
+        # Configuration, and the failure only exists where the DSC schema store is missing.
+        # The real message is the .NET exception and its stack trace; only the first line stays.
+        $t = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseInput('Configuration MyConfig { }', [ref]$t, [ref]$null)
+        $err = [System.Management.Automation.Language.ParseError]::new($t[1].Extent, 'ParserError',
+            "System.IO.DirectoryNotFoundException: Unable to find DSC schema store.`n   at Somewhere()`n   at Elsewhere()")
+        Get-PSCxSkipReason -ParseError $err -Token $t |
+            Should-Be 'a DSC Configuration, which this host cannot parse without the DSC schema store: System.IO.DirectoryNotFoundException: Unable to find DSC schema store.'
+    }
+
+    It 'keeps only the first line of any message, whatever its line ending' {
+        $t = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseInput('1', [ref]$t, [ref]$null)
+        $crlf = [System.Management.Automation.Language.ParseError]::new($t[0].Extent, 'Other', "first`r`nsecond")
+        $lf = [System.Management.Automation.Language.ParseError]::new($t[0].Extent, 'Other', "first`nsecond")
+        Get-PSCxSkipReason -ParseError $crlf -Token $t | Should-Be 'parse error: first'
+        Get-PSCxSkipReason -ParseError $lf -Token $t | Should-Be 'parse error: first'
+    }
+}
+
+Describe 'Test-PSCxDscSchemaFault' {
+    # By position: the DSC load failure sits on the configuration's NAME, the token straight
+    # after the keyword, and has only the generic ErrorId.
+    BeforeAll {
+        $script:dscTokens = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseInput(
+            "Configuration MyConfig {`n  1 +`n}", [ref]$script:dscTokens, [ref]$null)
+        function script:Fault { param($Extent, [string]$Id = 'ParserError')
+            return [System.Management.Automation.Language.ParseError]::new($Extent, $Id, 'm')
+        }
+    }
+
+    It 'is true for a ParserError on the name after the Configuration keyword' {
+        Test-PSCxDscSchemaFault -ParseError (Fault $script:dscTokens[1].Extent) -Token $script:dscTokens | Should-BeTrue
+    }
+
+    It 'is false for another ErrorId at the same place' {
+        Test-PSCxDscSchemaFault -ParseError (Fault $script:dscTokens[1].Extent 'UnexpectedToken') -Token $script:dscTokens | Should-BeFalse
+    }
+
+    It 'is false for a ParserError anywhere else in the configuration' {
+        # A genuine syntax error inside a Configuration is still a syntax error. On the keyword
+        # itself, and on a token later in the body.
+        Test-PSCxDscSchemaFault -ParseError (Fault $script:dscTokens[0].Extent) -Token $script:dscTokens | Should-BeFalse
+        Test-PSCxDscSchemaFault -ParseError (Fault $script:dscTokens[2].Extent) -Token $script:dscTokens | Should-BeFalse
+    }
+
+    It 'is false when the token before is not the Configuration keyword' {
+        $t = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseInput('function MyConfig { }', [ref]$t, [ref]$null)
+        Test-PSCxDscSchemaFault -ParseError (Fault $t[1].Extent) -Token $t | Should-BeFalse
+    }
+
+    It 'is false with no tokens' {
+        Test-PSCxDscSchemaFault -ParseError (Fault $script:dscTokens[1].Extent) -Token @() | Should-BeFalse
+    }
+}
+
+Describe 'a host-dependent file, end to end (#161)' {
+    It 'either measures a DSC Configuration or names why it could not' {
+        # Windows parses one; Linux without the DSC schema store cannot. Both are right, and the
+        # one thing that must not happen is a skip described as a syntax error.
+        $f = Join-Path $script:work 'dsc-161.ps1'
+        Set-Content $f "Configuration MyConfig {`n    Node 'localhost' { }`n}`nfunction Get-Ok { 1 }" -Encoding utf8
+        try {
+            $scan = Get-PSCxScan -Path @($f)
+            if ($scan.Skipped.Count -gt 0) {
+                $scan.Skipped[0].Reason | Should-BeLikeString 'a DSC Configuration, which this host cannot parse without the DSC schema store: *'
+                $scan.Skipped[0].Reason | Should-NotBeLikeString "*`n*"
+            }
+            else { @($scan.Units | ForEach-Object Unit) | Should-ContainCollection 'Get-Ok' }
+        }
+        finally { Remove-Item $f -Force -ErrorAction SilentlyContinue }
     }
 }
 
