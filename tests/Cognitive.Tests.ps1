@@ -42,6 +42,10 @@ function Get-Fib { param($n) if ($n -le 1) { return $n }; return (Get-Fib ($n - 
     @{ spec = 'EXTENSION -- PowerShell pipeline flow the spec does not cover'; name = 'if inside ForEach-Object'; expected = 3; code = 'function T { param($items) $items | ForEach-Object { if ($_) { 1 } } }' }
     @{ spec = 'EXTENSION -- the pipeline form must cost what the keyword form costs'; name = 'if inside foreach keyword scores identically'; expected = 3; code = 'function T { param($items) foreach ($i in $items) { if ($i) { 1 } } }' }
     @{ spec = 'EXTENSION -- PowerShell pipeline flow the spec does not cover'; name = 'Where-Object is a conditional'; expected = 1; code = 'function T { param($items) $items | Where-Object { $_ -gt 0 } }' }
+    # The intrinsic methods, each paired with the cmdlet case above: the same logic must score
+    # the same however it is spelled (#159).
+    @{ spec = 'EXTENSION -- the method form must cost what the cmdlet form costs'; name = 'if inside the .ForEach() method'; expected = 3; code = 'function T { param($items) $items.ForEach({ if ($_) { 1 } }) }' }
+    @{ spec = 'EXTENSION -- the method form must cost what the cmdlet form costs'; name = 'the .Where() method is a conditional'; expected = 1; code = 'function T { param($items) $items.Where({ $_ -gt 0 }) }' }
     @{ spec = 'EXTENSION -- pipeline chains follow the spec B1 run rule'; name = '&& is one run, like -and'; expected = 1; code = 'function T { a && b && c }' }
     @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = '&& then || is two runs'; expected = 2; code = 'function T { a && b || c }' }
     @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'null-coalescing is a conditional'; expected = 1; code = 'function T { param($a, $b) $x = $a ?? $b }' }
@@ -53,6 +57,8 @@ function Get-Fib { param($n) if ($n -le 1) { return $n }; return (Get-Fib ($n - 
     # NESTED, deliberately. At nesting 0 the increment is 1 + 0, which is indistinguishable
     # from 1 - 0: the arithmetic itself is only pinned when the nesting term is non-zero.
     @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'ForEach-Object nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $xs) if ($a) { $xs | ForEach-Object { $_ } } }' }
+    @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'the .ForEach() method nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $xs) if ($a) { $xs.ForEach({ $_ }) } }' }
+    @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'an ordinary method is not flow'; expected = 0; code = 'function T { param($xs) $xs.Add({ $_ }) }' }
     @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'null-coalescing nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $x, $y) if ($a) { $z = $x ?? $y } }' }
     @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'null-coalescing assignment nested in an if pays the nesting'; expected = 3; code = 'function T { param($a, $x) if ($a) { $x ??= 1 } }' }
     @{ spec = 'VOCABULARY -- pins a construct-list entry, not a reference score'; name = 'flat function scores 0'; expected = 0; code = 'function T { param($x) $y = $x + 1; return $y }' }

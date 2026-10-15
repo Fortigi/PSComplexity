@@ -40,15 +40,15 @@ function Get-PSCxCycBlockRow {
 }
 
 function Get-PSCxCycFlowCommandRow {
-    # ForEach-Object / Where-Object and their aliases: one decision each, exactly as the
-    # keyword loop and conditional they stand in for.
+    # ForEach-Object / Where-Object, their aliases and the .ForEach() / .Where() methods: one
+    # decision each, exactly as the keyword loop and conditional they stand in for.
     [OutputType([pscustomobject])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    # Test-PSCxFlowCommand answers False for anything that is not a CommandAst, so asking the
-    # index for the CommandAst nodes and testing those is the same set in the same order -- at the
-    # cost of the commands in the file rather than every node in it.
-    foreach ($n in (Get-PSCxNodeByTypeName -Ast $Ast -TypeName 'CommandAst')) {
+    # Test-PSCxFlowCommand answers False for anything that is not a command or a member call, so
+    # asking the index for those two kinds and testing them is the same set in the same order --
+    # at the cost of the calls in the file rather than every node in it.
+    foreach ($n in (Get-PSCxNodeByKind -Ast $Ast -Type ([System.Management.Automation.Language.CommandAst], [System.Management.Automation.Language.InvokeMemberExpressionAst]))) {
         if (-not (Test-PSCxFlowCommand -Node $n)) { continue }
         [pscustomobject]@{ Key = Get-PSCxUnitKey -Node $n; Construct = 'flow-command'; Line = $n.Extent.StartLineNumber; Amount = 1 }
     }

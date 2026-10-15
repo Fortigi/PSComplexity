@@ -59,7 +59,8 @@ function Get-PSCxSourceFile {
 #
 # Starts at 1 with 0.4.0. Scores from earlier releases carry no version and are not comparable
 # with these; that is a statement about what was never recorded, not a claim that they agree.
-$script:PSCxMetricVersion = 1
+# 2: the .ForEach() and .Where() methods score as the cmdlets do (#159).
+$script:PSCxMetricVersion = 2
 
 function Get-PSCxRelativePath {
     # A path two machines can agree on.

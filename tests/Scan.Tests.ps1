@@ -354,7 +354,8 @@ Describe 'Get-PSCxMetricVersion' {
     It 'reports the version this build measures with' {
         # Read through the function rather than the variable, because no other file may reach
         # into this one's module state -- tests/Layering.Tests.ps1 asserts exactly that.
-        Get-PSCxMetricVersion | Should-Be 1
+        # Moved to 2 with 0.6.0, when the .ForEach() and .Where() methods started to score (#159).
+        Get-PSCxMetricVersion | Should-Be 2
     }
 }
 

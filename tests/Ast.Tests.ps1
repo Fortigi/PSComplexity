@@ -333,6 +333,31 @@ Describe 'Test-PSCxFlowCommand' {
         # already answers false -- and a guard would be unreachable by any observation.
         Test-PSCxFlowCommand -Node (FirstNode (Tree '& $cmd 1') 'CommandAst') | Should-BeFalse
     }
+
+    It 'is true for the .Where() and .ForEach() methods, in any case (#159)' {
+        Test-PSCxFlowCommand -Node (FirstNode (Tree '$x.Where({ $_ })') 'InvokeMemberExpressionAst') |
+            Should-BeTrue
+        Test-PSCxFlowCommand -Node (FirstNode (Tree '$x.foreach({ $_ })') 'InvokeMemberExpressionAst') |
+            Should-BeTrue
+    }
+
+    It 'is false for an ordinary method' {
+        # Paired with the case above: an answer of true for every member call would pass it.
+        Test-PSCxFlowCommand -Node (FirstNode (Tree '$x.Add(1)') 'InvokeMemberExpressionAst') |
+            Should-BeFalse
+    }
+
+    It 'is false for a STATIC method of the same name' {
+        # The intrinsics are instance methods. The name matches here and only the static test
+        # refuses it, which is what pins the -and between the two.
+        Test-PSCxFlowCommand -Node (FirstNode (Tree '[Thing]::Where({ $_ })') 'InvokeMemberExpressionAst') |
+            Should-BeFalse
+    }
+
+    It 'is false for a method whose name is computed, which has no name to read' {
+        Test-PSCxFlowCommand -Node (FirstNode (Tree '$x.$m({ $_ })') 'InvokeMemberExpressionAst') |
+            Should-BeFalse
+    }
 }
 
 Describe 'the AST index' {
