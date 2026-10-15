@@ -327,6 +327,12 @@ Describe 'Test-PSCxSelfCall' {
         Test-PSCxSelfCall -Node (FirstNode $t 'CommandAst') | Should-BeFalse
     }
 
+    It 'is false inside a class method for a bare command spelling the method''s own name' {
+        # The case the class-member guard exists for: compared by name, `M` inside `M()` would
+        # read as recursion. A method recurses through `$this`, which a different collector counts.
+        Test-PSCxSelfCall -Node (FirstNode (Tree 'class W { [int] M() { M ; return 1 } }') 'CommandAst') | Should-BeFalse
+    }
+
     It 'is false at file scope, even for a command with no readable name' {
         # Neither side has a name there: `& $cmd` names nothing and file scope is no function, and
         # two absent names must not read as the same name.
@@ -336,6 +342,99 @@ Describe 'Test-PSCxSelfCall' {
 
     It 'is false for a command with no readable name inside a function' {
         Test-PSCxSelfCall -Node (FirstNode (Tree 'function Get-Thing { & $cmd }') 'CommandAst') | Should-BeFalse
+    }
+
+    # A command with no name can still run the function it sits in (#182).
+    It 'is true for <Name>' -ForEach @(
+        @{ Name = 'its body through the function drive'; Code = 'function Get-Thing { & ${function:Get-Thing} }' }
+        @{ Name = 'the function drive, dot-sourced'; Code = 'function Get-Thing { . ${function:Get-Thing} }' }
+        @{ Name = 'the function drive, from a function defined with a scope modifier'; Code = 'function global:Get-Thing { & ${function:Get-Thing} }' }
+        @{ Name = 'an unhyphenated name, which needs no braces'; Code = 'function fib { & $function:fib }' }
+        @{ Name = 'the running command'; Code = 'function Get-Thing { & $MyInvocation.MyCommand }' }
+        @{ Name = 'the running command by name'; Code = 'function Get-Thing { & $MyInvocation.MyCommand.Name }' }
+        @{ Name = 'the running command, inside a block-less construct'; Code = 'function Get-Thing { if ($x) { & $MyInvocation.MyCommand } }' }
+    ) {
+        Test-PSCxSelfCall -Node (FirstNode (Tree $Code) 'CommandAst') | Should-BeTrue
+    }
+
+    It 'is false for <Name>' -ForEach @(
+        # `$function:Get-Thing` is `$function:Get` then the text `-Thing`: it runs nothing.
+        @{ Name = 'an unbraced hyphenated name, which is not this function'; Code = 'function Get-Thing { & $function:Get-Thing }' }
+        @{ Name = 'another function on the function drive'; Code = 'function Get-Thing { & ${function:Get-Other} }' }
+        @{ Name = 'a variable that only ends in the name'; Code = 'function Get-Thing { & ${env:Get-Thing} }' }
+        @{ Name = 'an ordinary variable'; Code = 'function Get-Thing { & $Get }' }
+        @{ Name = 'a script path, inside a function'; Code = 'function Get-Thing { & $PSCommandPath }' }
+        @{ Name = 'the running script path, inside a function'; Code = 'function Get-Thing { & $MyInvocation.MyCommand.Path }' }
+        @{ Name = 'a longer member chain'; Code = 'function Get-Thing { & $MyInvocation.MyCommand.Name.Trim }' }
+        @{ Name = 'the running command inside a script block'; Code = 'function Get-Thing { & { & $MyInvocation.MyCommand } }' }
+    ) {
+        $t = Tree $Code
+        # The LAST command: in the script-block case the outer `& { }` is a command too.
+        Test-PSCxSelfCall -Node (Nodes $t 'CommandAst')[-1] | Should-BeFalse
+    }
+}
+
+Describe 'Test-PSCxScriptSelfCall' {
+    # The <script-body> unit's recursion (#182). Parsed WITH a file name, as Parser::ParseFile does,
+    # because the third form compares against it.
+    BeforeAll {
+        function script:ScriptCall { param([string]$Code, [string]$File = '/repo/scripts/Get-Self.ps1')
+            $t = [System.Management.Automation.Language.Parser]::ParseInput($Code, $File, [ref]$null, [ref]$null)
+            return Test-PSCxSelfCall -Node (Nodes $t 'CommandAst')[-1]
+        }
+    }
+
+    It 'is true for <Name>' -ForEach @(
+        @{ Name = 'the script path'; Code = '& $PSCommandPath 1' }
+        @{ Name = 'the script path, dot-sourced'; Code = '. $PSCommandPath' }
+        @{ Name = 'the script path, quoted'; Code = '& "$PSCommandPath" 1' }
+        @{ Name = 'the running script'; Code = '& $MyInvocation.MyCommand 1' }
+        @{ Name = 'the running script by path'; Code = '& $MyInvocation.MyCommand.Path 1' }
+        @{ Name = 'its own name, relative'; Code = '.\Get-Self.ps1 1' }
+        @{ Name = 'its own name, relative, forward slash'; Code = './Get-Self.ps1 1' }
+        @{ Name = 'its own name, single-quoted'; Code = "& '.\Get-Self.ps1' 1" }
+        @{ Name = 'its own name beside the script'; Code = '& "$PSScriptRoot\Get-Self.ps1" 1' }
+        @{ Name = 'its own name beside the script, unquoted, forward slash'; Code = '& $PSScriptRoot/Get-Self.ps1 1' }
+        @{ Name = 'the script path inside a script block'; Code = '& { & $PSCommandPath }' }
+    ) {
+        ScriptCall $Code | Should-BeTrue
+    }
+
+    It 'is false for <Name>' -ForEach @(
+        @{ Name = 'an ordinary command'; Code = 'Get-Item x' }
+        @{ Name = 'a variable'; Code = '& $cmd' }
+        @{ Name = 'another script beside it'; Code = '.\Get-Other.ps1' }
+        @{ Name = 'its name bare, which is a PATH lookup'; Code = 'Get-Self.ps1' }
+        @{ Name = 'its name in another folder'; Code = '.\lib\Get-Self.ps1' }
+        @{ Name = 'its name as a suffix of another'; Code = '.\Not-Get-Self.ps1' }
+        @{ Name = 'its name with something after it'; Code = '.\Get-Self.ps1.bak' }
+        @{ Name = 'a regex metacharacter where the dot is'; Code = '.\Get-SelfXps1' }
+        @{ Name = 'the running script by name, which is a PATH lookup'; Code = '& $MyInvocation.MyCommand.Name' }
+        @{ Name = 'the running script inside a script block'; Code = '& { & $MyInvocation.MyCommand }' }
+        @{ Name = 'a path variable that only starts the same'; Code = '& $PSCommandPathX' }
+        @{ Name = 'another root variable'; Code = '& "$HOME\Get-Self.ps1"' }
+    ) {
+        ScriptCall $Code | Should-BeFalse
+    }
+
+    It 'is false for <Name> when the tree records no file' -ForEach @(
+        # A tree parsed from text has no file name, so there is nothing for a path to be -- and an
+        # empty name must not turn the pattern into "the folder itself".
+        @{ Name = 'its own name'; Code = '.\Get-Self.ps1 1' }
+        @{ Name = 'the folder beside it'; Code = '& "$PSScriptRoot/"' }
+    ) {
+        Test-PSCxSelfCall -Node (FirstNode (Tree $Code) 'CommandAst') | Should-BeFalse
+    }
+
+    It 'is false for the script path inside a function -- that is the function''s unit, and runs the script' {
+        ScriptCall 'function Get-Thing { & $PSCommandPath }' | Should-BeFalse
+    }
+
+    It 'counts the running command in a function nested inside a script block' {
+        # The walk stops at the unit's own definition: a block OUTSIDE the function is not
+        # between the command and the function's body.
+        $t = Tree '& { function Get-Thing { & $MyInvocation.MyCommand } }'
+        Test-PSCxSelfCall -Node (Nodes $t 'CommandAst')[-1] | Should-BeTrue
     }
 }
 

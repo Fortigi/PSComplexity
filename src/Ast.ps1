@@ -599,13 +599,70 @@ function Test-PSCxSelfCall {
     # -- an exact match on the text missed all three. A module qualifier is ONE segment before a
     # backslash; anything reading as a path -- `.\Get-Fact`, `C:\Get-Fact`, `~\x`, two segments --
     # runs a script rather than this function, so it is left as written and never matches.
+    #
+    # A command with no name can still be the function (#182): `& ${function:Get-Fact}` runs its
+    # body, and `& $MyInvocation.MyCommand` (or `.Name`) runs whatever is executing. At file scope
+    # the unit is the script, and Test-PSCxScriptSelfCall answers instead.
     [OutputType([bool])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Node)
     $boundary = Get-PSCxUnitBoundary -Node $Node
+    if ($null -eq $boundary) { return Test-PSCxScriptSelfCall -Node $Node }
     if ($boundary -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) { return $false }
-    $called = $Node.GetCommandName() -replace '^[^\\/:.~][^\\/:]*\\', '' -replace $script:PSCxScopeModifierPattern, ''
-    return $called -eq ($boundary.Name -replace $script:PSCxScopeModifierPattern, '')
+    $own = $boundary.Name -replace $script:PSCxScopeModifierPattern, ''
+    $called = $Node.GetCommandName()
+    if ($null -ne $called) {
+        return ($called -replace '^[^\\/:.~][^\\/:]*\\', '' -replace $script:PSCxScopeModifierPattern, '') -eq $own
+    }
+    # `$function:Get-Fact` is NOT this: it parses as `$function:Get` followed by the text `-Fact`,
+    # and fails at run time. Only the braced form names a hyphenated function, and the variable
+    # path carries it whole either way.
+    $first = $Node.CommandElements[0]
+    if ($first -is [System.Management.Automation.Language.VariableExpressionAst]) {
+        return ($first.VariablePath.DriveName -eq 'function') -and
+            (($first.VariablePath.UserPath -replace '^function:', '') -eq $own)
+    }
+    return ($first.Extent.Text -match '^\$MyInvocation\.MyCommand(\.Name)?$') -and (Test-PSCxOwnInvocation -Node $Node)
+}
+
+function Test-PSCxScriptSelfCall {
+    # True when a command at file scope runs the script it sits in (#182) -- the `<script-body>`
+    # unit's recursion. The forms are the idioms, matched as text, and nothing is resolved:
+    #
+    #   $PSCommandPath                         the running script's path
+    #   $MyInvocation.MyCommand[.Path]         the running script, when no script block intervenes
+    #   .\Name.ps1, $PSScriptRoot\Name.ps1     the file's OWN name, either separator, quoted or not
+    #
+    # `.\` is relative to the current location rather than the script's folder, so it is the same
+    # file only by convention -- the one every script written to call itself follows. The file name
+    # comes from the tree: Parser::ParseFile records it on every extent, and a tree parsed from text
+    # has none, so the third form cannot match there.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Node)
+    $text = $Node.CommandElements[0].Extent.Text -replace '^["'']|["'']$', ''
+    if ($text -eq '$PSCommandPath') { return $true }
+    if ($text -match '^\$MyInvocation\.MyCommand(\.Path)?$') { return Test-PSCxOwnInvocation -Node $Node }
+    $file = $Node.Extent.File
+    if (-not $file) { return $false }
+    return $text -match ('^(\.|\$PSScriptRoot)[\\/]' + [regex]::Escape([System.IO.Path]::GetFileName($file)) + '$')
+}
+
+function Test-PSCxOwnInvocation {
+    # True when no script block lies between a command and the body of its unit, so that
+    # `$MyInvocation` there is the unit's own. `& { & $MyInvocation.MyCommand }` runs the block,
+    # which has an invocation of its own -- measured, not assumed. A block passed to
+    # ForEach-Object shares its caller's, but a static walk cannot tell which command a block
+    # will be handed to, so every block stops the match: a missed recursion rather than an
+    # invented one.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Node)
+    for ($p = $Node.Parent; $p -isnot [System.Management.Automation.Language.FunctionDefinitionAst]; $p = $p.Parent) {
+        if ($null -eq $p) { return $true }
+        if ($p -is [System.Management.Automation.Language.ScriptBlockExpressionAst]) { return $false }
+    }
+    return $true
 }
 
 function Get-PSCxEnclosingMethod {
