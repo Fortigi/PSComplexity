@@ -144,7 +144,9 @@ function Measure-PSComplexity {
         # duplicate rows in the output, doubling that file's contribution to anything that
         # counts. In `begin` rather than `process` so it also spans pipeline input, where
         # each item arrives as its own invocation of the block below.
-        $seen = [System.Collections.Generic.HashSet[string]]::new((Get-PSCxPathComparer))
+        # Compared as this run's file system compares names, read once from the working directory.
+        $pathComparison = Get-PSCxRunPathComparison -Root (Get-PSCxWorkingRoot)
+        $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::FromComparison($pathComparison))
         # Paths that produced no source file, collected across the whole run for the same reason
         # $seen is: each piped path arrives as its own invocation of the process block.
         $unmatched = [System.Collections.Generic.List[object]]::new()
@@ -161,7 +163,7 @@ function Measure-PSComplexity {
         $changedSet = $null
         if ($PSBoundParameters.ContainsKey('ChangedFile')) {
             Assert-PSCxChangedFile -ChangedFile $ChangedFile
-            $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root (Get-PSCxWorkingRoot)
+            $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root (Get-PSCxWorkingRoot) -PathComparison $pathComparison
         }
     }
     process {
@@ -170,7 +172,7 @@ function Measure-PSComplexity {
         # Accumulating per file here would need three guards that only save memory -- and a
         # branch that changes no output cannot be told from its own absence by any test.
         if ($ReportPath) { return }
-        foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -Recurse:$Recurse -Detailed:$Detailed)) {
+        foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -PathComparison $pathComparison -Recurse:$Recurse -Detailed:$Detailed)) {
             # The projection: units to the output stream, a skip to the error stream.
             #
             # Write-Error rather than a warning: CI logs routinely swallow warnings, and this
@@ -450,7 +452,7 @@ function Test-PSComplexity {
         # acceptance is a fault in the policy, not a complaint about the code -- reporting it
         # as a failing gate would send someone to refactor a unit that is fine.
         $faults = @($Accept | Get-PSCxAcceptanceFault -Unit $units `
-                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive)
+                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $scan.PathComparison)
         if ($faults.Count -gt 0) {
             throw ("The acceptance list does not describe this run: " + ($faults -join '; ') +
                 ". An acceptance that no longer applies is a mute button, so it fails here rather than ageing quietly.")
@@ -459,7 +461,7 @@ function Test-PSComplexity {
         if ($UpdateBaseline) {
             Write-PSCxBaselineFile -Path $BaselineFile -Unit $units -Accept $Accept `
                 -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
-                -MetricVersion (Get-PSCxMetricVersion)
+                -MetricVersion (Get-PSCxMetricVersion) -PathComparison $scan.PathComparison
             # No report and no SARIF from an update. The verdict they would record is one this
             # call just manufactured by recording every breach, and an artefact saying "passed"
             # about that is the mute button the whole policy layer exists instead of.
@@ -468,10 +470,11 @@ function Test-PSComplexity {
 
         $baselineMap = Get-PSCxBaselineState -Path $BaselineFile -Unit $units -Accept $Accept `
             -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
-            -MetricVersion (Get-PSCxMetricVersion)
+            -MetricVersion (Get-PSCxMetricVersion) -PathComparison $scan.PathComparison
 
         $violations = @(Get-PSCxUnacceptedUnit -Unit $units -Accept $Accept `
-                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -BaselineMap $baselineMap)
+                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -BaselineMap $baselineMap `
+                -PathComparison $scan.PathComparison)
         foreach ($v in $violations) {
             Write-Warning ("{0}:{1} {2} -- cyclomatic {3} (max {4}), cognitive {5} (max {6})" -f `
                     $v.File, $v.Line, $v.Unit, $v.Cyclomatic, $MaxCyclomatic, $v.Cognitive, $MaxCognitive)

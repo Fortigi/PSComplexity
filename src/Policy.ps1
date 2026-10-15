@@ -32,37 +32,6 @@ function Get-PSCxBaselineSchemaVersion {
     return $script:PSCxBaselineSchemaVersion
 }
 
-function Get-PSCxPathComparison {
-    # Whether two FILE paths that differ only in case name the same file: the one answer every
-    # path set and every identity in this module has to share (#151).
-    #
-    # By platform, which is the assumption .NET itself makes: Linux is case-sensitive, Windows and
-    # macOS are not. On Linux src/A.ps1 and src/a.ps1 are two files, and comparing them ignoring
-    # case dropped one without a word -- so a gate passed over code it never read. On Windows the
-    # same file is reached under two casings, and comparing them exactly would measure it twice.
-    #
-    # Case-sensitive on Linux everywhere, baselines included. A project with two files differing
-    # only in case cannot be checked out on Windows or macOS at all, so a baseline that holds
-    # one was written on a case-sensitive system and is read on one.
-    #
-    # A parameter rather than reading $IsLinux in the body, so both answers are testable on the
-    # one platform the self-mutation gate runs on. Read inside the body, the other arm would be
-    # a mutant no test there could kill.
-    [OutputType([System.StringComparison])]
-    [CmdletBinding()]
-    param([bool]$CaseSensitive = $IsLinux)
-    if ($CaseSensitive) { return [System.StringComparison]::Ordinal }
-    return [System.StringComparison]::OrdinalIgnoreCase
-}
-
-function Get-PSCxPathComparer {
-    # The same answer as a comparer, for the sets and lookups keyed by path.
-    [OutputType([System.StringComparer])]
-    [CmdletBinding()]
-    param()
-    return [System.StringComparer]::FromComparison((Get-PSCxPathComparison))
-}
-
 function Get-PSCxPolicyKey {
     # The identity a policy is written against. NOT Get-PSCxUnitKey in Ast.ps1, which keys an
     # AST node during a walk -- a different thing that happened to want the same name.
@@ -72,8 +41,8 @@ function Get-PSCxPolicyKey {
     # somebody gates outside their repo.
     #
     # The UNIT is case-folded here and the FILE is not. A function name is case-insensitive in
-    # PowerShell on every platform; a file name is case-sensitive on Linux (#151). Folding the
-    # unit leaves the file half to Get-PSCxPathComparer, which every table keyed by this uses.
+    # PowerShell everywhere; whether a file name is depends on the file system (#151). Folding the
+    # unit leaves the file half to the run's path comparison, which every table keyed by this uses.
     [OutputType([string])]
     [CmdletBinding()]
     param(
@@ -90,7 +59,7 @@ function Get-PSCxPolicyLookup {
     # from 9s to 31s (#153). One builder for both, so the gate and the baseline check cannot come
     # to disagree about which units are accepted.
     #
-    # Keyed with the path comparer, so a file name matches as the platform's file system does and
+    # Keyed with the run's path comparison, so a file name matches as its file system does and
     # a unit name always ignores case (Get-PSCxPolicyKey folds it). Two units cannot collide:
     # files are deduplicated with the same comparer, and same-named units in one file carry
     # ordinals assigned through a case-insensitive table. TryAdd keeps the first anyway, which is
@@ -98,9 +67,12 @@ function Get-PSCxPolicyLookup {
     [OutputType([System.Collections.Generic.Dictionary[string, object]])]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Record
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Record,
+        # How this run's file system compares names (Get-PSCxScan records it). Mandatory, not
+        # defaulted: a default would be a forgotten argument that compares silently wrong.
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
     )
-    $lookup = [System.Collections.Generic.Dictionary[string, object]]::new((Get-PSCxPathComparer))
+    $lookup = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::FromComparison($PathComparison))
     foreach ($r in $Record) { [void]$lookup.TryAdd((Get-PSCxPolicyKey -File ([string]$r.File) -Unit ([string]$r.Unit)), $r) }
     return $lookup
 }
@@ -134,10 +106,11 @@ function Get-PSCxAcceptanceFault {
         [Parameter(ValueFromPipeline)] [AllowNull()] $Acceptance,
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unit,
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
-        [Parameter(Mandatory)] [int]$MaxCognitive
+        [Parameter(Mandatory)] [int]$MaxCognitive,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
     )
     # In begin, once for the whole pipeline: each acceptance arrives as its own run of process.
-    begin { $lookup = Get-PSCxPolicyLookup -Record $Unit }
+    begin { $lookup = Get-PSCxPolicyLookup -Record $Unit -PathComparison $PathComparison }
     process {
         $file = [string]$Acceptance.File
         $name = [string]$Acceptance.Unit
@@ -173,9 +146,10 @@ function Get-PSCxUnacceptedUnit {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Accept,
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
         [AllowEmptyCollection()] [hashtable]$BaselineMap = @{}
     )
-    $accepted = Get-PSCxPolicyLookup -Record $Accept
+    $accepted = Get-PSCxPolicyLookup -Record $Accept -PathComparison $PathComparison
     # Emitted rather than returned as an array, so the declared OutputType describes what a
     # caller actually receives -- one record at a time. The gate wraps the result in @() and
     # gets an empty array when nothing breaches, which is the same answer either way.
@@ -211,13 +185,14 @@ function Get-PSCxBaselineMap {
     # Two entries for one unit is not a merge to resolve quietly: whichever wins decides what the
     # gate permits, and the loser reads as a recorded decision that is silently doing nothing.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseLiteralInitializerForHashtable', '',
-        Justification = 'The literal @{} ignores case, which on Linux is the one property this map must not have: src/A.ps1 and src/a.ps1 are two files, and the literal would refuse their entries as one unit named twice (#151). The path comparer decides instead.')]
+        Justification = 'The literal @{} ignores case, which on a case-sensitive file system is the one property this map must not have: src/A.ps1 and src/a.ps1 are two files there, and the literal would refuse their entries as one unit named twice (#151). The run path comparison decides instead.')]
     [OutputType([hashtable])]
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Entry
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Entry,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
     )
-    $map = [hashtable]::new((Get-PSCxPathComparer))
+    $map = [hashtable]::new([System.StringComparer]::FromComparison($PathComparison))
     foreach ($e in $Entry) {
         $key = Get-PSCxPolicyKey -File ([string]$e.file) -Unit ([string]$e.unit)
         if ($map.ContainsKey($key)) {
@@ -313,13 +288,14 @@ function Get-PSCxBaselineFault {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unit,
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Accept,
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
-        [Parameter(Mandatory)] [int]$MaxCognitive
+        [Parameter(Mandatory)] [int]$MaxCognitive,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
     )
     # In begin, once for the whole pipeline: each entry arrives as its own run of process, and
     # searching both lists from there is what made this cost entries x units (#153).
     begin {
-        $lookup = Get-PSCxPolicyLookup -Record $Unit
-        $accepted = Get-PSCxPolicyLookup -Record $Accept
+        $lookup = Get-PSCxPolicyLookup -Record $Unit -PathComparison $PathComparison
+        $accepted = Get-PSCxPolicyLookup -Record $Accept -PathComparison $PathComparison
     }
     process {
         $file = [string]$Entry.file
@@ -409,9 +385,10 @@ function Get-PSCxBaselineDocument {
         [Parameter(Mandatory)] [int]$MaxCognitive,
         [Parameter(Mandatory)] [int]$MetricVersion,
         [Parameter(Mandatory)] [int]$SchemaVersion,
-        [Parameter(Mandatory)] [datetime]$GeneratedAt
+        [Parameter(Mandatory)] [datetime]$GeneratedAt,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
     )
-    $breaching = @(Get-PSCxUnacceptedUnit -Unit $Unit -Accept $Accept -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive)
+    $breaching = @(Get-PSCxUnacceptedUnit -Unit $Unit -Accept $Accept -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $PathComparison)
     $entries = @($breaching | Sort-Object File, Unit | ForEach-Object {
             [pscustomobject]@{
                 file       = $_.File

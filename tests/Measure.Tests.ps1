@@ -2,6 +2,9 @@
 # the <script-body> unit, parse-error handling, and the Test-PSComplexity gate.
 
 BeforeAll {
+    # The comparison a real run makes on this platform's usual file system. Tests about case
+    # pass both values explicitly instead (#151).
+    $script:PathCmp = $IsLinux ? [System.StringComparison]::Ordinal : [System.StringComparison]::OrdinalIgnoreCase
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
     # Every src file, discovered rather than listed. A hand-kept list here is a second copy
     # of the one in PSComplexity.psm1, and this is the copy that goes stale -- a file
@@ -166,7 +169,7 @@ Describe 'Get-PSCxRelativePath' {
         # happened to be standing, which is a wrong answer that looks entirely plausible.
         $root = Join-Path ([System.IO.Path]::GetTempPath()) 'some-repo'
         Push-Location ([System.IO.Path]::GetTempPath())
-        try { Get-PSCxRelativePath -Path 'src/a.ps1' -Root $root | Should-Be 'src/a.ps1' }
+        try { Get-PSCxRelativePath -PathComparison $script:PathCmp -Path 'src/a.ps1' -Root $root | Should-Be 'src/a.ps1' }
         finally { Pop-Location }
     }
 
@@ -174,7 +177,7 @@ Describe 'Get-PSCxRelativePath' {
         # The kept half: the production caller passes absolute paths, so a fix that only
         # handled the relative case would break the one path that actually runs.
         $root = Join-Path ([System.IO.Path]::GetTempPath()) 'some-repo'
-        Get-PSCxRelativePath -Path (Join-Path $root 'src/b.ps1') -Root $root | Should-Be 'src/b.ps1'
+        Get-PSCxRelativePath -PathComparison $script:PathCmp -Path (Join-Path $root 'src/b.ps1') -Root $root | Should-Be 'src/b.ps1'
     }
 
     It 'strips a root that already ends with a separator' {
@@ -183,7 +186,7 @@ Describe 'Get-PSCxRelativePath' {
         # path silently comes back absolute rather than relative.
         $root = [System.IO.Path]::GetTempPath()   # ends with a separator on both platforms
         $file = Join-Path $root 'rooted.ps1'
-        Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'rooted.ps1'
+        Get-PSCxRelativePath -PathComparison $script:PathCmp -Path $file -Root $root | Should-Be 'rooted.ps1'
     }
 
     It 'strips a root that does not end with a separator' {
@@ -191,7 +194,7 @@ Describe 'Get-PSCxRelativePath' {
         # against code that only ever handles one of them.
         $root = ([System.IO.Path]::GetTempPath()).TrimEnd([System.IO.Path]::DirectorySeparatorChar)
         $file = Join-Path $root 'rooted.ps1'
-        Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'rooted.ps1'
+        Get-PSCxRelativePath -PathComparison $script:PathCmp -Path $file -Root $root | Should-Be 'rooted.ps1'
     }
 }
 
@@ -941,7 +944,7 @@ Describe 'the scan is the measurement; the record stream is a projection of it' 
         # wherever the caller reports errors -- the gate announced it as a file that did not
         # parse. A test because the fix is one attribute that reads like decoration.
         $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-        $scans = @(Get-PSCxPathScan -Path (Join-Path $script:scanDir 'good.ps1') -Seen $seen -Unmatched ([System.Collections.Generic.List[object]]::new()))
+        $scans = @(Get-PSCxPathScan -PathComparison $script:PathCmp -Path (Join-Path $script:scanDir 'good.ps1') -Seen $seen -Unmatched ([System.Collections.Generic.List[object]]::new()))
         $scans.Count | Should-Be 1
         $scans[0].SkipReason | Should-BeNull
     }
@@ -1833,8 +1836,13 @@ Describe 'two files whose names differ only in case, on Linux (#151)' {
                 -Value 'function Get-Deep { param($a) if ($a) { if ($a) { if ($a) { 1 } } } }'
             # -CaseSensitive: Sort-Object -Unique ignores case by default, and would merge the
             # very pair this exists to keep apart.
-            @(Measure-PSComplexity -Path $dir | ForEach-Object File | Sort-Object -Unique -CaseSensitive).Count | Should-Be 2
-            Test-PSComplexity -Path $dir -MaxCognitive 3 3>$null | Should-BeFalse
+            # From inside the directory, so the run reads its own file system's case rule.
+            Push-Location -LiteralPath $dir
+            try {
+                @(Measure-PSComplexity -Path . | ForEach-Object File | Sort-Object -Unique -CaseSensitive).Count | Should-Be 2
+                Test-PSComplexity -Path . -MaxCognitive 3 3>$null | Should-BeFalse
+            }
+            finally { Pop-Location }
         }
         finally { Remove-Item -LiteralPath $dir -Recurse -Force }
     }

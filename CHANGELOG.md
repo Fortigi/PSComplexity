@@ -39,13 +39,18 @@ and a `-ChangedFile` list matched nothing -- which the gate reads as "no PowerSh
 passes. Paths are now resolved to the plain file-system form, so a share, or any path written
 provider-qualified, behaves exactly as a local path does. This one moves no score either.
 
-**On Linux, two files whose names differ only in case are both measured** (#151). The scan
-compared paths ignoring case on every platform, so next to `src/A.ps1` the file `src/a.ps1` was
-skipped as already seen -- without a word -- and the gate passed over code it never read. File
-names are now compared as the platform's file system compares them: case-sensitively on Linux,
-ignoring case on Windows and macOS, where one file reached under two casings must still count
-once. `-ChangedFile`, `-Accept` and the baseline follow the same rule, so on Linux an entry must
-name a file in its exact case; a unit name still ignores case everywhere.
+**Two files whose names differ only in case are both measured where the file system tells them
+apart** (#151). The scan compared paths ignoring case on every platform, so next to `src/A.ps1` the
+file `src/a.ps1` was skipped as already seen -- without a word -- and the gate passed over code it
+never read. That happened on Linux, in a WSL project measured from Windows PowerShell, and in a
+case-sensitive Windows directory.
+
+File names are now compared the way the working directory's file system compares them, read once
+per run (the platform decides only if the directory cannot say). `-ChangedFile`, `-Accept` and the
+baseline follow the same rule, so on a case-sensitive file system an entry must name a file in its
+exact case; a unit name still ignores case everywhere. A case-sensitive folder inside a
+case-insensitive project is reported rather than guessed at: the second of two files differing only
+in case is skipped, naming the first, and the gate refuses the run.
 
 ## [0.5.2] - 2026-10-09
 

@@ -18,6 +18,9 @@
 # operators disagree.
 
 BeforeAll {
+    # The comparison a real run makes on this platform's usual file system. Tests about case
+    # pass both values explicitly instead (#151).
+    $script:PathCmp = $IsLinux ? [System.StringComparison]::Ordinal : [System.StringComparison]::OrdinalIgnoreCase
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
     # Every src file, discovered rather than listed. A hand-kept list here is a second copy
     # of the one in PSComplexity.psm1, and this is the copy that goes stale -- a file
@@ -109,25 +112,25 @@ Describe 'Test-PSCxWithinBaseline' {
     }
 
     It 'finds a unit that is recorded' {
-        $map = Get-PSCxBaselineMap -Entry @(Entry)
+        $map = Get-PSCxBaselineMap -PathComparison $script:PathCmp -Entry @(Entry)
         Test-PSCxWithinBaseline -Unit (Unit) -Map $map | Should-BeTrue
     }
 
     It 'does not match a like-named unit in another file' {
         # The key is file AND unit. Keyed on the name alone this excuses every unit of that name
         # in the tree, which is how suppression lists usually leak.
-        $map = Get-PSCxBaselineMap -Entry @(Entry -File 'src/B.ps1')
+        $map = Get-PSCxBaselineMap -PathComparison $script:PathCmp -Entry @(Entry -File 'src/B.ps1')
         Test-PSCxWithinBaseline -Unit (Unit -File 'src/A.ps1') -Map $map | Should-BeFalse
     }
 }
 
 Describe 'Get-PSCxBaselineMap' {
     It 'builds a lookup over the entries' {
-        (Get-PSCxBaselineMap -Entry @((Entry), (Entry -Name 'Other'))).Count | Should-Be 2
+        (Get-PSCxBaselineMap -PathComparison $script:PathCmp -Entry @((Entry), (Entry -Name 'Other'))).Count | Should-Be 2
     }
 
     It 'is empty for no entries' {
-        (Get-PSCxBaselineMap -Entry @()).Count | Should-Be 0
+        (Get-PSCxBaselineMap -PathComparison $script:PathCmp -Entry @()).Count | Should-Be 0
     }
 
     It 'refuses a file naming one unit twice' {
@@ -135,62 +138,66 @@ Describe 'Get-PSCxBaselineMap' {
         # builds it and PowerShell raises a conversion error QUOTING its left operand, which
         # contains every earlier phrase -- so an assertion on one of those matches the very
         # failure it exists to detect. Only text from after the break tells them apart.
-        { Get-PSCxBaselineMap -Entry @((Entry), (Entry)) } |
+        { Get-PSCxBaselineMap -PathComparison $script:PathCmp -Entry @((Entry), (Entry)) } |
             Should-Throw -ExceptionMessage '*twice*cannot be read off the file*'
     }
 
     It 'refuses one unit named twice under two casings of its NAME, on every platform' {
-        { Get-PSCxBaselineMap -Entry @((Entry -Name 'Invoke-Thing'), (Entry -Name 'invoke-thing')) } |
+        { Get-PSCxBaselineMap -PathComparison $script:PathCmp -Entry @((Entry -Name 'Invoke-Thing'), (Entry -Name 'invoke-thing')) } |
             Should-Throw -ExceptionMessage '*twice*'
     }
 
-    It 'keeps two files differing only in case apart on Linux, and refuses them as one elsewhere (#151)' {
+    It 'keeps two files differing only in case apart when the run compares exactly (#151)' {
         $entries = @((Entry -File 'src/A.ps1'), (Entry -File 'src/a.ps1'))
-        if ($IsLinux) { (Get-PSCxBaselineMap -Entry $entries).Count | Should-Be 2 }
-        else { { Get-PSCxBaselineMap -Entry $entries } | Should-Throw -ExceptionMessage '*twice*' }
+        (Get-PSCxBaselineMap -PathComparison Ordinal -Entry $entries).Count | Should-Be 2
+    }
+
+    It 'refuses them as one unit named twice when the run ignores case' {
+        $entries = @((Entry -File 'src/A.ps1'), (Entry -File 'src/a.ps1'))
+        { Get-PSCxBaselineMap -PathComparison OrdinalIgnoreCase -Entry $entries } | Should-Throw -ExceptionMessage '*twice*'
     }
 }
 
 Describe 'Get-PSCxUnacceptedUnit' {
     It 'reports a unit over a ceiling that nothing excuses' {
-        @(Get-PSCxUnacceptedUnit -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
+        @(Get-PSCxUnacceptedUnit -PathComparison $script:PathCmp -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 1
     }
 
     It 'says nothing about a unit at the ceiling exactly' {
         # The boundary: -gt, not -ge. A unit AT the limit is within it.
-        @(Get-PSCxUnacceptedUnit -Unit @(Unit -Cyc 15 -Cog 15) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
+        @(Get-PSCxUnacceptedUnit -PathComparison $script:PathCmp -Unit @(Unit -Cyc 15 -Cog 15) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 0
     }
 
     It 'reports a unit over on cyclomatic alone, and on cognitive alone' {
         # Two single-metric cases, because the breach test is -or and a version written with
         # -and passes whichever one it is given.
-        @(Get-PSCxUnacceptedUnit -Unit @(Unit -Cyc 16 -Cog 1) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
+        @(Get-PSCxUnacceptedUnit -PathComparison $script:PathCmp -Unit @(Unit -Cyc 16 -Cog 1) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 1
-        @(Get-PSCxUnacceptedUnit -Unit @(Unit -Cyc 1 -Cog 16) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
+        @(Get-PSCxUnacceptedUnit -PathComparison $script:PathCmp -Unit @(Unit -Cyc 1 -Cog 16) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 1
     }
 
     It 'excuses an accepted unit' {
         $acc = @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' })
-        @(Get-PSCxUnacceptedUnit -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15).Count |
+        @(Get-PSCxUnacceptedUnit -PathComparison $script:PathCmp -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 0
     }
 
     It 'excuses a unit within its baseline, and only that unit' {
         # Paired: the recorded unit is excused and its neighbour is not, so a filter matching
         # on file alone fails here rather than passing quietly.
-        $map = Get-PSCxBaselineMap -Entry @(Entry)
+        $map = Get-PSCxBaselineMap -PathComparison $script:PathCmp -Entry @(Entry)
         $units = @((Unit), (Unit -Name 'Other'))
-        $left = @(Get-PSCxUnacceptedUnit -Unit $units -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -BaselineMap $map)
+        $left = @(Get-PSCxUnacceptedUnit -PathComparison $script:PathCmp -Unit $units -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -BaselineMap $map)
         $left.Count | Should-Be 1
         $left[0].Unit | Should-Be 'Other'
     }
 
     It 'still reports a recorded unit that got worse' {
-        $map = Get-PSCxBaselineMap -Entry @(Entry -Cyc 20 -Cog 30)
-        @(Get-PSCxUnacceptedUnit -Unit @(Unit -Cyc 21 -Cog 30) -Accept @() `
+        $map = Get-PSCxBaselineMap -PathComparison $script:PathCmp -Entry @(Entry -Cyc 20 -Cog 30)
+        @(Get-PSCxUnacceptedUnit -PathComparison $script:PathCmp -Unit @(Unit -Cyc 21 -Cog 30) -Accept @() `
                 -MaxCyclomatic 15 -MaxCognitive 15 -BaselineMap $map).Count | Should-Be 1
     }
 }
@@ -198,32 +205,32 @@ Describe 'Get-PSCxUnacceptedUnit' {
 Describe 'Get-PSCxAcceptanceFault' {
     It 'says nothing about an acceptance that holds' {
         @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' } |
-                Get-PSCxAcceptanceFault -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15).Count | Should-Be 0
+                Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15).Count | Should-Be 0
     }
 
     It 'refuses an acceptance with no File or no Unit' {
-        (@{ Unit = 'Invoke-Thing'; Reason = 'r' } | Get-PSCxAcceptanceFault -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15) |
+        (@{ Unit = 'Invoke-Thing'; Reason = 'r' } | Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15) |
             Should-BeLikeString '*needs both File and Unit*'
-        (@{ File = 'src/A.ps1'; Reason = 'r' } | Get-PSCxAcceptanceFault -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15) |
+        (@{ File = 'src/A.ps1'; Reason = 'r' } | Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15) |
             Should-BeLikeString '*needs both File and Unit*'
     }
 
     It 'refuses an acceptance whose reason is only whitespace' {
         (@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = '   ' } |
-                Get-PSCxAcceptanceFault -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15) |
+                Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15) |
             Should-BeLikeString '*no reason*'
     }
 
     It 'refuses an acceptance naming a unit nobody measured' {
         (@{ File = 'src/A.ps1'; Unit = 'Ghost'; Reason = 'r' } |
-                Get-PSCxAcceptanceFault -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15) |
+                Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15) |
             Should-BeLikeString '*no such unit was measured*'
     }
 
     It 'refuses an acceptance for a unit within both ceilings, at the boundary' {
         # At the ceiling exactly, so -le and -lt disagree here.
         (@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' } |
-                Get-PSCxAcceptanceFault -Unit @(Unit -Cyc 15 -Cog 15) -MaxCyclomatic 15 -MaxCognitive 15) |
+                Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit @(Unit -Cyc 15 -Cog 15) -MaxCyclomatic 15 -MaxCognitive 15) |
             Should-BeLikeString '*within both ceilings*'
     }
 
@@ -236,10 +243,10 @@ Describe 'Get-PSCxAcceptanceFault' {
         # that broke the cognitive read -- yielding $null, and $null -le 15 is $true -- survived
         # the whole suite.
         @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' } |
-                Get-PSCxAcceptanceFault -Unit @(Unit -Cyc 16 -Cog 1) -MaxCyclomatic 15 -MaxCognitive 15).Count |
+                Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit @(Unit -Cyc 16 -Cog 1) -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 0
         @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' } |
-                Get-PSCxAcceptanceFault -Unit @(Unit -Cyc 1 -Cog 16) -MaxCyclomatic 15 -MaxCognitive 15).Count |
+                Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit @(Unit -Cyc 1 -Cog 16) -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 0
     }
 }
@@ -292,28 +299,28 @@ Describe 'Get-PSCxBaselineScoreFault' {
 
 Describe 'Get-PSCxBaselineFault' {
     It 'says nothing about an entry that holds' {
-        @(Entry | Get-PSCxBaselineFault -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
+        @(Entry | Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 0
     }
 
     It 'refuses an entry with no file or no unit' {
         ([pscustomobject]@{ unit = 'Invoke-Thing'; cyclomatic = 20; cognitive = 30 } |
-                Get-PSCxBaselineFault -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15) |
+                Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15) |
             Should-BeLikeString '*needs both file and unit*'
         ([pscustomobject]@{ file = 'src/A.ps1'; cyclomatic = 20; cognitive = 30 } |
-                Get-PSCxBaselineFault -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15) |
+                Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15) |
             Should-BeLikeString '*needs both file and unit*'
     }
 
     It 'refuses an entry keyed by an ordinal name' {
-        (Entry -Name 'Invoke-Twice#2' | Get-PSCxBaselineFault -Unit @(Unit -Name 'Invoke-Twice#2') `
+        (Entry -Name 'Invoke-Twice#2' | Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit @(Unit -Name 'Invoke-Twice#2') `
                 -Accept @() -MaxCyclomatic 15 -MaxCognitive 15) |
             Should-BeLikeString '*renumbers when a duplicate*'
     }
 
     It 'refuses an entry for a unit that is also accepted' {
         $acc = @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' })
-        (Entry | Get-PSCxBaselineFault -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15) |
+        (Entry | Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15) |
             Should-BeLikeString '*both accepted and recorded*'
     }
 
@@ -321,47 +328,24 @@ Describe 'Get-PSCxBaselineFault' {
         # Both halves of the identity. Matching on the file alone, any acceptance anywhere in the
         # same file would count as excusing this unit, and its entry would be deleted as redundant.
         $acc = @(@{ File = 'src/A.ps1'; Unit = 'Something-Else'; Reason = 'r' })
-        @(Entry | Get-PSCxBaselineFault -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15).Count |
+        @(Entry | Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 0
     }
 
     It 'does not treat an acceptance for the same unit in ANOTHER file as a clash' {
         $acc = @(@{ File = 'src/B.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' })
-        @(Entry | Get-PSCxBaselineFault -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15).Count |
+        @(Entry | Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15).Count |
             Should-Be 0
     }
 
     It 'refuses an entry naming a unit nobody measured' {
-        (Entry -Name 'Ghost' | Get-PSCxBaselineFault -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15) |
+        (Entry -Name 'Ghost' | Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15) |
             Should-BeLikeString '*no such unit was measured*'
     }
 
     It 'passes the score rules on to the score fault' {
-        (Entry -Cyc 20 -Cog 30 | Get-PSCxBaselineFault -Unit @(Unit -Cyc 19 -Cog 30) -Accept @() `
+        (Entry -Cyc 20 -Cog 30 | Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit @(Unit -Cyc 19 -Cog 30) -Accept @() `
                 -MaxCyclomatic 15 -MaxCognitive 15) | Should-BeLikeString '*improved to cyclomatic*'
-    }
-}
-
-Describe 'Get-PSCxPathComparison' {
-    # Asked with the platform passed IN, so both answers are pinned on every platform -- the
-    # self-mutation gate runs on Linux only, where the default can only ever say one thing.
-    It 'is exact when the file system is case-sensitive' {
-        Get-PSCxPathComparison -CaseSensitive $true | Should-Be ([System.StringComparison]::Ordinal)
-    }
-
-    It 'ignores case when it is not' {
-        Get-PSCxPathComparison -CaseSensitive $false | Should-Be ([System.StringComparison]::OrdinalIgnoreCase)
-    }
-
-    It 'follows the platform by default: case-sensitive on Linux only (#151)' {
-        Get-PSCxPathComparison | Should-Be (Get-PSCxPathComparison -CaseSensitive $IsLinux)
-    }
-}
-
-Describe 'Get-PSCxPathComparer' {
-    It 'compares two casings of one name as the platform file system does' {
-        (Get-PSCxPathComparer).Equals('src/A.ps1', 'src/a.ps1') | Should-Be (-not $IsLinux)
-        (Get-PSCxPathComparer).Equals('src/A.ps1', 'src/A.ps1') | Should-BeTrue
     }
 }
 
@@ -380,26 +364,28 @@ Describe 'Get-PSCxPolicyKey, and case' {
 
 Describe 'Get-PSCxPolicyLookup' {
     It 'finds a unit by file and unit, the unit ignoring case' {
-        $lookup = Get-PSCxPolicyLookup -Record @((Unit), (Unit -Name 'Other' -Cyc 3))
+        $lookup = Get-PSCxPolicyLookup -PathComparison $script:PathCmp -Record @((Unit), (Unit -Name 'Other' -Cyc 3))
         $found = $null
         $lookup.TryGetValue((Get-PSCxPolicyKey -File 'src/A.ps1' -Unit 'invoke-thing'), [ref]$found) | Should-BeTrue
         $found.Cyclomatic | Should-Be 20
         $lookup.Count | Should-Be 2
     }
 
-    It 'matches the file the way the platform file system does (#151)' {
-        # On Linux src/a.ps1 is a different file from src/A.ps1 and must not find its unit.
-        $lookup = Get-PSCxPolicyLookup -Record @(Unit)
-        $lookup.ContainsKey((Get-PSCxPolicyKey -File 'SRC/a.ps1' -Unit 'Invoke-Thing')) | Should-Be (-not $IsLinux)
+    It 'matches the file by the run path comparison, both ways (#151)' {
+        # Where the file system is case-sensitive, src/a.ps1 is a different file from src/A.ps1
+        # and must not find its unit; where it is not, they are one file.
+        $key = Get-PSCxPolicyKey -File 'SRC/a.ps1' -Unit 'Invoke-Thing'
+        (Get-PSCxPolicyLookup -PathComparison Ordinal -Record @(Unit)).ContainsKey($key) | Should-BeFalse
+        (Get-PSCxPolicyLookup -PathComparison OrdinalIgnoreCase -Record @(Unit)).ContainsKey($key) | Should-BeTrue
     }
 
     It 'keys an acceptance, which is a hashtable, the same way' {
-        $lookup = Get-PSCxPolicyLookup -Record @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' })
+        $lookup = Get-PSCxPolicyLookup -PathComparison $script:PathCmp -Record @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' })
         $lookup.ContainsKey((Get-PSCxPolicyKey -File 'src/A.ps1' -Unit 'Invoke-Thing')) | Should-BeTrue
     }
 
     It 'is an empty lookup over no records, not nothing' {
-        (Get-PSCxPolicyLookup -Record @()).Count | Should-Be 0
+        (Get-PSCxPolicyLookup -PathComparison $script:PathCmp -Record @()).Count | Should-Be 0
     }
 }
 
@@ -412,7 +398,7 @@ Describe 'Policy checks over many entries' {
         # Two entries through one pipeline: the lookup built in begin must serve both, and each
         # gets its own answer rather than the first one's.
         $faults = @((Entry), (Entry -Name 'Ghost') |
-                Get-PSCxBaselineFault -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15)
+                Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15)
         $faults.Count | Should-Be 1
         $faults[0] | Should-BeLikeString '*Ghost is recorded but no such unit*'
     }
@@ -434,8 +420,8 @@ Describe 'Policy checks over many entries' {
         $time = {
             param($Unit)
             $clock = [System.Diagnostics.Stopwatch]::StartNew()
-            $null = $entries | Get-PSCxBaselineFault -Unit $Unit -Accept @() -MaxCyclomatic 15 -MaxCognitive 15
-            $null = $accept | Get-PSCxAcceptanceFault -Unit $Unit -MaxCyclomatic 15 -MaxCognitive 15
+            $null = $entries | Get-PSCxBaselineFault -PathComparison $script:PathCmp -Unit $Unit -Accept @() -MaxCyclomatic 15 -MaxCognitive 15
+            $null = $accept | Get-PSCxAcceptanceFault -PathComparison $script:PathCmp -Unit $Unit -MaxCyclomatic 15 -MaxCognitive 15
             return $clock.Elapsed.TotalMilliseconds
         }
         $null = & $time $small  # warm-up, so neither side pays for compilation
@@ -492,12 +478,12 @@ Describe 'Get-PSCxBaselineDocumentFault' {
 
 Describe 'Get-PSCxBaselineRaise' {
     It 'names a recorded unit that got worse' {
-        $map = Get-PSCxBaselineMap -Entry @(Entry -Cyc 20 -Cog 30)
+        $map = Get-PSCxBaselineMap -PathComparison $script:PathCmp -Entry @(Entry -Cyc 20 -Cog 30)
         @(Get-PSCxBaselineRaise -Unit @(Unit -Cyc 21 -Cog 30) -Map $map).Count | Should-Be 1
     }
 
     It 'says nothing about a unit at or under its record' {
-        $map = Get-PSCxBaselineMap -Entry @(Entry -Cyc 20 -Cog 30)
+        $map = Get-PSCxBaselineMap -PathComparison $script:PathCmp -Entry @(Entry -Cyc 20 -Cog 30)
         @(Get-PSCxBaselineRaise -Unit @((Unit -Cyc 20 -Cog 30), (Unit -Cyc 1 -Cog 1)) -Map $map).Count |
             Should-Be 0
     }
@@ -511,7 +497,7 @@ Describe 'Get-PSCxBaselineRaise' {
 
 Describe 'Get-PSCxBaselineDocument' {
     It 'records the breaching units and leaves the compliant ones out' {
-        $doc = Get-PSCxBaselineDocument -Unit @((Unit), (Unit -Name 'Fine' -Cyc 1 -Cog 1)) -Accept @() `
+        $doc = Get-PSCxBaselineDocument -PathComparison $script:PathCmp -Unit @((Unit), (Unit -Name 'Fine' -Cyc 1 -Cog 1)) -Accept @() `
             -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 -SchemaVersion 1 -GeneratedAt ([datetime]'2026-01-02T03:04:05Z')
         @($doc.units).Count | Should-Be 1
         $doc.units[0].unit | Should-Be 'Invoke-Thing'
@@ -519,7 +505,7 @@ Describe 'Get-PSCxBaselineDocument' {
 
     It 'leaves an accepted unit out' {
         $acc = @(@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' })
-        $doc = Get-PSCxBaselineDocument -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15 `
+        $doc = Get-PSCxBaselineDocument -PathComparison $script:PathCmp -Unit @(Unit) -Accept $acc -MaxCyclomatic 15 -MaxCognitive 15 `
             -MetricVersion 1 -SchemaVersion 1 -GeneratedAt ([datetime]'2026-01-02T03:04:05Z')
         @($doc.units).Count | Should-Be 0
     }
@@ -529,14 +515,14 @@ Describe 'Get-PSCxBaselineDocument' {
         # pass against the reshuffle this ordering exists to prevent.
         $units = @((Unit -File 'src/B.ps1' -Name 'Zeta'), (Unit -File 'src/A.ps1' -Name 'Beta'),
             (Unit -File 'src/A.ps1' -Name 'Alpha'))
-        $doc = Get-PSCxBaselineDocument -Unit $units -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 `
+        $doc = Get-PSCxBaselineDocument -PathComparison $script:PathCmp -Unit $units -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 `
             -MetricVersion 1 -SchemaVersion 1 -GeneratedAt ([datetime]'2026-01-02T03:04:05Z')
         (($doc.units | ForEach-Object { "$($_.file):$($_.unit)" }) -join ' ') |
             Should-Be 'src/A.ps1:Alpha src/A.ps1:Beta src/B.ps1:Zeta'
     }
 
     It 'stamps the versions and a UTC timestamp' {
-        $doc = Get-PSCxBaselineDocument -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 `
+        $doc = Get-PSCxBaselineDocument -PathComparison $script:PathCmp -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 `
             -MetricVersion 7 -SchemaVersion 3 -GeneratedAt ([datetime]::new(2026, 1, 2, 3, 4, 5, [System.DateTimeKind]::Utc))
         $doc.metricVersion | Should-Be 7
         $doc.schemaVersion | Should-Be 3
@@ -544,7 +530,7 @@ Describe 'Get-PSCxBaselineDocument' {
     }
 
     It 'writes an empty units array when nothing breached' {
-        $doc = Get-PSCxBaselineDocument -Unit @(Unit -Cyc 1 -Cog 1) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 `
+        $doc = Get-PSCxBaselineDocument -PathComparison $script:PathCmp -Unit @(Unit -Cyc 1 -Cog 1) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 `
             -MetricVersion 1 -SchemaVersion 1 -GeneratedAt ([datetime]'2026-01-02T03:04:05Z')
         @($doc.units).Count | Should-Be 0
     }

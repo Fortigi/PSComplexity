@@ -28,7 +28,8 @@ function Get-PSCxBaselineState {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Accept,
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive,
-        [Parameter(Mandatory)] [int]$MetricVersion
+        [Parameter(Mandatory)] [int]$MetricVersion,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
     )
     if (-not $Path) { return @{} }
     $document = Read-PSCxDocument -Path $Path
@@ -41,12 +42,12 @@ function Get-PSCxBaselineState {
     # is a fault in the policy rather than a complaint about the code, and reporting it as a
     # failure would send somebody to refactor a unit that is fine.
     $faults = @($entries | Get-PSCxBaselineFault -Unit $Unit -Accept $Accept `
-            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive)
+            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $PathComparison)
     if ($faults.Count -gt 0) {
         throw ("The baseline $Path does not describe this run: " + ($faults -join '; ') +
             '. A ratchet that has stopped matching is a suppression list, so it fails here rather than ageing quietly.')
     }
-    return Get-PSCxBaselineMap -Entry $entries
+    return Get-PSCxBaselineMap -Entry $entries -PathComparison $PathComparison
 }
 
 function Write-PSCxBaselineFile {
@@ -67,7 +68,8 @@ function Write-PSCxBaselineFile {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Accept,
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive,
-        [Parameter(Mandatory)] [int]$MetricVersion
+        [Parameter(Mandatory)] [int]$MetricVersion,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
     )
     # Absent is the ordinary first run, not an error: seeding a baseline is the reason this
     # switch exists.
@@ -79,7 +81,7 @@ function Write-PSCxBaselineFile {
     $comparable = $null -ne $existing -and -not (Get-PSCxBaselineDocumentFault -Document $existing `
             -MetricVersion $MetricVersion -SchemaVersion (Get-PSCxBaselineSchemaVersion))
     if ($comparable) {
-        $raised = @(Get-PSCxBaselineRaise -Unit $Unit -Map (Get-PSCxBaselineMap -Entry @($existing.units)))
+        $raised = @(Get-PSCxBaselineRaise -Unit $Unit -Map (Get-PSCxBaselineMap -Entry @($existing.units) -PathComparison $PathComparison))
         if ($raised.Count -gt 0) {
             throw ("Refusing to update $Path : " +
                 (($raised | ForEach-Object { "$($_.File) $($_.Unit) is now cyclomatic $($_.Cyclomatic), cognitive $($_.Cognitive)" }) -join '; ') +
@@ -89,5 +91,5 @@ function Write-PSCxBaselineFile {
     Save-PSCxDocument -Path $Path -Document (Get-PSCxBaselineDocument -Unit $Unit -Accept $Accept `
             -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
             -MetricVersion $MetricVersion -SchemaVersion (Get-PSCxBaselineSchemaVersion) `
-            -GeneratedAt (Get-Date))
+            -GeneratedAt (Get-Date) -PathComparison $PathComparison)
 }

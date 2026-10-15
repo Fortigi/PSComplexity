@@ -12,6 +12,9 @@
 # commands, because covering a function is not covering its application.
 
 BeforeAll {
+    # The comparison a real run makes on this platform's usual file system. Tests about case
+    # pass both values explicitly instead (#151).
+    $script:PathCmp = $IsLinux ? [System.StringComparison]::Ordinal : [System.StringComparison]::OrdinalIgnoreCase
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
     # Every src file, discovered rather than listed. A hand-kept list here is a second copy
     # of the one in PSComplexity.psm1, and this is the copy that goes stale -- a file
@@ -115,31 +118,32 @@ Describe 'Get-PSCxRelativePath' {
     It 'renders a path under the root relative, with forward slashes' {
         $root = [System.IO.Path]::GetFullPath('/repo')
         $file = Join-Path $root (Join-Path 'src' 'A.ps1')
-        Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'src/A.ps1'
+        Get-PSCxRelativePath -PathComparison $script:PathCmp -Path $file -Root $root | Should-Be 'src/A.ps1'
     }
 
-    It 'decides what is under the root as the platform file system does (#151)' {
-        # /REPO is not /repo on Linux, so a file there is outside the root and keeps its full
-        # path. Elsewhere it is the same directory, the file is relative to it, and a config
-        # spelling the root in another case does not report one file under two names.
+    It 'decides what is under the root by the run path comparison, both ways (#151)' {
+        # On a case-sensitive file system /REPO is not /repo, so a file there is outside the root
+        # and keeps its full path. Ignoring case it is the same directory, the file is relative
+        # to it, and a config spelling the root in another case does not name one file twice.
         $root = [System.IO.Path]::GetFullPath('/repo')
         $file = Join-Path ([System.IO.Path]::GetFullPath('/REPO')) 'A.ps1'
-        $expected = $IsLinux ? $file.Replace([System.IO.Path]::DirectorySeparatorChar, '/') : 'A.ps1'
-        Get-PSCxRelativePath -Path $file -Root $root | Should-BeString $expected -CaseSensitive
+        Get-PSCxRelativePath -PathComparison Ordinal -Path $file -Root $root |
+            Should-BeString $file.Replace([System.IO.Path]::DirectorySeparatorChar, '/') -CaseSensitive
+        Get-PSCxRelativePath -PathComparison OrdinalIgnoreCase -Path $file -Root $root | Should-BeString 'A.ps1' -CaseSensitive
     }
 
     It 'resolves a RELATIVE path against Root, not the working directory' {
         # GetFullPath alone silently uses the CWD, so the function only gave the right answer
         # while its caller happened to pass an absolute path AND a Root equal to the CWD -- two
         # conditions that both had to hold and neither of which was stated.
-        Get-PSCxRelativePath -Path 'src/A.ps1' -Root ([System.IO.Path]::GetFullPath('/repo')) |
+        Get-PSCxRelativePath -PathComparison $script:PathCmp -Path 'src/A.ps1' -Root ([System.IO.Path]::GetFullPath('/repo')) |
             Should-Be 'src/A.ps1'
     }
 
     It 'keeps the FULL path for a file outside the root' {
         # A ../../ chain says less than the absolute path does and is no more portable, so
         # pretending would only hide where the file came from.
-        $out = Get-PSCxRelativePath -Path ([System.IO.Path]::GetFullPath('/elsewhere/B.ps1')) `
+        $out = Get-PSCxRelativePath -PathComparison $script:PathCmp -Path ([System.IO.Path]::GetFullPath('/elsewhere/B.ps1')) `
             -Root ([System.IO.Path]::GetFullPath('/repo'))
         $out | Should-BeLikeString '*elsewhere/B.ps1'
         $out | Should-NotBeLikeString '..*'
@@ -149,8 +153,8 @@ Describe 'Get-PSCxRelativePath' {
         $root = [System.IO.Path]::GetFullPath('/repo')
         $sep = [System.IO.Path]::DirectorySeparatorChar
         $file = Join-Path $root (Join-Path 'src' 'A.ps1')
-        (Get-PSCxRelativePath -Path $file -Root $root) |
-            Should-Be (Get-PSCxRelativePath -Path $file -Root ($root + $sep))
+        (Get-PSCxRelativePath -PathComparison $script:PathCmp -Path $file -Root $root) |
+            Should-Be (Get-PSCxRelativePath -PathComparison $script:PathCmp -Path $file -Root ($root + $sep))
     }
 
     It 'separates every level with a forward slash' {
@@ -164,7 +168,7 @@ Describe 'Get-PSCxRelativePath' {
         # mutant while looking tested. An exact expectation says the observable half on both.
         $root = [System.IO.Path]::GetFullPath('/repo')
         $file = Join-Path $root (Join-Path 'a' (Join-Path 'b' 'C.ps1'))
-        Get-PSCxRelativePath -Path $file -Root $root | Should-Be 'a/b/C.ps1'
+        Get-PSCxRelativePath -PathComparison $script:PathCmp -Path $file -Root $root | Should-Be 'a/b/C.ps1'
     }
 }
 
@@ -206,7 +210,7 @@ Describe 'Get-PSCxUnitRecord' {
 
 Describe 'Get-PSCxFileScan' {
     It 'returns the units of a file that parses, with no skip reason' {
-        $scan = Get-PSCxFileScan -File $script:flat
+        $scan = Get-PSCxFileScan -PathComparison $script:PathCmp -File $script:flat
         @($scan.Units | ForEach-Object Unit) | Should-ContainCollection 'Get-Flat'
         $scan.SkipReason | Should-BeNull
     }
@@ -214,7 +218,7 @@ Describe 'Get-PSCxFileScan' {
     It 'reports the script body as a unit of its own' {
         # A decision-free unit still reports, so a file of top-level code is measured rather
         # than silently producing nothing.
-        @(Get-PSCxFileScan -File $script:flat).Units.Unit | Should-ContainCollection '<script-body>'
+        @(Get-PSCxFileScan -PathComparison $script:PathCmp -File $script:flat).Units.Unit | Should-ContainCollection '<script-body>'
     }
 
     It 'names a file that does not parse, with a reason, and emits no units' {
@@ -222,7 +226,7 @@ Describe 'Get-PSCxFileScan' {
         # capturing the stream and reading message text -- which is what the gate used to do,
         # with -ErrorAction SilentlyContinue, so any unrelated failure reached the user
         # described as a parse error.
-        $scan = Get-PSCxFileScan -File (Join-Path $script:broken 'bad.ps1')
+        $scan = Get-PSCxFileScan -PathComparison $script:PathCmp -File (Join-Path $script:broken 'bad.ps1')
         @($scan.Units).Count | Should-Be 0
         # Matched with a regex demanding a non-space AFTER the prefix, not just the prefix.
         # The message is built from $errors[0]; read $errors[1] instead and there is no second
@@ -233,13 +237,13 @@ Describe 'Get-PSCxFileScan' {
     }
 
     It 'stamps every unit with the metric version' {
-        @(Get-PSCxFileScan -File $script:flat).Units[0].MetricVersion | Should-Be (Get-PSCxMetricVersion)
+        @(Get-PSCxFileScan -PathComparison $script:PathCmp -File $script:flat).Units[0].MetricVersion | Should-Be (Get-PSCxMetricVersion)
     }
 
     It 'carries contributions only with -Detailed' {
-        (Get-PSCxFileScan -File $script:flat).Units[0].PSObject.Properties.Name |
+        (Get-PSCxFileScan -PathComparison $script:PathCmp -File $script:flat).Units[0].PSObject.Properties.Name |
             Should-NotContainCollection 'Contributions'
-        (Get-PSCxFileScan -File $script:flat -Detailed).Units[0].PSObject.Properties.Name |
+        (Get-PSCxFileScan -PathComparison $script:PathCmp -File $script:flat -Detailed).Units[0].PSObject.Properties.Name |
             Should-ContainCollection 'Contributions'
     }
 
@@ -247,7 +251,7 @@ Describe 'Get-PSCxFileScan' {
         # The property existing is not the claim -- its contents are. Skip the lookup that
         # populates them and every unit still reports a Contributions property, just an empty
         # one, which an assertion on the property name alone cannot tell apart.
-        $unit = @((Get-PSCxFileScan -File $script:flat -Detailed).Units |
+        $unit = @((Get-PSCxFileScan -PathComparison $script:PathCmp -File $script:flat -Detailed).Units |
                 Where-Object Unit -eq 'Get-Flat')[0]
         @($unit.Contributions).Count | Should-BeGreaterThan 0
     }
@@ -258,7 +262,7 @@ Describe 'Get-PSCxFileScan' {
         # construct and no amount, which survives a count check by looking like data.
         $bare = Join-Path $script:work 'bare.ps1'
         Set-Content -LiteralPath $bare -Value 'function Get-Bare { 1 }' -Encoding utf8
-        $unit = @((Get-PSCxFileScan -File $bare -Detailed).Units |
+        $unit = @((Get-PSCxFileScan -PathComparison $script:PathCmp -File $bare -Detailed).Units |
                 Where-Object Unit -eq 'Get-Bare')[0]
         @($unit.Contributions).Count | Should-Be 0
     }
@@ -272,9 +276,9 @@ Describe 'Get-PSCxFileScan' {
         # Both halves, because the negative alone passes just as well against a guard that never
         # calls it at all.
         Mock Get-PSCxContributionMap { @{} }
-        Get-PSCxFileScan -File $script:flat | Out-Null
+        Get-PSCxFileScan -PathComparison $script:PathCmp -File $script:flat | Out-Null
         Should-NotInvoke Get-PSCxContributionMap
-        Get-PSCxFileScan -File $script:flat -Detailed | Out-Null
+        Get-PSCxFileScan -PathComparison $script:PathCmp -File $script:flat -Detailed | Out-Null
         Should-Invoke Get-PSCxContributionMap -Times 1 -Exactly
     }
 }
@@ -284,7 +288,7 @@ Describe 'Get-PSCxPathScan' {
     # what collects units and skips into one answer.
 
     It 'measures every source file under a path' {
-        $scans = @(Get-PSCxPathScan -Path $script:work -Seen (NewSeen) -Unmatched (NewUnmatched) -Recurse)
+        $scans = @(Get-PSCxPathScan -PathComparison $script:PathCmp -Path $script:work -Seen (NewSeen) -Unmatched (NewUnmatched) -Recurse)
         $units = @($scans | ForEach-Object { $_.Units } | ForEach-Object Unit)
         $units | Should-ContainCollection 'Get-Deep'
         $units | Should-ContainCollection 'Get-Flat'
@@ -298,7 +302,7 @@ Describe 'Get-PSCxPathScan' {
         New-Item -ItemType Directory -Path $mixed -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $mixed 'ok.ps1') -Value 'function Get-Ok { 1 }' -Encoding utf8
         Set-Content -LiteralPath (Join-Path $mixed 'bad.ps1') -Value 'function Get-Bad { if (' -Encoding utf8
-        $scans = @(Get-PSCxPathScan -Path $mixed -Seen (NewSeen) -Unmatched (NewUnmatched))
+        $scans = @(Get-PSCxPathScan -PathComparison $script:PathCmp -Path $mixed -Seen (NewSeen) -Unmatched (NewUnmatched))
         $scans.Count | Should-Be 2
         @($scans | Where-Object { $_.SkipReason }).Count | Should-Be 1
         @($scans | ForEach-Object { $_.Units } | ForEach-Object Unit) | Should-ContainCollection 'Get-Ok'
@@ -308,7 +312,7 @@ Describe 'Get-PSCxPathScan' {
         # The seen-set is the whole reason this takes one: gate ./src and ./src/A.ps1 together and
         # the file would otherwise be measured twice and counted twice in any per-file total.
         $seen = NewSeen
-        $scans = @(Get-PSCxPathScan -Path @($script:flat, $script:flat) -Seen $seen -Unmatched (NewUnmatched))
+        $scans = @(Get-PSCxPathScan -PathComparison $script:PathCmp -Path @($script:flat, $script:flat) -Seen $seen -Unmatched (NewUnmatched))
         $scans.Count | Should-Be 1
     }
 }
@@ -351,7 +355,12 @@ Describe 'Get-PSCxScan' {
         New-Item -ItemType Directory -Path $pair -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $pair 'A.ps1') -Value 'function Get-Upper { 1 }' -Encoding utf8
         Set-Content -LiteralPath (Join-Path $pair 'a.ps1') -Value 'function Get-Lower { 1 }' -Encoding utf8
-        $scan = Get-PSCxScan -Path @($pair)
+        # From inside the pair, so the run reads case sensitivity from the file system the pair
+        # is on rather than from wherever the suite happens to be run.
+        Push-Location -LiteralPath $pair
+        try { $scan = Get-PSCxScan -Path @('.') }
+        finally { Pop-Location }
+        @($scan.Skipped).Count | Should-Be 0
         (@($scan.Units | Where-Object Unit -ne '<script-body>' | ForEach-Object Unit | Sort-Object) -join ',') |
             Should-Be 'Get-Lower,Get-Upper'
     }
@@ -359,9 +368,21 @@ Describe 'Get-PSCxScan' {
     It 'measures one file reached under two casings ONCE, where the file system ignores case' -Skip:$IsLinux {
         # The other half of the same comparer: on Windows and macOS the directory and the
         # upper-cased literal are one file, and counting it twice doubles its rows.
-        $upper = Join-Path $script:work 'FLAT.PS1'
-        $scan = Get-PSCxScan -Path @($script:work, $upper)
+        Push-Location -LiteralPath $script:work
+        try { $scan = Get-PSCxScan -Path @('.', 'FLAT.PS1') }
+        finally { Pop-Location }
+        @($scan.Skipped).Count | Should-Be 0
         @($scan.Units | Where-Object Unit -eq 'Get-Flat').Count | Should-Be 1
+    }
+
+    It 'records how it compared file paths, read from the working directory (#151)' {
+        # The suite's two CI legs are Linux on ext4 and Windows on NTFS, so the answer here is the
+        # file system's and happens to match the platform. What is pinned is that the scan
+        # RECORDS it, which is what the gate keys the baseline by.
+        Push-Location -LiteralPath $script:work
+        try { $scan = Get-PSCxScan -Path @('flat.ps1') }
+        finally { Pop-Location }
+        $scan.PathComparison | Should-Be (Get-PSCxRunPathComparison -Root $script:work)
     }
 
     It 'merges several paths into one scan' {
@@ -451,33 +472,36 @@ Describe 'Get-PSCxChangedSet' {
 
     It 'treats every spelling of one path as the same entry' {
         $root = [System.IO.Path]::GetFullPath('/repo')
-        $set = Get-PSCxChangedSet -Root $root -ChangedFile @(
+        $set = Get-PSCxChangedSet -PathComparison $script:PathCmp -Root $root -ChangedFile @(
             'src/A.ps1', './src/A.ps1', (Join-Path $root (Join-Path 'src' 'A.ps1')))
         $set.Count | Should-Be 1
         $set.Contains('src/A.ps1') | Should-BeTrue
     }
 
-    It 'matches case as the platform file system does (#151)' {
+    It 'matches case by the run path comparison, both ways (#151)' {
         # On Linux a list naming SRC/A.PS1 names a different file from src/a.ps1.
-        $set = Get-PSCxChangedSet -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @('SRC/A.PS1')
-        $set.Contains('src/a.ps1') | Should-Be (-not $IsLinux)
-        $set.Contains('SRC/A.PS1') | Should-BeTrue
+        $root = [System.IO.Path]::GetFullPath('/repo')
+        $exact = Get-PSCxChangedSet -PathComparison Ordinal -Root $root -ChangedFile @('SRC/A.PS1')
+        $exact.Contains('src/a.ps1') | Should-BeFalse
+        $exact.Contains('SRC/A.PS1') | Should-BeTrue
+        (Get-PSCxChangedSet -PathComparison OrdinalIgnoreCase -Root $root -ChangedFile @('SRC/A.PS1')).Contains('src/a.ps1') |
+            Should-BeTrue
     }
 
     It 'ignores blank entries, which a diff can emit as a trailing line' {
-        $set = Get-PSCxChangedSet -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @('src/A.ps1', '', '   ')
+        $set = Get-PSCxChangedSet -PathComparison $script:PathCmp -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @('src/A.ps1', '', '   ')
         $set.Count | Should-Be 1
     }
 
     It 'trims surrounding whitespace' {
-        $set = Get-PSCxChangedSet -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @("  src/A.ps1`t")
+        $set = Get-PSCxChangedSet -PathComparison $script:PathCmp -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @("  src/A.ps1`t")
         $set.Contains('src/A.ps1') | Should-BeTrue
     }
 
     It 'returns an empty SET, not a null, for a list of nothing but blanks' {
         # A HashSet is enumerable, so returning an empty one unrolls it to nothing and the caller
         # gets $null -- which then fails to bind several frames from the return that caused it.
-        $set = Get-PSCxChangedSet -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @('')
+        $set = Get-PSCxChangedSet -PathComparison $script:PathCmp -Root ([System.IO.Path]::GetFullPath('/repo')) -ChangedFile @('')
         ($null -ne $set) | Should-BeTrue
         $set.Count | Should-Be 0
     }
@@ -827,5 +851,157 @@ Describe 'Get-PSCxScanFault' {
                 [pscustomobject]@{ Path = '/nope'; Reason = 'no such path'; Exists = $false })) `
             -Path @('/nope') -Filtered $true -Recurse |
             Should-BeLikeString '*could not read*'
+    }
+}
+
+Describe 'case sensitivity, read from the file system rather than the platform (#151)' {
+    # Each CI leg can only build what its own file system allows: a pair of names differing only
+    # in case exists on Linux, never on NTFS without a flag CI cannot set. So the both-ways
+    # questions are asked with the answer passed IN, and the file-system answers are asserted
+    # against the leg's own file system. The self-mutation gate runs on Linux, which is the leg
+    # that can build a pair.
+    BeforeAll {
+        $script:caseRoot = Join-Path $script:work "fs-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:caseRoot -Force | Out-Null
+        function script:NewDir([string[]]$Names) {
+            $d = Join-Path $script:caseRoot ([System.Guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $d -Force | Out-Null
+            foreach ($n in $Names) { Set-Content -LiteralPath (Join-Path $d $n) -Value "function Get-$([System.Guid]::NewGuid().ToString('N')) { 1 }" -Encoding utf8 }
+            return $d
+        }
+        # The temp directory's own answer on this leg: case-sensitive on Linux's ext4, not on NTFS.
+        $script:fsSensitive = [bool]$IsLinux
+    }
+
+    It 'compares exactly, or ignoring case, as asked' {
+        Get-PSCxPathComparison -CaseSensitive $true | Should-Be ([System.StringComparison]::Ordinal)
+        Get-PSCxPathComparison -CaseSensitive $false | Should-Be ([System.StringComparison]::OrdinalIgnoreCase)
+    }
+
+    It 'finds an entry only by its exact spelling' {
+        $d = NewDir @('Probe.ps1')
+        Test-PSCxExactEntry -Directory $d -Name 'Probe.ps1' | Should-BeTrue
+        Test-PSCxExactEntry -Directory $d -Name 'PROBE.PS1' | Should-BeFalse
+    }
+
+    It 'resolves a file and a directory alike' {
+        $d = NewDir @('probe.ps1')
+        Test-PSCxEntryExist -Path (Join-Path $d 'probe.ps1') | Should-BeTrue
+        Test-PSCxEntryExist -Path $d | Should-BeTrue
+        Test-PSCxEntryExist -Path (Join-Path $d 'absent') | Should-BeFalse
+    }
+
+    It 'calls a directory case-INSENSITIVE where a flipped name resolves to the same entry, on every leg' {
+        # The Windows answer, MOCKED so the Linux leg runs it too: there a flipped name never
+        # resolves unless it is an entry of its own, so this arm is otherwise unreachable where
+        # the self-mutation gate runs.
+        Mock Test-PSCxEntryExist { $true }
+        Test-PSCxCaseSensitiveDirectory -Path (NewDir @('probe.ps1')) | Should-BeFalse
+    }
+
+    It 'cannot tell from a directory with nothing in it, or nothing with a letter' {
+        Test-PSCxCaseSensitiveDirectory -Path (NewDir @()) | Should-BeNull
+        Test-PSCxCaseSensitiveDirectory -Path (NewDir @('123')) | Should-BeNull
+    }
+
+    It 'reads the file system from a lower-case name and from an upper-case one' {
+        # Both, because each takes a different arm of the flip.
+        Test-PSCxCaseSensitiveDirectory -Path (NewDir @('probe.ps1')) | Should-Be $script:fsSensitive
+        Test-PSCxCaseSensitiveDirectory -Path (NewDir @('PROBE')) | Should-Be $script:fsSensitive
+    }
+
+    It 'passes over a name with no letter to the next one' {
+        Test-PSCxCaseSensitiveDirectory -Path (NewDir @('123', 'probe.ps1')) | Should-Be $script:fsSensitive
+    }
+
+    It 'calls a directory holding both spellings case-sensitive' -Skip:(-not $IsLinux) {
+        # The flipped name RESOLVES here, which on its own reads as case-insensitive. Only the
+        # exact-entry check tells a directory holding two spellings from one holding one.
+        Test-PSCxCaseSensitiveDirectory -Path (NewDir @('Twin', 'TWIN')) | Should-BeTrue
+    }
+
+    It 'takes the run answer from the directory, and the fallback only when it cannot say' {
+        $empty = NewDir @()
+        Get-PSCxRunPathComparison -Root $empty -Fallback $true | Should-Be ([System.StringComparison]::Ordinal)
+        Get-PSCxRunPathComparison -Root $empty -Fallback $false | Should-Be ([System.StringComparison]::OrdinalIgnoreCase)
+        # The opposite fallback, so a probe that was ignored would show.
+        $expected = Get-PSCxPathComparison -CaseSensitive $script:fsSensitive
+        Get-PSCxRunPathComparison -Root (NewDir @('probe.ps1')) -Fallback (-not $script:fsSensitive) | Should-Be $expected
+    }
+
+    It 'calls two spellings one file when only one of them is an entry' {
+        $d = NewDir @('flat.ps1')
+        Test-PSCxSameEntry -Path (Join-Path $d 'flat.ps1') -Other (Join-Path $d 'flat.ps1') | Should-BeTrue
+        Test-PSCxSameEntry -Path (Join-Path $d 'flat.ps1') -Other (Join-Path $d 'FLAT.PS1') | Should-BeTrue
+    }
+
+    It 'calls them two files when a directory holds both spellings, at any depth' -Skip:(-not $IsLinux) {
+        $d = NewDir @('A.ps1', 'a.ps1')
+        Test-PSCxSameEntry -Path (Join-Path $d 'A.ps1') -Other (Join-Path $d 'a.ps1') | Should-BeFalse
+        # The difference in a DIRECTORY name, with the file names alike.
+        foreach ($sub in 'Sub', 'sub') { New-Item -ItemType Directory -Path (Join-Path $d $sub) -Force | Out-Null
+            Set-Content -LiteralPath (Join-Path (Join-Path $d $sub) 'x.ps1') -Value '1' -Encoding utf8 }
+        Test-PSCxSameEntry -Path (Join-Path (Join-Path $d 'Sub') 'x.ps1') -Other (Join-Path (Join-Path $d 'sub') 'x.ps1') |
+            Should-BeFalse
+    }
+
+    It 'calls two spellings two files when the directory holds both, on every leg' {
+        # The file system's answer MOCKED, so the Windows leg -- which cannot create the pair --
+        # still runs this arm and keeps coverage at 100% there. The Linux-only test above asks the
+        # real file system the same question.
+        Mock Test-PSCxExactEntry { $true }
+        $d = NewDir @('flat.ps1')
+        Test-PSCxSameEntry -Path (Join-Path $d 'flat.ps1') -Other (Join-Path $d 'FLAT.PS1') | Should-BeFalse
+    }
+
+    It 'turns a case twin into a skip naming the file it collides with, on every leg' {
+        Mock Test-PSCxSameEntry { $false }
+        $d = NewDir @('flat.ps1')
+        $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        [void]$seen.Add((Join-Path $d 'flat.ps1'))
+        Push-Location -LiteralPath $d
+        try {
+            $skip = Get-PSCxCaseTwinScan -File (Join-Path $d 'FLAT.PS1') -Seen $seen -PathComparison OrdinalIgnoreCase
+        }
+        finally { Pop-Location }
+        $skip.File | Should-BeString 'FLAT.PS1' -CaseSensitive
+        @($skip.Units).Count | Should-Be 0
+        $skip.SkipReason | Should-BeLikeString 'differs only in case from flat.ps1.*Rename one*' -CaseSensitive
+    }
+
+    It 'says nothing about another spelling of a file already measured' {
+        # FLAT.PS1 is not an entry; it is flat.ps1 reached by a case-insensitive lookup. One
+        # file, so no skip -- the case a twin check that skipped every different spelling gets
+        # wrong.
+        $d = NewDir @('flat.ps1')
+        $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        [void]$seen.Add((Join-Path $d 'flat.ps1'))
+        Get-PSCxCaseTwinScan -File (Join-Path $d 'FLAT.PS1') -Seen $seen -PathComparison OrdinalIgnoreCase | Should-BeNull
+    }
+
+    It 'says nothing about a path already measured under the same spelling' {
+        $d = NewDir @('flat.ps1')
+        $file = Join-Path $d 'flat.ps1'
+        $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        [void]$seen.Add($file)
+        Get-PSCxCaseTwinScan -File $file -Seen $seen -PathComparison OrdinalIgnoreCase | Should-BeNull
+    }
+
+    It 'skips a case twin in a run that ignores case, naming the file it collides with' -Skip:(-not $IsLinux) {
+        # A case-sensitive folder inside a case-insensitive run: built on Linux by handing the
+        # walk an ignore-case set, which is what such a run hands it.
+        $d = NewDir @('A.ps1', 'a.ps1')
+        $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        Push-Location -LiteralPath $d
+        try {
+            $scans = @(Get-PSCxPathScan -Path @('.') -Seen $seen -Unmatched ([System.Collections.Generic.List[object]]::new()) `
+                    -PathComparison OrdinalIgnoreCase)
+        }
+        finally { Pop-Location }
+        $scans.Count | Should-Be 2
+        $skips = @($scans | Where-Object SkipReason)
+        $skips.Count | Should-Be 1
+        $other = @('A.ps1', 'a.ps1') | Where-Object { $_ -cne $skips[0].File }
+        $skips[0].SkipReason | Should-BeLikeString "differs only in case from $other.*Rename one*" -CaseSensitive
     }
 }
