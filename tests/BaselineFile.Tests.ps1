@@ -214,3 +214,25 @@ Describe 'Write-PSCxBaselineFile' {
         @($seedWarned).Count + @($regenWarned).Count | Should-Be 0
     }
 }
+
+Describe 'per-path ceilings in the baseline file (#164)' {
+
+    BeforeAll {
+        $script:Loose = @{ 'src/A.ps1' = [pscustomobject]@{ Cyclomatic = 25; Cognitive = 35 } }
+    }
+
+    It 'refuses an entry for a unit its override already permits' {
+        $p = Baseline -Units @(Entry)
+        { Get-PSCxBaselineState -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 -FileCeiling $script:Loose } |
+            Should-Throw -ExceptionMessage '*now within both ceilings*'
+    }
+
+    It 'does not record, or count as new, a unit its override permits' {
+        $p = Baseline -Units @(Entry -File 'src/B.ps1')
+        Write-PSCxBaselineFile -PathComparison $script:PathCmp -Path $p -Unit @((Unit), (Unit -File 'src/B.ps1')) -Accept @() `
+            -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 -FileCeiling $script:Loose
+        $doc = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
+        @($doc.units).Count | Should-Be 1
+        $doc.units[0].file | Should-Be 'src/B.ps1'
+    }
+}

@@ -29,9 +29,12 @@ since its 0.6.0 a line counts as executed when the innermost command spanning it
 continuation lines of a multi-line statement are in the set, where before they were silently left
 out. A line no command spans -- a parameter declaration -- can never count as executed, so the
 self config sets **`coveredLinesOnly: false`** and mutates every line. That is safe only because
-coverage is gated at 100%: the lines it adds are exactly the parameter declarations, four of them,
-not code nothing ran. The gate's 15 / 15 ceiling defaults are among them and die to the test in
-`tests/Measure.Tests.ps1` that sits a unit on each side of each ceiling. The other two are
+coverage is gated at 100%: the lines it adds are exactly the parameter declarations, not code
+nothing ran. The gate's 15 / 15 ceiling defaults USED to be among them; since #164 they are
+`$script:PSCxDefaultCeiling` in `src/Config.ps1`, because 15 applies only when neither the command
+line nor a config sets a ceiling and a parameter default cannot tell "not given" from "given as
+15". `tests/Config.Tests.ps1` kills its mutants, and `tests/Measure.Tests.ps1` still sits a unit on
+each side of each ceiling end to end. The declarations that remain are
 `Position = 0 -> 1` on `-Path`, **declared equivalent** in the config: `-Path` is each command's
 only positional parameter, so 0 and 1 bind identically. If coverage ever drops below 100%,
 `coveredLinesOnly` has to come back on first, or every uncovered mutant becomes a survivor.
@@ -169,8 +172,17 @@ src/Measure-PSComplexity.ps1   the two public projections over the scan: Measure
                                and Test-PSComplexity. Wiring, and nothing else.
 src/Report.ps1                 the two published formats -- our JSON report and SARIF -- and
                                the two functions that touch a file.
+src/Config.ps1                 what a .pscomplexity.json may say and what it means for one gate
+                               run (#164): the faults, the globs, the command line winning, the
+                               per-file ceilings. Pure, like Policy.ps1.
+src/ConfigFile.ps1             finding the config (up to the repository root, never outside one)
+                               and reading it. The I/O half, like BaselineFile.ps1.
 schemas/v1/report.schema.json  the report format. Ships in the package; a consumer validates
                                against it without reading this repo.
+schemas/v1/config.schema.json  the config format, for editors. The module checks the same rules
+                               itself, because Test-Json's messages differ by PowerShell version
+                               and 7.6.7 writes none for a fault inside a list (#197); a test in
+                               tests/Config.Tests.ps1 holds the two to the same answers.
 ```
 
 **A covering suite must be CHEAP, not only complete, and the cost is measured rather than

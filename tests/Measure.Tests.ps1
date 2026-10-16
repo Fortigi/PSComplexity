@@ -1870,11 +1870,11 @@ Describe 'a path that produced nothing is reported, not swallowed' {
 }
 
 Describe 'the gate ceilings a caller gets without asking' {
-    # Both default to 15, and the README says so. A param() default is never a command, so no
-    # coverage tracer can say it ran: the self-mutation config sets coveredLinesOnly off so that
-    # these two defaults are mutated anyway, and this test is what kills them. Each case sits
-    # exactly on one side of ONE ceiling with the other well clear, so a moved default fails
-    # exactly one case.
+    # Both default to 15, and the README says so. The 15 lives in src/Config.ps1 since #164 --
+    # it applies only when neither the command line nor a config sets a ceiling, which a param()
+    # default could not express -- and tests/Config.Tests.ps1 kills its mutants. This is the
+    # end-to-end proof. Each case sits exactly on one side of ONE ceiling with the other well
+    # clear, so a moved default fails exactly one case.
     BeforeAll {
         $script:ceil = Join-Path ([System.IO.Path]::GetTempPath()) "cxceil-$([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $script:ceil -Force | Out-Null
@@ -1937,5 +1937,111 @@ Describe 'two files whose names differ only in case, on Linux (#151)' {
             finally { Pop-Location }
         }
         finally { Remove-Item -LiteralPath $dir -Recurse -Force }
+    }
+}
+
+Describe 'a config file (#164)' {
+
+    BeforeAll {
+        $script:cfgRepo = [System.IO.Path]::GetFullPath((Join-Path ([System.IO.Path]::GetTempPath()) "cxcfg-$([System.Guid]::NewGuid().ToString('N'))"))
+        New-Item -ItemType Directory -Path (Join-Path $script:cfgRepo '.git'), (Join-Path $script:cfgRepo 'src'), (Join-Path $script:cfgRepo 'tests'), (Join-Path $script:cfgRepo 'gen') -Force | Out-Null
+        # n sequential ifs: cyclomatic n + 1.
+        function script:Write-IfChain([string]$Relative, [string]$Name, [int]$N) {
+            $body = (1..$N | ForEach-Object { "if (`$a) { $_ }" }) -join '; '
+            Set-Content -LiteralPath (Join-Path $script:cfgRepo $Relative) -Value "function $Name { param(`$a) $body }" -Encoding utf8
+        }
+        Write-IfChain 'src/a.ps1' 'Get-A' 2      # cyclomatic 3
+        Write-IfChain 'tests/t.ps1' 'Get-T' 4    # cyclomatic 5
+        Write-IfChain 'gen/g.ps1' 'Get-G' 8      # cyclomatic 9
+        function script:Set-Config([string]$Json) {
+            Set-Content -LiteralPath (Join-Path $script:cfgRepo '.pscomplexity.json') -Value $Json -Encoding utf8
+        }
+        function script:Gate {
+            param([hashtable]$Extra = @{})
+            Push-Location $script:cfgRepo
+            try { return Test-PSComplexity -Path . -Recurse @Extra 3>$null 6>$null }
+            finally { Pop-Location }
+        }
+    }
+
+    AfterAll { Remove-Item -LiteralPath $script:cfgRepo -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'is found and applied, and ignored with -NoConfig' {
+        Set-Config '{"schemaVersion": 1, "maxCyclomatic": 4}'
+        Gate | Should-BeFalse
+        Gate @{ NoConfig = $true } | Should-BeTrue
+    }
+
+    It 'says which config it used' {
+        Set-Config '{"schemaVersion": 1}'
+        Push-Location $script:cfgRepo
+        try { $said = @(Test-PSComplexity -Path . -Recurse 6>&1 | Where-Object { $_ -is [System.Management.Automation.InformationRecord] }) }
+        finally { Pop-Location }
+        "$($said[0].MessageData)" | Should-Be 'Using config .pscomplexity.json'
+    }
+
+    It 'loses to the command line' {
+        Set-Config '{"schemaVersion": 1, "maxCyclomatic": 4}'
+        Gate @{ MaxCyclomatic = 10 } | Should-BeTrue
+    }
+
+    It 'excludes, overrides by path, and records both in the report' {
+        Set-Config '{"schemaVersion": 1, "maxCyclomatic": 4, "exclude": ["gen"], "overrides": [{"path": "tests", "maxCyclomatic": 5}]}'
+        $report = Join-Path $script:cfgRepo "r-$([System.Guid]::NewGuid().ToString('N')).json"
+        Gate @{ ReportPath = $report } | Should-BeTrue
+        $d = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+        $d.config | Should-Be '.pscomplexity.json'
+        @($d.scope.exclude) | Should-BeCollection @('gen')
+        @($d.scope.excluded) | Should-BeCollection @('gen/g.ps1')
+        @($d.units.Unit) | Should-NotContainCollection @('Get-G')
+        $d.thresholds.cyclomatic | Should-Be 4
+        $d.thresholds.overrides[0].path | Should-Be 'tests'
+        $d.thresholds.overrides[0].cyclomatic | Should-Be 5
+    }
+
+    It 'names the ceiling a unit faced, an override where one reached it' {
+        Set-Config '{"schemaVersion": 1, "maxCyclomatic": 10, "overrides": [{"path": "tests", "maxCyclomatic": 4}]}'
+        Push-Location $script:cfgRepo
+        try { $warned = @(Test-PSComplexity -Path . -Recurse 3>&1 6>$null | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }) }
+        finally { Pop-Location }
+        $warned.Count | Should-Be 1
+        "$($warned[0].Message)" | Should-BeLikeString 'tests/t.ps1:1 Get-T -- cyclomatic 5 (max 4), cognitive 4 (max 15)'
+    }
+
+    It 'takes acceptances from the file, and refuses one that has gone stale' {
+        Set-Config '{"schemaVersion": 1, "maxCyclomatic": 4, "exclude": ["gen"], "accept": [{"file": "tests/t.ps1", "unit": "Get-T", "reason": "a table"}]}'
+        Gate | Should-BeTrue
+        Set-Config '{"schemaVersion": 1, "maxCyclomatic": 4, "exclude": ["gen"], "accept": [{"file": "src/a.ps1", "unit": "Get-A", "reason": "a table"}]}'
+        { Gate } | Should-Throw -ExceptionMessage '*src/a.ps1 Get-A is accepted but is within both ceilings*'
+    }
+
+    It 'writes and then holds to the baseline the file names' {
+        Set-Config '{"schemaVersion": 1, "maxCyclomatic": 4, "baselineFile": "complexity-baseline.json"}'
+        $baseline = Join-Path $script:cfgRepo 'complexity-baseline.json'
+        Remove-Item -LiteralPath $baseline -ErrorAction SilentlyContinue
+        Gate @{ UpdateBaseline = $true } | Should-BeTrue
+        @((Get-Content -LiteralPath $baseline -Raw | ConvertFrom-Json).units.unit) | Should-BeCollection @('Get-G', 'Get-T')
+        Gate | Should-BeTrue
+    }
+
+    It 'applies the config -ConfigFile names' {
+        Set-Config '{"schemaVersion": 1, "maxCyclomatic": 4}'
+        $elsewhere = Join-Path $script:cfgRepo "other-$([System.Guid]::NewGuid().ToString('N')).json"
+        Set-Content -LiteralPath $elsewhere -Value '{"schemaVersion": 1, "maxCyclomatic": 9}' -Encoding utf8
+        Gate @{ ConfigFile = $elsewhere } | Should-BeTrue
+    }
+
+    It 'refuses a config that is not valid, before measuring anything' {
+        Set-Config '{"schemaVersion": 1, "maxCyclomatc": 4}'
+        { Gate } | Should-Throw -ExceptionMessage "Cannot use the config *unknown key 'maxCyclomatc'*"
+    }
+
+    It 'is not read by Measure-PSComplexity, which measures what it is pointed at' {
+        Set-Config '{"schemaVersion": 1, "exclude": ["gen"]}'
+        Push-Location $script:cfgRepo
+        try { $units = @(Measure-PSComplexity -Path . -Recurse 6>&1) }
+        finally { Pop-Location }
+        @($units.Unit) | Should-ContainCollection @('Get-G')
+        @($units | Where-Object { $_ -is [System.Management.Automation.InformationRecord] }).Count | Should-Be 0
     }
 }

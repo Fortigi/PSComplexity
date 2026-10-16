@@ -54,6 +54,16 @@ BeforeAll {
         'Measure-PSComplexity.ps1 -> BaselineFile.ps1'
         'Measure-PSComplexity.ps1 -> Policy.ps1'
         'Measure-PSComplexity.ps1 -> Report.ps1'
+
+        # The config (#164), split as the baseline is: Config.ps1 decides what a config means and
+        # reaches only the scan's path spelling, so an acceptance it resolves names a File exactly
+        # as a record does; ConfigFile.ps1 finds and reads the file. Neither knows the gate.
+        'Config.ps1 -> Scan.ps1'
+        'ConfigFile.ps1 -> Config.ps1'
+        'ConfigFile.ps1 -> Report.ps1'
+        'ConfigFile.ps1 -> Scan.ps1'
+        'Measure-PSComplexity.ps1 -> Config.ps1'
+        'Measure-PSComplexity.ps1 -> ConfigFile.ps1'
     )
 
     function Get-SrcAst {

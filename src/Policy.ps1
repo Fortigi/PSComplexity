@@ -77,6 +77,40 @@ function Get-PSCxPolicyLookup {
     return $lookup
 }
 
+function Get-PSCxUnitCeiling {
+    # The ceilings units in one file face: a per-path override's (#164), or the run's.
+    #
+    # FileCeiling holds only the files an override reaches -- Get-PSCxFileCeiling builds it -- so a
+    # run with no overrides passes nothing and every unit faces the run's ceilings, as before.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$File,
+        [Parameter(Mandatory)] [int]$MaxCyclomatic,
+        [Parameter(Mandatory)] [int]$MaxCognitive,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [hashtable]$FileCeiling
+    )
+    if ($FileCeiling.ContainsKey($File)) { return $FileCeiling[$File] }
+    return [pscustomobject]@{ Cyclomatic = $MaxCyclomatic; Cognitive = $MaxCognitive }
+}
+
+function Test-PSCxOverCeiling {
+    # Whether a unit breaches either of the ceilings its file faces. The ONE spelling of "breaches",
+    # because the gate, the acceptance check and the baseline all ask it, and two spellings would
+    # disagree exactly where an override applies.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Unit,
+        [Parameter(Mandatory)] [int]$MaxCyclomatic,
+        [Parameter(Mandatory)] [int]$MaxCognitive,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [hashtable]$FileCeiling
+    )
+    $ceiling = Get-PSCxUnitCeiling -File ([string]$Unit.File) -MaxCyclomatic $MaxCyclomatic `
+        -MaxCognitive $MaxCognitive -FileCeiling $FileCeiling
+    return ($Unit.Cyclomatic -gt $ceiling.Cyclomatic -or $Unit.Cognitive -gt $ceiling.Cognitive)
+}
+
 function Get-PSCxAcceptanceFault {
     # Why ONE acceptance fails to describe this run, as text. Nothing when it holds.
     #
@@ -107,7 +141,9 @@ function Get-PSCxAcceptanceFault {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unit,
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive,
-        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
+        # File -> ceilings, for the files a per-path override reaches (#164). Empty: the run's ceilings.
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{}
     )
     # In begin, once for the whole pipeline: each acceptance arrives as its own run of process.
     begin { $lookup = Get-PSCxPolicyLookup -Record $Unit -PathComparison $PathComparison }
@@ -125,7 +161,7 @@ function Get-PSCxAcceptanceFault {
         if (-not $lookup.TryGetValue((Get-PSCxPolicyKey -File $file -Unit $name), [ref]$found)) {
             return "$file $name is accepted but no such unit was measured -- it was renamed, moved, or is outside the path being gated"
         }
-        if ($found.Cyclomatic -le $MaxCyclomatic -and $found.Cognitive -le $MaxCognitive) {
+        if (-not (Test-PSCxOverCeiling -Unit $found -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -FileCeiling $FileCeiling)) {
             return "$file $name is accepted but is within both ceilings -- delete the acceptance, it is no longer an argument about anything"
         }
     }
@@ -147,14 +183,16 @@ function Get-PSCxUnacceptedUnit {
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive,
         [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
-        [AllowEmptyCollection()] [hashtable]$BaselineMap = @{}
+        [AllowEmptyCollection()] [hashtable]$BaselineMap = @{},
+        # File -> ceilings, for the files a per-path override reaches (#164). Empty: the run's ceilings.
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{}
     )
     $accepted = Get-PSCxPolicyLookup -Record $Accept -PathComparison $PathComparison
     # Emitted rather than returned as an array, so the declared OutputType describes what a
     # caller actually receives -- one record at a time. The gate wraps the result in @() and
     # gets an empty array when nothing breaches, which is the same answer either way.
     $Unit | Where-Object {
-        ($_.Cyclomatic -gt $MaxCyclomatic -or $_.Cognitive -gt $MaxCognitive) -and
+        (Test-PSCxOverCeiling -Unit $_ -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -FileCeiling $FileCeiling) -and
         -not $accepted.ContainsKey((Get-PSCxPolicyKey -File $_.File -Unit $_.Unit)) -and
         -not (Test-PSCxWithinBaseline -Unit $_ -Map $BaselineMap)
     }
@@ -252,9 +290,11 @@ function Get-PSCxBaselineScoreFault {
         [Parameter(Mandatory)] $Entry,
         [Parameter(Mandatory)] $Unit,
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
-        [Parameter(Mandatory)] [int]$MaxCognitive
+        [Parameter(Mandatory)] [int]$MaxCognitive,
+        # File -> ceilings, for the files a per-path override reaches (#164). Empty: the run's ceilings.
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{}
     )
-    if ($Unit.Cyclomatic -le $MaxCyclomatic -and $Unit.Cognitive -le $MaxCognitive) {
+    if (-not (Test-PSCxOverCeiling -Unit $Unit -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -FileCeiling $FileCeiling)) {
         return "$($Entry.file) $($Entry.unit) is recorded but is now within both ceilings (cyclomatic $($Unit.Cyclomatic), cognitive $($Unit.Cognitive)) -- delete the entry, the real bar covers it"
     }
     # Covered FIRST, then better. A unit can be both at once -- worse on cyclomatic, better on
@@ -289,7 +329,9 @@ function Get-PSCxBaselineFault {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Accept,
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive,
-        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
+        # File -> ceilings, for the files a per-path override reaches (#164). Empty: the run's ceilings.
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{}
     )
     # In begin, once for the whole pipeline: each entry arrives as its own run of process, and
     # searching both lists from there is what made this cost entries x units (#153).
@@ -318,7 +360,7 @@ function Get-PSCxBaselineFault {
             return "$file $name is recorded but no such unit was measured -- it was renamed, moved, or is outside the path being gated"
         }
         return Get-PSCxBaselineScoreFault -Entry $Entry -Unit $found `
-            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive
+            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -FileCeiling $FileCeiling
     }
 }
 
@@ -385,12 +427,14 @@ function Get-PSCxBaselineAddition {
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive,
         [Parameter(Mandatory)] [AllowEmptyCollection()] [hashtable]$Map,
-        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
+        # File -> ceilings, for the files a per-path override reaches (#164). Empty: the run's ceilings.
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{}
     )
     # Exactly what the document writer would record -- breaching and not accepted -- so the two
     # cannot disagree about which units an update adds.
     Get-PSCxUnacceptedUnit -Unit $Unit -Accept $Accept -MaxCyclomatic $MaxCyclomatic `
-        -MaxCognitive $MaxCognitive -PathComparison $PathComparison | Where-Object {
+        -MaxCognitive $MaxCognitive -PathComparison $PathComparison -FileCeiling $FileCeiling | Where-Object {
         -not $Map.ContainsKey((Get-PSCxPolicyKey -File ([string]$_.File) -Unit ([string]$_.Unit)))
     }
 }
@@ -436,9 +480,11 @@ function Get-PSCxBaselineDocument {
         [Parameter(Mandatory)] [int]$MetricVersion,
         [Parameter(Mandatory)] [int]$SchemaVersion,
         [Parameter(Mandatory)] [datetime]$GeneratedAt,
-        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
+        # File -> ceilings, for the files a per-path override reaches (#164). Empty: the run's ceilings.
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{}
     )
-    $breaching = @(Get-PSCxUnacceptedUnit -Unit $Unit -Accept $Accept -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $PathComparison)
+    $breaching = @(Get-PSCxUnacceptedUnit -Unit $Unit -Accept $Accept -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $PathComparison -FileCeiling $FileCeiling)
     $entries = @($breaching | Sort-Object File, Unit | ForEach-Object {
             [pscustomobject]@{
                 file       = $_.File

@@ -1142,3 +1142,80 @@ Describe 'case sensitivity, read from the file system rather than the platform (
         $skips[0].SkipReason | Should-BeLikeString "differs only in case from $other.*Rename one*" -CaseSensitive
     }
 }
+
+Describe 'excluding files by config (#164)' {
+
+    BeforeAll {
+        $script:exWork = [System.IO.Path]::GetFullPath((Join-Path ([System.IO.Path]::GetTempPath()) "cxexcl-$([System.Guid]::NewGuid().ToString('N'))"))
+        New-Item -ItemType Directory -Path (Join-Path $script:exWork 'gen'), (Join-Path $script:exWork 'src') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $script:exWork 'gen/b.ps1') -Value 'function Get-B { 1 }' -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $script:exWork 'gen/a.ps1') -Value 'function Get-A { 1 }' -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $script:exWork 'src/c.ps1') -Value 'function Get-C { 1 }' -Encoding utf8
+        function script:Exclude {
+            param([string[]]$Pattern, [string]$Base = $script:exWork)
+            return [pscustomobject]@{
+                Base    = $Base
+                Pattern = $Pattern
+                Regex   = [regex[]]@($Pattern | ForEach-Object { ConvertTo-PSCxGlobRegex -Pattern $_ -PathComparison $script:PathCmp })
+            }
+        }
+        function script:NewExcluded { return , [System.Collections.Generic.List[string]]::new() }
+        function script:Selected {
+            param([string]$Relative, $Exclude, $ChangedSet, $Excluded = (NewExcluded))
+            $file = Join-Path $script:exWork $Relative
+            return Test-PSCxSelectedFile -File $file -Root $script:exWork -PathComparison $script:PathCmp `
+                -ChangedSet $ChangedSet -Exclude $Exclude -Excluded $Excluded
+        }
+    }
+
+    AfterAll { Remove-Item $script:exWork -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'selects every file with no list and no config' {
+        Selected 'src/c.ps1' | Should-BeTrue
+    }
+
+    It 'drops a file the changed list does not name, without calling it excluded' {
+        $excluded = NewExcluded
+        $set = [System.Collections.Generic.HashSet[string]]::new([string[]]@('src/c.ps1'))
+        Selected 'gen/a.ps1' -Exclude (Exclude 'gen') -ChangedSet $set -Excluded $excluded | Should-BeFalse
+        $excluded.Count | Should-Be 0
+        Selected 'src/c.ps1' -Exclude (Exclude 'gen') -ChangedSet $set | Should-BeTrue
+    }
+
+    It 'drops a file any pattern matches, recording it as a record names a File' {
+        $excluded = NewExcluded
+        Selected 'gen/a.ps1' -Exclude (Exclude 'nothing', 'gen') -Excluded $excluded | Should-BeFalse
+        $excluded | Should-BeCollection @('gen/a.ps1')
+        Selected 'src/c.ps1' -Exclude (Exclude 'nothing', 'gen') | Should-BeTrue
+    }
+
+    It 'matches against the config directory, not the working root' {
+        $excluded = NewExcluded
+        Selected 'gen/a.ps1' -Exclude (Exclude 'a.ps1' -Base (Join-Path $script:exWork 'gen')) -Excluded $excluded | Should-BeFalse
+        $excluded | Should-BeCollection @('gen/a.ps1')
+    }
+
+    It 'never excludes a file outside the config directory, even with a pattern matching everything' {
+        Selected 'src/c.ps1' -Exclude (Exclude '**' -Base (Join-Path $script:exWork 'gen')) | Should-BeTrue
+    }
+
+    It 'measures what is left, and records the patterns and the files they kept out' {
+        Push-Location $script:exWork
+        try { $scan = Get-PSCxScan -Path @('.') -Recurse -Exclude (Exclude 'gen') }
+        finally { Pop-Location }
+        @($scan.Units.Unit) | Should-ContainCollection @('Get-C')
+        @($scan.Units.Unit) | Should-NotContainCollection @('Get-A')
+        $scan.Scope.Exclude | Should-BeCollection @('gen')
+        # Sorted, so a report diffs cleanly whatever order the walk found them in.
+        $scan.Scope.Excluded | Should-BeCollection @('gen/a.ps1', 'gen/b.ps1')
+        $scan.Scope.Excluded[0] | Should-Be 'gen/a.ps1'
+    }
+
+    It 'records empty lists, not nothing, for a run with no config' {
+        $scan = Get-PSCxScan -Path @($script:flat)
+        ($scan.Scope.Exclude -is [array]) | Should-BeTrue
+        $scan.Scope.Exclude.Count | Should-Be 0
+        ($scan.Scope.Excluded -is [array]) | Should-BeTrue
+        $scan.Scope.Excluded.Count | Should-Be 0
+    }
+}
