@@ -560,14 +560,15 @@ function Test-PSCxAssignable {
     return $false
 }
 
-function Get-PSCxUnitTable {
-    # Baseline unit -> start-line map: every function, every class method and
-    # initialised property, plus the script body -- so a decision-free unit still
-    # reports (cyclomatic 1 / cognitive 0).
+function Get-PSCxUnitSpan {
+    # Every unit except the script body, with the offsets its text starts and ends at: unit key ->
+    # [pscustomobject]@{ Start; End; StartLine }. The ONE enumeration of units -- Get-PSCxUnitTable
+    # is derived from it -- so the units a line count is attributed to and the units that are
+    # scored cannot disagree about which units exist.
     [OutputType([hashtable])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Ast)
-    $units = @{ '<script-body>' = 1 }
+    $spans = @{}
     # From the index's type buckets, not a FindAll of its own: the index already walked the tree
     # and filed every node by type, and a second walk invoking a PowerShell predicate per node
     # was a fifth of a file's measurement (#155). The buckets are by EXACT type name, which is
@@ -582,9 +583,24 @@ function Get-PSCxUnitTable {
                 (($node.Parent -is [System.Management.Automation.Language.TypeDefinitionAst] -and $node.Parent.IsEnum) -or
                 -not $node.InitialValue)) { continue }
             $unit = Resolve-PSCxUnitBoundary -Boundary $node
-            $units[(Get-PSCxUnitName -Boundary $unit)] = $unit.Extent.StartLineNumber
+            $spans[(Get-PSCxUnitName -Boundary $unit)] = [pscustomobject]@{
+                Start = $unit.Extent.StartOffset; End = $unit.Extent.EndOffset; StartLine = $unit.Extent.StartLineNumber
+            }
         }
     }
+    return $spans
+}
+
+function Get-PSCxUnitTable {
+    # Baseline unit -> start-line map: every function, every class method and
+    # initialised property, plus the script body -- so a decision-free unit still
+    # reports (cyclomatic 1 / cognitive 0). A projection of Get-PSCxUnitSpan.
+    [OutputType([hashtable])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Ast)
+    $units = @{ '<script-body>' = 1 }
+    $spans = Get-PSCxUnitSpan -Ast $Ast
+    foreach ($k in $spans.Keys) { $units[$k] = $spans[$k].StartLine }
     return $units
 }
 

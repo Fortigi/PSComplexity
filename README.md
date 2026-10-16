@@ -219,6 +219,23 @@ costs what rather than landing on the `if` line as one lump.
 `Contributions` covers the **cognitive** score only; cyclomatic is a count of decision points
 and its total is already its own explanation.
 
+### How long a unit is
+
+Complexity says nothing about size: a 60-line function of straight-line code scores 1 and 0.
+`-Detailed` therefore also adds **`LinesOfCode`**, counted exactly as SonarQube counts `ncloc`: a
+physical line holding at least one character that is neither whitespace nor part of a comment.
+
+- **Counted:** a line holding only a brace, every line of a statement continued over several lines,
+  a line holding only a continuation backtick, and the non-blank lines inside a here-string.
+- **Not counted:** blank lines, comment lines, comment-based help, and the comment after code on a
+  line (the line counts once, for its code).
+- **Attributed to the innermost unit**, as every other number on a record is: a nested function's
+  lines are its own and not its parent's, a class's own lines belong to the script body, and a
+  line holding code of two units -- `} function Next {` -- counts for each.
+
+It is information only, with no threshold. SonarQube's definition rather than one of our own,
+because it is the one most readers already know and PowerShell has no agreed alternative.
+
 Nothing changes without the switch. The six fields above are what a default run emits, in that
 order, and CI consumers that parse it are unaffected.
 

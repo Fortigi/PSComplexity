@@ -5,6 +5,19 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-16
+
+### For consumers
+
+**`-Detailed` reports each unit's lines of code.** Complexity says nothing about size -- a long
+function of straight-line code scores 1 and 0 -- so `-Detailed` now adds `LinesOfCode`, counted
+exactly as SonarQube counts `ncloc`: a physical line holding at least one character that is neither
+whitespace nor part of a comment. A brace on its own line, each line of a continued statement and
+the non-blank lines of a here-string count; blank lines, comments and comment-based help do not.
+Each line belongs to the innermost unit, so a nested function's lines are not its parent's. It is
+information only, with no threshold, and a run without `-Detailed` is unchanged. The JSON report
+carries it for a `-Detailed` run, as an optional field of each unit.
+
 ## [0.6.0] - 2026-10-15
 
 ### For consumers

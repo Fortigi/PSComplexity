@@ -234,6 +234,33 @@ Describe 'Get-PSCxNesting' {
     }
 }
 
+Describe 'Get-PSCxUnitSpan (#166)' {
+    It 'gives each unit the offsets of its own text, and leaves the script body out' {
+        $code = "function F { 1 }`nclass C {`n    [int] `$P = 1`n    [int] M() { return 1 }`n}"
+        $spans = Get-PSCxUnitSpan -Ast (Tree $code)
+        (@($spans.Keys | ForEach-Object { Bare $_ } | Sort-Object) -join ',') | Should-Be 'C.M,C.P,F'
+        $f = $spans[@($spans.Keys | Where-Object { (Bare $_) -eq 'F' })[0]]
+        "$($f.Start)/$($f.End)/$($f.StartLine)" | Should-Be '0/16/1'
+    }
+
+    It 'gives a method the extent of the MEMBER, not of its body' {
+        # The member starts at its return type; the FunctionDefinitionAst inside starts later.
+        $code = "class C {`n    [int] M() { return 1 }`n}"
+        $spans = Get-PSCxUnitSpan -Ast (Tree $code)
+        $m = $spans[@($spans.Keys)[0]]
+        $code.Substring($m.Start, $m.End - $m.Start) | Should-Be '[int] M() { return 1 }'
+    }
+
+    It 'agrees with the unit table about which units exist and where they start' {
+        $code = "function A { 1 }`nfunction B { function C { 2 } }`nenum E { Red = 1 }`nclass K { [int] `$X }"
+        $t = Tree $code
+        $spans = Get-PSCxUnitSpan -Ast $t
+        $table = Get-PSCxUnitTable -Ast $t
+        (@($table.Keys | Where-Object { $_ -ne '<script-body>' } | Sort-Object) -join ',') | Should-Be (@($spans.Keys | Sort-Object) -join ',')
+        foreach ($k in $spans.Keys) { $table[$k] | Should-Be $spans[$k].StartLine }
+    }
+}
+
 Describe 'Get-PSCxUnitTable' {
     It 'always contains the script body, at line 1' {
         # The line is a literal 1. A decision-free file must still report a unit, and it must

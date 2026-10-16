@@ -508,6 +508,8 @@ function Get-PSCxUnitRecord {
         [Parameter(Mandatory)] [int]$Cognitive,
         [Parameter(Mandatory)] [int]$MetricVersion,
         [AllowEmptyCollection()] [object[]]$Contributions,
+        # SonarQube's ncloc for this unit (#166); published with -Detailed only.
+        [int]$LinesOfCode,
         [switch]$Detailed
     )
     $record = [pscustomobject]@{
@@ -520,7 +522,10 @@ function Get-PSCxUnitRecord {
     }
     # Absent and empty are different answers, and a consumer iterating this should not have to
     # tell them apart -- so -Detailed always adds the property, even for a decision-free unit.
-    if ($Detailed) { $record | Add-Member -NotePropertyName Contributions -NotePropertyValue @($Contributions) }
+    if ($Detailed) {
+        $record | Add-Member -NotePropertyName Contributions -NotePropertyValue @($Contributions)
+        $record | Add-Member -NotePropertyName LinesOfCode -NotePropertyValue $LinesOfCode
+    }
     return $record
 }
 
@@ -641,7 +646,13 @@ function Get-PSCxFileScan {
     # Once per file rather than per unit: the rows are one walk, and asking for them per unit
     # would re-walk the tree for every function in the file.
     $byUnit = @{}
-    if ($Detailed) { $byUnit = Get-PSCxContributionMap -Row $cogRows }
+    $loc = @{}
+    if ($Detailed) {
+        $byUnit = Get-PSCxContributionMap -Row $cogRows
+        # Information only, and only when asked for (#166): one pass over the tokens the parse
+        # already produced, attributed to the same units the scores are.
+        $loc = Get-PSCxLinesOfCodeMap -Token @($tokens) -Span (Get-PSCxUnitSpan -Ast $ast)
+    }
     $units = foreach ($k in $ordered) {
         # Two traps stacked here, and the empty list has to survive BOTH.
         #
@@ -657,7 +668,7 @@ function Get-PSCxFileScan {
         if ($byUnit.ContainsKey($k)) { $contrib = $byUnit[$k] }
         Get-PSCxUnitRecord -File $relative -Unit $display[$k] -Line $lines[$k] `
             -Cyclomatic $cyc[$k] -Cognitive $cog[$k] -MetricVersion $script:PSCxMetricVersion `
-            -Contributions $contrib -Detailed:$Detailed
+            -Contributions $contrib -LinesOfCode ([int]$loc[$k]) -Detailed:$Detailed
     }
     return [pscustomobject]@{ File = $relative; Units = @($units); SkipReason = $null }
 }
