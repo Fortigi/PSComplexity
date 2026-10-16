@@ -114,6 +114,10 @@ function Get-PSCxReportDocument {
             # score has to be able to tell which subset it describes, and absent is a different
             # answer from empty: only one of them may be read as a full measurement.
             changedFile = $changedFile
+            # What a config excluded (#164), patterns and files, by the argument skipped is
+            # written for: a number has to say what it left out. Empty, never absent, without one.
+            exclude     = [string[]]@($Scan.Scope.Exclude)
+            excluded    = [string[]]@($Scan.Scope.Excluded)
         }
         # Beside the summary, never instead of it: an aggregate that cannot say what it excluded
         # is the failure this project exists to find in other people's code.
@@ -131,7 +135,17 @@ function Get-PSCxReportDocument {
         $document['thresholds'] = [ordered]@{
             cyclomatic = $Gate.MaxCyclomatic
             cognitive  = $Gate.MaxCognitive
+            # The per-path ceilings that applied, as the config spells them -- relative to the config
+            # file named below. A null metric is one the override left to the run's ceiling, or one
+            # the command line overrode everywhere.
+            overrides  = @($Gate.Overrides | ForEach-Object {
+                    [ordered]@{ path = [string]$_.Path; cyclomatic = $_.MaxCyclomatic; cognitive = $_.MaxCognitive }
+                })
         }
+        # The policy behind the verdict, or null for a run with no config. A gate report that said
+        # "passed" without saying which file decided what passing meant would be read as the
+        # command line's verdict alone.
+        $document['config'] = $Gate.Config
         $document['passed'] = [bool]$Gate.Passed
         $document['violations'] = @($Gate.Violations)
         # What the run EXCUSED, with the argument for each. A gate report that reported a pass
@@ -254,10 +268,15 @@ function Get-PSCxSarifDocument {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Violation,
         [Parameter(Mandatory)] [string]$ModuleVersion,
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
-        [Parameter(Mandatory)] [int]$MaxCognitive
+        [Parameter(Mandatory)] [int]$MaxCognitive,
+        # File -> ceilings for the files a per-path override reaches, as Get-PSCxFileCeiling builds
+        # it; read here rather than resolved, because this file is a sink and decides nothing.
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{}
     )
     $results = @(foreach ($u in $Violation) {
-            Get-PSCxSarifResult -Unit $u -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive
+            $ceiling = $FileCeiling[[string]$u.File]
+            Get-PSCxSarifResult -Unit $u -MaxCyclomatic ($ceiling.Cyclomatic ?? $MaxCyclomatic) `
+                -MaxCognitive ($ceiling.Cognitive ?? $MaxCognitive)
         })
     return [ordered]@{
         '$schema' = 'https://json.schemastore.org/sarif-2.1.0.json'
@@ -308,6 +327,11 @@ function Write-PSCxGateArtifact {
         # empty are different answers, and a consumer iterating this should not have to tell them
         # apart.
         [AllowEmptyCollection()] [object[]]$Baselined = @(),
+        # The per-path overrides that applied and the ceilings they gave each file (#164).
+        [AllowEmptyCollection()] [object[]]$Override = @(),
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{},
+        # The config's path as a record names a File, or empty for a run with none.
+        [AllowEmptyString()] [string]$Config,
         [AllowEmptyString()] [string]$ReportPath,
         [AllowEmptyString()] [string]$SarifPath
     )
@@ -319,13 +343,17 @@ function Write-PSCxGateArtifact {
             Violations    = $Violation
             Accepted      = $Accept
             Baselined     = $Baselined
+            Overrides     = $Override
+            # Empty becomes null: the report says "no config", not a config with no name.
+            Config        = $Config ? $Config : $null
         }
         Save-PSCxDocument -Path $ReportPath -Document (Get-PSCxReportDocument -Scan $Scan `
                 -ModuleVersion (Get-PSCxModuleVersion) -GeneratedAt (Get-Date) -Gate $gate)
     }
     if ($SarifPath) {
         Save-PSCxDocument -Path $SarifPath -Document (Get-PSCxSarifDocument -Violation $Violation `
-                -ModuleVersion (Get-PSCxModuleVersion) -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive)
+                -ModuleVersion (Get-PSCxModuleVersion) -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
+                -FileCeiling $FileCeiling)
     }
 }
 
@@ -389,7 +417,7 @@ function Read-PSCxDocument {
     # document with no entries -- a baseline permitting nothing, which is a silent verdict
     # change rather than an error.
     if (-not $text -or -not $text.Trim()) {
-        throw "$Path is empty. An empty baseline is a document with an empty units array, not an empty file."
+        throw "$Path is empty. An empty baseline is a document with an empty units array, and an empty config is {} with a schemaVersion -- never an empty file."
     }
     try {
         return $text | ConvertFrom-Json -ErrorAction Stop

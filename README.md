@@ -376,6 +376,68 @@ reviewed.
 `-UpdateBaseline` writes no report and no SARIF: the verdict they would record is one the call
 just manufactured by recording every breach.
 
+### Keeping the policy in a file
+
+Ceilings, acceptances and a baseline can all live on the command line, which is fine for one CI
+step and drifts as soon as there are two -- the pipeline, a developer running the gate by hand, a
+pre-commit hook. A committed `.pscomplexity.json` holds them in one place:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/Fortigi/PSComplexity/main/schemas/v1/config.schema.json",
+  "schemaVersion": 1,
+  "maxCyclomatic": 15,
+  "maxCognitive": 15,
+  "exclude": ["src/generated", "**/*.g.ps1"],
+  "overrides": [
+    { "path": "tests", "maxCyclomatic": 25, "maxCognitive": 25 },
+    { "path": "src/Parser.ps1", "maxCognitive": 30 }
+  ],
+  "accept": [
+    { "file": "src/Lexer.ps1", "unit": "Read-Token", "reason": "table-driven lexer; splitting it hides the table" }
+  ],
+  "baselineFile": "complexity-baseline.json"
+}
+```
+
+```powershell
+Test-PSComplexity ./src -Recurse                 # finds and applies the config
+Test-PSComplexity ./src -Recurse -NoConfig       # applies none: 15 / 15
+Test-PSComplexity ./src -Recurse -ConfigFile ./ci/strict.json
+```
+
+**Which file.** `-ConfigFile` names one. Without it, the gate takes the nearest
+`.pscomplexity.json` from each `-Path` up to the repository root -- the directory holding `.git` --
+and never looks above that root, nor anywhere at all outside a repository, so a file left in a
+parent or home directory cannot quietly start deciding verdicts. The paths of one run must all fall
+under the same config, or the run is refused. The file used is printed (`Using config
+.pscomplexity.json`) and recorded as `config` in the JSON report, so a verdict cannot be read
+without the policy behind it.
+
+**What it says.**
+
+- `maxCyclomatic` / `maxCognitive` -- the ceilings for every unit no override reaches. Default 15.
+- `overrides` -- other ceilings below a path: a directory or a file, no wildcards. The deepest path
+  reaching a file decides each metric, and a metric an override leaves out comes from a shallower
+  one or from the ceilings above.
+- `exclude` -- files not measured at all. `*` and `?` stay inside one path segment, `**` spans any
+  number, and a pattern covers everything below what it names, so `src/generated` needs no `/**`.
+  The report lists every excluded file under `scope.excluded`.
+- `accept` -- exactly what `-Accept` takes, with the same checks: the gate throws when an
+  acceptance stops describing the run.
+- `baselineFile` -- the baseline the gate holds units to and `-UpdateBaseline` writes.
+
+Every path is relative to the config file's own directory, with forward slashes, and may not leave
+it. Unknown keys are refused rather than ignored, because a misspelt `maxCognitve` would otherwise
+be a setting that silently does nothing; `$schema` and `_`-prefixed comment keys are allowed. A
+config that is not valid is refused before anything is measured, naming every fault in it.
+
+**The command line wins wherever it says something.** `-MaxCyclomatic` and `-MaxCognitive` replace
+the config's ceilings for every unit, overrides included -- a caller typing `-MaxCognitive 10`
+means every unit. `-Accept` replaces the config's acceptances and `-BaselineFile` its baseline.
+
+Only `Test-PSComplexity` reads a config. `Measure-PSComplexity` measures what it is pointed at.
+
 ### Gating a pull request on what it changed
 
 A whole-tree gate answers "is this codebase clean?" when the reviewer is asking "did this PR make

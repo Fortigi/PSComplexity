@@ -245,7 +245,7 @@ function Get-R2 { param($a, $b, $c) if ($a) { if ($b) { if ($c) { 1 } } } }
     It 'adds exactly the gate fields to a gate report' {
         $d = Get-Content $script:gatePath -Raw | ConvertFrom-Json
         ($d.PSObject.Properties.Name -join ',') |
-            Should-Be 'generatedFrom,schemaVersion,producedBy,generatedAt,mode,metricVersion,scope,skipped,unmatched,summary,units,thresholds,passed,violations,accepted,baselined'
+            Should-Be 'generatedFrom,schemaVersion,producedBy,generatedAt,mode,metricVersion,scope,skipped,unmatched,summary,units,thresholds,config,passed,violations,accepted,baselined'
     }
 
     It 'reconciles its summary against the units it carries' {
@@ -696,5 +696,82 @@ Describe 'a report says which subset it describes' {
         @($d.scope.changedFile).Count | Should-Be 1
         @($d.units | ForEach-Object unit) | Should-NotContainCollection 'Get-Two'
         Should-BeTrue -Actual (Test-AgainstSchema -Json $raw)
+    }
+}
+
+Describe 'what a report says about a config (#164)' {
+
+    BeforeAll {
+        $script:cfgScan = [pscustomobject]@{
+            Units         = @([pscustomobject]@{ File = 'tests/a.ps1'; Unit = 'Get-A'; Line = 3; Cyclomatic = 20; Cognitive = 1; MetricVersion = 1 })
+            Skipped       = @()
+            Unmatched     = @()
+            Scope         = [pscustomobject]@{ Path = @('.'); Recurse = $true; Root = '/r'; ChangedFile = $null; Exclude = [string[]]@('gen'); Excluded = [string[]]@('gen/x.ps1') }
+            MetricVersion = 1
+        }
+        $script:cfgGate = [pscustomobject]@{
+            MaxCyclomatic = 15; MaxCognitive = 15; Passed = $true; Violations = @(); Accepted = @(); Baselined = @()
+            Overrides     = @([pscustomobject]@{ Path = 'tests'; Full = '/r/tests'; MaxCyclomatic = 25; MaxCognitive = $null })
+            Config        = '.pscomplexity.json'
+        }
+    }
+
+    It 'records what the config excluded, as lists even of one' {
+        $d = Get-PSCxReportDocument -Scan $script:cfgScan -ModuleVersion '1' -GeneratedAt ([datetime]'2026-01-01Z')
+        ($d.scope.exclude -is [array]) | Should-BeTrue
+        $d.scope.exclude | Should-BeCollection @('gen')
+        ($d.scope.excluded -is [array]) | Should-BeTrue
+        $d.scope.excluded | Should-BeCollection @('gen/x.ps1')
+    }
+
+    It 'records the overrides that applied and the config behind the verdict' {
+        $d = Get-PSCxReportDocument -Scan $script:cfgScan -ModuleVersion '1' -GeneratedAt ([datetime]'2026-01-01Z') -Gate $script:cfgGate
+        $d.config | Should-Be '.pscomplexity.json'
+        $o = @($d.thresholds.overrides)
+        $o.Count | Should-Be 1
+        $o[0].path | Should-Be 'tests'
+        $o[0].cyclomatic | Should-Be 25
+        $o[0].keys -contains 'cognitive' | Should-BeTrue
+        $o[0].cognitive | Should-BeNull
+    }
+
+    It 'writes a gate report with a config that the published schema accepts' {
+        $p = Join-Path $script:work "cfg-$([System.Guid]::NewGuid().ToString('N')).json"
+        Write-PSCxGateArtifact -Scan $script:cfgScan -Passed $true -Violation @() -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 `
+            -Override $script:cfgGate.Overrides -Config '.pscomplexity.json' -ReportPath $p
+        $text = [System.IO.File]::ReadAllText($p)
+        ($text | ConvertFrom-Json).config | Should-Be '.pscomplexity.json'
+        @(($text | ConvertFrom-Json).thresholds.overrides).Count | Should-Be 1
+        Should-BeTrue -Actual (Test-AgainstSchema -Json $text)
+    }
+
+    It 'writes null, not an empty name, for a run with no config' {
+        $p = Join-Path $script:work "nocfg-$([System.Guid]::NewGuid().ToString('N')).json"
+        Write-PSCxGateArtifact -Scan $script:cfgScan -Passed $true -Violation @() -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -Config '' -ReportPath $p
+        $d = Get-Content -LiteralPath $p -Raw | ConvertFrom-Json
+        $d.PSObject.Properties.Name -contains 'config' | Should-BeTrue
+        $d.config | Should-BeNull
+        @($d.thresholds.overrides).Count | Should-Be 0
+    }
+
+    It 'names the ceiling each unit faced in SARIF, an override where one reached it' {
+        $u = $script:cfgScan.Units[0]
+        $map = @{ 'tests/a.ps1' = [pscustomobject]@{ Cyclomatic = 18; Cognitive = 0 } }
+        $doc = Get-PSCxSarifDocument -Violation @($u) -ModuleVersion '1' -MaxCyclomatic 15 -MaxCognitive 15 -FileCeiling $map
+        $results = @($doc.runs[0].results)
+        $results.Count | Should-Be 2
+        $results[0].message.text | Should-BeLikeString '*cyclomatic complexity 20, over the ceiling of 18.'
+        $results[1].message.text | Should-BeLikeString '*cognitive complexity 1, over the ceiling of 0.'
+        $plain = @((Get-PSCxSarifDocument -Violation @($u) -ModuleVersion '1' -MaxCyclomatic 15 -MaxCognitive 15).runs[0].results)
+        $plain.Count | Should-Be 1
+        $plain[0].message.text | Should-BeLikeString '*over the ceiling of 15.'
+    }
+
+    It 'passes the file ceilings from the gate to SARIF' {
+        $p = Join-Path $script:work "cfg-$([System.Guid]::NewGuid().ToString('N')).sarif"
+        $map = @{ 'tests/a.ps1' = [pscustomobject]@{ Cyclomatic = 18; Cognitive = 35 } }
+        Write-PSCxGateArtifact -Scan $script:cfgScan -Passed $false -Violation @($script:cfgScan.Units[0]) -Accept @() `
+            -MaxCyclomatic 15 -MaxCognitive 15 -FileCeiling $map -SarifPath $p
+        (Get-Content -LiteralPath $p -Raw | ConvertFrom-Json).runs[0].results[0].message.text | Should-BeLikeString '*ceiling of 18.'
     }
 }

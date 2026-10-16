@@ -243,6 +243,9 @@ function Test-PSComplexity {
         The last of those is a fault in the policy rather than a complaint about the code, so
         reporting it as a failing gate would send somebody to refactor a unit that is fine.
 
+        The policy can live in a committed .pscomplexity.json instead of on the command line --
+        see -ConfigFile. Whatever the command line says still wins.
+
         Two mechanisms let an already-red codebase adopt the gate without weakening it.
         -Accept excuses a named unit outright and carries the written argument for it;
         -BaselineFile caps each already-breaching unit at what it already scored, so old code
@@ -253,10 +256,12 @@ function Test-PSComplexity {
         One or more files or directories to check.
 
     .PARAMETER MaxCyclomatic
-        Cyclomatic ceiling (default 15).
+        Cyclomatic ceiling. Without it, the config's maxCyclomatic, or 15. Given, it applies to
+        every unit, overriding the config's per-path overrides too.
 
     .PARAMETER MaxCognitive
-        Cognitive ceiling (default 15).
+        Cognitive ceiling. Without it, the config's maxCognitive, or 15. Given, it applies to
+        every unit, overriding the config's per-path overrides too.
 
     .PARAMETER Recurse
         Recurse into subdirectories when a directory is given.
@@ -323,6 +328,26 @@ function Test-PSComplexity {
         duplicate definitions in one file are told apart -- is refused outright: the ordinal
         renumbers when a duplicate is inserted above it, so the entry would silently begin capping
         a different function.
+
+    .PARAMETER ConfigFile
+        A .pscomplexity.json holding the gate's policy: default ceilings, per-path overrides,
+        excludes, acceptances with their reasons, and the baseline file. It is described by
+        schemas/v1/config.schema.json, which ships with the module, and every path in it is
+        relative to the config file's own directory.
+
+        Without -ConfigFile the gate looks for one: the nearest .pscomplexity.json from each -Path
+        up to the repository root, and none at all outside a repository. Every path of one run
+        must fall under the same config, or the run is refused. The file used is printed and
+        recorded in the report.
+
+        The command line wins wherever it says something: -MaxCyclomatic and -MaxCognitive replace
+        the config's ceilings everywhere, -Accept replaces its acceptances, -BaselineFile its
+        baseline. A config that is not valid is refused, naming every fault in it.
+
+        Only this command reads a config. Measure-PSComplexity measures what it is pointed at.
+
+    .PARAMETER NoConfig
+        Apply no config: do not look for one. The ceilings are then the command line's or 15.
 
     .PARAMETER UpdateBaseline
         Write the file named by -BaselineFile, recording every breaching unaccepted unit at the
@@ -391,8 +416,10 @@ function Test-PSComplexity {
         [ValidateNotNullOrEmpty()]
         [Alias('FullName')]
         [string[]]$Path,
-        [int]$MaxCyclomatic = 15,
-        [int]$MaxCognitive = 15,
+        # No defaults here: 15 applies only when neither this nor a config sets a ceiling, and a
+        # parameter default cannot tell "not given" from "given as 15". See Get-PSCxGatePolicy.
+        [int]$MaxCyclomatic,
+        [int]$MaxCognitive,
         [switch]$Recurse,
         [string]$ReportPath,
         [string]$SarifPath,
@@ -402,10 +429,12 @@ function Test-PSComplexity {
         [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ChangedFile,
 
         # Empty is the normal case, and an empty array must bind rather than be rejected.
-        [AllowEmptyCollection()] [object[]]$Accept = @(),
+        [AllowEmptyCollection()] [object[]]$Accept,
         [string]$BaselineFile,
         [switch]$UpdateBaseline,
-        [switch]$AllowNew
+        [switch]$AllowNew,
+        [ValidateNotNullOrEmpty()] [string]$ConfigFile,
+        [switch]$NoConfig
     )
     # ValueFromPipeline needs begin/process/end, not a bare body. A bare body IS the `end`
     # block, so it would run once with $Path holding only the LAST item piped in -- and the
@@ -419,23 +448,18 @@ function Test-PSComplexity {
         $collected.AddRange([string[]]$Path)
     }
     end {
-        # Before the scan, because the answer does not depend on it and a measurement run is the
-        # expensive part. A -UpdateBaseline with nowhere to write would otherwise measure the
-        # whole tree and then say it had no path.
-        if ($UpdateBaseline -and -not $BaselineFile) {
-            throw '-UpdateBaseline needs -BaselineFile: there is no default path for a baseline, because a file the gate reads without being told to is one nobody reviews.'
-        }
-        # Refused rather than ignored: a gate run carrying -AllowNew believes it permitted
-        # something, and it permits nothing without an update to apply it to.
-        if ($AllowNew -and -not $UpdateBaseline) {
-            throw '-AllowNew only applies with -UpdateBaseline: it permits an update to record units the baseline has never seen, and without an update there is nothing for it to permit.'
-        }
         $paths = $collected.ToArray()
+        # The config, the command line and the defaults, settled into what this run applies --
+        # including the two refusals about -UpdateBaseline, which now depend on the config.
+        $policy = Resolve-PSCxGatePolicy -Bound $PSBoundParameters -Path $paths
+        $MaxCyclomatic = $policy.MaxCyclomatic
+        $MaxCognitive = $policy.MaxCognitive
+        $Accept = $policy.Accept
         # The scan, not the record stream. What was skipped is a fact the measurement already
         # holds; reading it back off the error stream required -ErrorAction SilentlyContinue,
         # which swallowed every OTHER error into the same variable and then described it to
         # the caller as a file that did not parse.
-        $scanArgs = @{ Path = $paths; Recurse = $Recurse }
+        $scanArgs = @{ Path = $paths; Recurse = $Recurse; Exclude = $policy.Exclude }
         if ($PSBoundParameters.ContainsKey('ChangedFile')) {
             Assert-PSCxChangedFile -ChangedFile $ChangedFile
             $scanArgs.ChangedFile = $ChangedFile
@@ -454,6 +478,8 @@ function Test-PSComplexity {
                 ". Fix the fault named, or exclude the file from the path you gate on.")
         }
         $units = $scan.Units
+        $fileCeiling = Get-PSCxFileCeiling -Unit $units -Override $policy.Overrides -MaxCyclomatic $MaxCyclomatic `
+            -MaxCognitive $MaxCognitive -Root $scan.Scope.Root -PathComparison $scan.PathComparison
 
         # Before the verdict, so it is on screen whether the run passes or fails. A pass is the
         # case that needs it: a failing gate already prints what breached.
@@ -472,15 +498,16 @@ function Test-PSComplexity {
         # acceptance is a fault in the policy, not a complaint about the code -- reporting it
         # as a failing gate would send someone to refactor a unit that is fine.
         $faults = @($Accept | Get-PSCxAcceptanceFault -Unit $units `
-                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $scan.PathComparison)
+                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $scan.PathComparison `
+                -FileCeiling $fileCeiling)
         if ($faults.Count -gt 0) {
             throw ("The acceptance list does not describe this run: " + ($faults -join '; ') +
                 ". An acceptance that no longer applies is a mute button, so it fails here rather than ageing quietly.")
         }
 
         if ($UpdateBaseline) {
-            Write-PSCxBaselineFile -Path $BaselineFile -Unit $units -Accept $Accept `
-                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
+            Write-PSCxBaselineFile -Path $policy.BaselineFile -Unit $units -Accept $Accept `
+                -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -FileCeiling $fileCeiling `
                 -MetricVersion (Get-PSCxMetricVersion) -PathComparison $scan.PathComparison -AllowNew:$AllowNew
             # No report and no SARIF from an update. The verdict they would record is one this
             # call just manufactured by recording every breach, and an artefact saying "passed"
@@ -488,16 +515,18 @@ function Test-PSComplexity {
             return $true
         }
 
-        $baselineMap = Get-PSCxBaselineState -Path $BaselineFile -Unit $units -Accept $Accept `
-            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
+        $baselineMap = Get-PSCxBaselineState -Path $policy.BaselineFile -Unit $units -Accept $Accept `
+            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -FileCeiling $fileCeiling `
             -MetricVersion (Get-PSCxMetricVersion) -PathComparison $scan.PathComparison
 
         $violations = @(Get-PSCxUnacceptedUnit -Unit $units -Accept $Accept `
                 -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -BaselineMap $baselineMap `
-                -PathComparison $scan.PathComparison)
+                -PathComparison $scan.PathComparison -FileCeiling $fileCeiling)
         foreach ($v in $violations) {
+            # The ceilings THIS unit faced, which a per-path override may have moved.
+            $ceiling = Get-PSCxUnitCeiling -File $v.File -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -FileCeiling $fileCeiling
             Write-Warning ("{0}:{1} {2} -- cyclomatic {3} (max {4}), cognitive {5} (max {6})" -f `
-                    $v.File, $v.Line, $v.Unit, $v.Cyclomatic, $MaxCyclomatic, $v.Cognitive, $MaxCognitive)
+                    $v.File, $v.Line, $v.Unit, $v.Cyclomatic, $ceiling.Cyclomatic, $v.Cognitive, $ceiling.Cognitive)
         }
         # Recomputed from the same two inputs the verdict used, rather than collected as a side
         # effect while deciding. A second pass is cheap; a list built inside the decision drifts
@@ -506,6 +535,7 @@ function Test-PSComplexity {
         $passed = $violations.Count -eq 0
         Write-PSCxGateArtifact -Scan $scan -Passed $passed -Violation $violations -Accept $Accept `
             -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -Baselined $baselined `
+            -Override $policy.Overrides -FileCeiling $fileCeiling -Config ([string]$policy.Config.Display) `
             -ReportPath $ReportPath -SarifPath $SarifPath
         return $passed
     }

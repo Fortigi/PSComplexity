@@ -58,7 +58,9 @@
         "path": { "type": "array", "items": { "type": "string" } },
         "recurse": { "type": "boolean" },
         "root": { "type": "string", "description": "The working directory the File fields are relative to." },
-        "changedFile": { "type": ["array", "null"], "items": { "type": "string" }, "description": "The files a diff-scoped run was restricted to, or null for a whole-tree run. Absent-versus-empty matters: only null may be read as a measurement of everything under `path`. A type union rather than oneOf, because oneOf reports a failure in every branch and drags a bogus complaint about this key along with any unrelated mistake elsewhere in the file." }
+        "changedFile": { "type": ["array", "null"], "items": { "type": "string" }, "description": "The files a diff-scoped run was restricted to, or null for a whole-tree run. Absent-versus-empty matters: only null may be read as a measurement of everything under `path`. A type union rather than oneOf, because oneOf reports a failure in every branch and drags a bogus complaint about this key along with any unrelated mistake elsewhere in the file." },
+        "exclude": { "type": "array", "items": { "type": "string" }, "description": "The exclude patterns of the config the gate applied, relative to that config's directory. Empty for a run with no config, and always empty in a measurement report: Measure-PSComplexity reads no config." },
+        "excluded": { "type": "array", "items": { "type": "string" }, "description": "The files those patterns kept out of this run, spelt as File is. Only files the run would otherwise have measured, so a diff-scoped run does not list files it was never going to read." }
       }
     },
     "skipped": {
@@ -124,9 +126,23 @@
       "description": "The ceilings that applied. Present only in a gate report.",
       "properties": {
         "cyclomatic": { "type": "integer", "minimum": 1 },
-        "cognitive": { "type": "integer", "minimum": 0 }
+        "cognitive": { "type": "integer", "minimum": 0 },
+        "overrides": {
+          "type": "array",
+          "description": "The config's per-path ceilings that applied, as the config spells each path: relative to the config file named in `config`. The most specific path reaching a file decides each metric; a null metric is one this override leaves to a shallower override or to the run's ceiling, or one the command line set for every unit.",
+          "items": {
+            "type": "object",
+            "required": ["path", "cyclomatic", "cognitive"],
+            "properties": {
+              "path": { "type": "string" },
+              "cyclomatic": { "type": ["integer", "null"], "minimum": 1 },
+              "cognitive": { "type": ["integer", "null"], "minimum": 0 }
+            }
+          }
+        }
       }
     },
+    "config": { "type": ["string", "null"], "description": "The config file whose policy the gate applied, spelt as File is, or null for a run with none. Present only in a gate report." },
     "passed": {
       "type": "boolean",
       "description": "The verdict. Present only in a gate report, and forbidden elsewhere -- see the conditional below."

@@ -29,7 +29,9 @@ function Get-PSCxBaselineState {
         [Parameter(Mandatory)] [int]$MaxCyclomatic,
         [Parameter(Mandatory)] [int]$MaxCognitive,
         [Parameter(Mandatory)] [int]$MetricVersion,
-        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
+        # File -> ceilings, for the files a per-path override reaches (#164). Empty: the run's ceilings.
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{}
     )
     if (-not $Path) { return @{} }
     $document = Read-PSCxDocument -Path $Path
@@ -42,7 +44,7 @@ function Get-PSCxBaselineState {
     # is a fault in the policy rather than a complaint about the code, and reporting it as a
     # failure would send somebody to refactor a unit that is fine.
     $faults = @($entries | Get-PSCxBaselineFault -Unit $Unit -Accept $Accept `
-            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $PathComparison)
+            -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $PathComparison -FileCeiling $FileCeiling)
     if ($faults.Count -gt 0) {
         throw ("The baseline $Path does not describe this run: " + ($faults -join '; ') +
             '. A ratchet that has stopped matching is a suppression list, so it fails here rather than ageing quietly.')
@@ -70,6 +72,8 @@ function Write-PSCxBaselineFile {
         [Parameter(Mandatory)] [int]$MaxCognitive,
         [Parameter(Mandatory)] [int]$MetricVersion,
         [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
+        # File -> ceilings, for the files a per-path override reaches (#164). Empty: the run's ceilings.
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{},
         # Record units the existing file has never seen (#152). Never needed to SEED a baseline or
         # to regenerate one across a metric change: there is nothing to add to.
         [switch]$AllowNew
@@ -86,7 +90,7 @@ function Write-PSCxBaselineFile {
     if ($comparable) {
         $map = Get-PSCxBaselineMap -Entry @($existing.units) -PathComparison $PathComparison
         $added = @(Get-PSCxBaselineAddition -Unit $Unit -Accept $Accept -MaxCyclomatic $MaxCyclomatic `
-                -MaxCognitive $MaxCognitive -Map $map -PathComparison $PathComparison)
+                -MaxCognitive $MaxCognitive -Map $map -PathComparison $PathComparison -FileCeiling $FileCeiling)
         $fault = Get-PSCxBaselineUpdateFault -Raised @(Get-PSCxBaselineRaise -Unit $Unit -Map $map) `
             -Added $added -AllowNew:$AllowNew
         if ($fault) { throw "Refusing to update $Path : $fault" }
@@ -99,5 +103,5 @@ function Write-PSCxBaselineFile {
     Save-PSCxDocument -Path $Path -Document (Get-PSCxBaselineDocument -Unit $Unit -Accept $Accept `
             -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive `
             -MetricVersion $MetricVersion -SchemaVersion (Get-PSCxBaselineSchemaVersion) `
-            -GeneratedAt (Get-Date) -PathComparison $PathComparison)
+            -GeneratedAt (Get-Date) -PathComparison $PathComparison -FileCeiling $FileCeiling)
 }

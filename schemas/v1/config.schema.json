@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/Fortigi/PSComplexity/main/schemas/v1/config.schema.json",
+  "title": "PSComplexity config",
+  "description": "A .pscomplexity.json: the policy Test-PSComplexity applies. Found by -ConfigFile, or as the nearest .pscomplexity.json from each -Path up to the repository root. Every path in it is relative to the directory the file sits in, with forward slashes. The command line wins wherever it says something. This schema is for editors; the module checks the same rules itself and names every fault.",
+  "type": "object",
+  "required": ["schemaVersion"],
+  "additionalProperties": false,
+  "patternProperties": {
+    "^_": { "description": "A comment. Ignored." }
+  },
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1, "description": "The config format. A config naming another version is refused rather than read as this one." },
+    "maxCyclomatic": { "type": "integer", "minimum": 1, "description": "The cyclomatic ceiling for every unit no override reaches. Default 15. -MaxCyclomatic replaces it, and every override's, for the run." },
+    "maxCognitive": { "type": "integer", "minimum": 0, "description": "The cognitive ceiling for every unit no override reaches. Default 15. -MaxCognitive replaces it, and every override's, for the run." },
+    "exclude": {
+      "type": "array",
+      "description": "Files the gate does not measure, as patterns. * and ? stay within one path segment, ** spans any number, and a pattern also covers everything below what it names, so a directory needs no /**. Each excluded file is listed in the report's scope.excluded.",
+      "items": { "$ref": "#/definitions/relativePattern" }
+    },
+    "overrides": {
+      "type": "array",
+      "description": "Different ceilings below a path. The most specific path reaching a file decides each metric, and a metric an override leaves out comes from a shallower one, or from the ceilings above.",
+      "items": {
+        "type": "object",
+        "required": ["path"],
+        "additionalProperties": false,
+        "anyOf": [{ "required": ["maxCyclomatic"] }, { "required": ["maxCognitive"] }],
+        "properties": {
+          "path": { "$ref": "#/definitions/relativePath" },
+          "maxCyclomatic": { "type": "integer", "minimum": 1 },
+          "maxCognitive": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "accept": {
+      "type": "array",
+      "description": "Units allowed over a ceiling, each with the argument for it. The gate fails when one stops describing the run: no such unit, the unit back within its ceilings, or no reason. -Accept replaces the list for the run.",
+      "items": {
+        "type": "object",
+        "required": ["file", "unit", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "file": { "$ref": "#/definitions/relativePath" },
+          "unit": { "type": "string", "minLength": 1 },
+          "reason": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "baselineFile": { "$ref": "#/definitions/relativePath", "description": "The baseline the gate holds units to, and -UpdateBaseline writes. -BaselineFile replaces it for the run." }
+  },
+  "definitions": {
+    "relativePath": {
+      "type": "string",
+      "description": "Relative to the config's directory and inside it: no leading /, no drive, no .. segment, no backslash, no wildcard.",
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!(?:.*/)?\\.\\.(?:/|$))[^\\\\*?]*[^\\s/.\\\\*?][^\\\\*?]*$"
+    },
+    "relativePattern": {
+      "type": "string",
+      "description": "As a relative path, and may also hold * and ?.",
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!(?:.*/)?\\.\\.(?:/|$))[^\\\\]*[^\\s/.\\\\][^\\\\]*$"
+    }
+  }
+}

@@ -673,6 +673,42 @@ function Get-PSCxFileScan {
     return [pscustomobject]@{ File = $relative; Units = @($units); SkipReason = $null }
 }
 
+function Test-PSCxSelectedFile {
+    # Whether the walk measures this file: named by -ChangedFile when a list was given, and not
+    # excluded by the config (#164). An excluded file is recorded, because a report has to be able
+    # to say what it left out -- and only one the run would otherwise have measured, so the list
+    # does not fill up with files a diff-scoped run was never going to read.
+    #
+    # Out of the walk's loop for the ceiling this module gates itself on: two filters nested two
+    # loops deep cost the walk its nesting twice.
+    [OutputType([bool])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$File,
+        [Parameter(Mandatory)] [string]$Root,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
+        [System.Collections.Generic.HashSet[string]]$ChangedSet,
+        # The resolved config's Exclude -- Base, Pattern, Regex -- or $null for none.
+        $Exclude,
+        [System.Collections.Generic.List[string]]$Excluded
+    )
+    $relative = Get-PSCxRelativePath -Path $File -Root $Root -PathComparison $PathComparison
+    if ($null -ne $ChangedSet -and -not $ChangedSet.Contains($relative)) { return $false }
+    if ($null -eq $Exclude) { return $true }
+    # Matched relative to the CONFIG's directory, which is what its patterns are written against. A
+    # file outside that directory comes back as a full path, and is never excluded: `**` would
+    # otherwise match it, and a config cannot speak for a tree it does not sit in.
+    $underConfig = Get-PSCxRelativePath -Path $File -Root $Exclude.Base -PathComparison $PathComparison
+    if ([System.IO.Path]::IsPathRooted($underConfig)) { return $true }
+    foreach ($regex in $Exclude.Regex) {
+        if ($regex.IsMatch($underConfig)) {
+            $Excluded.Add($relative)
+            return $false
+        }
+    }
+    return $true
+}
+
 function Get-PSCxPathScan {
     # Every file under Path, measured, ONE per-file scan at a time.
     #
@@ -699,6 +735,9 @@ function Get-PSCxPathScan {
         # filter was asked for" are different answers -- so the public commands refuse an empty
         # list rather than passing one down.
         [System.Collections.Generic.HashSet[string]]$ChangedSet,
+        # The config's excludes and the list the files they matched go into; both $null without one.
+        $Exclude,
+        [System.Collections.Generic.List[string]]$Excluded,
         # The run's, and the one -Seen was built with -- the caller holds both.
         [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
         [switch]$Recurse,
@@ -724,8 +763,8 @@ function Get-PSCxPathScan {
             # BEFORE the parse, so a diff-scoped run over a large tree does not read every file
             # only to throw most of them away. The verdict is identical either way; the cost is
             # not, and cost is most of why anyone asks for a diff-scoped run.
-            if ($null -ne $ChangedSet -and
-                -not $ChangedSet.Contains((Get-PSCxRelativePath -Path $file -Root $root -PathComparison $PathComparison))) { continue }
+            if (-not (Test-PSCxSelectedFile -File $file -Root $root -PathComparison $PathComparison `
+                        -ChangedSet $ChangedSet -Exclude $Exclude -Excluded $Excluded)) { continue }
             # BEFORE the parse, not after. A line written afterwards names files that are
             # already done, so a scan stuck on one file looks exactly like a scan that has
             # finished -- which is the whole complaint. Named here, the last line printed IS
@@ -759,10 +798,13 @@ function Get-PSCxScan {
         # recorded in Scope, because a number over a subset that cannot say WHICH subset is worse
         # than no number: it reads as a stronger claim than it is.
         [AllowEmptyCollection()] [string[]]$ChangedFile,
+        # The resolved config's Exclude, or $null. Recorded in Scope beside the files it matched.
+        $Exclude,
         [switch]$Recurse,
         [switch]$Detailed
     )
     $units = [System.Collections.Generic.List[object]]::new()
+    $excluded = [System.Collections.Generic.List[string]]::new()
     $skipped = [System.Collections.Generic.List[object]]::new()
     $unmatched = [System.Collections.Generic.List[object]]::new()
     $root = Get-PSCxWorkingRoot
@@ -777,7 +819,7 @@ function Get-PSCxScan {
     if ($PSBoundParameters.ContainsKey('ChangedFile')) {
         $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root $root -PathComparison $pathComparison
     }
-    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -PathComparison $pathComparison -Recurse:$Recurse -Detailed:$Detailed)) {
+    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -Exclude $Exclude -Excluded $excluded -PathComparison $pathComparison -Recurse:$Recurse -Detailed:$Detailed)) {
         if ($fileScan.SkipReason) {
             $skipped.Add([pscustomobject]@{ File = $fileScan.File; Reason = $fileScan.SkipReason })
             continue
@@ -805,6 +847,10 @@ function Get-PSCxScan {
             # answers here: a consumer has to be able to tell a whole-tree run from one filtered
             # down to nothing, and only one of those may be read as a full measurement.
             ChangedFile = $changed
+            # What the config excluded: its patterns, and the files they kept out of this run.
+            # Both empty without a config, which is the true answer rather than an absent one.
+            Exclude     = [string[]]@($Exclude.Pattern | Where-Object { $null -ne $_ })
+            Excluded    = [string[]]@($excluded | Sort-Object)
         }
         MetricVersion = $script:PSCxMetricVersion
         # How this run compared file paths. A fact about the run, read by the gate: a baseline keyed

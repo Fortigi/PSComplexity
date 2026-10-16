@@ -18,6 +18,16 @@ Each line belongs to the innermost unit, so a nested function's lines are not it
 information only, with no threshold, and a run without `-Detailed` is unchanged. The JSON report
 carries it for a `-Detailed` run, as an optional field of each unit.
 
+**The gate's policy can live in a committed `.pscomplexity.json`.** Ceilings, per-path overrides,
+excludes, acceptances with their reasons and the baseline file, in one place for CI and for a run by
+hand. `Test-PSComplexity` takes `-ConfigFile`, or finds the nearest `.pscomplexity.json` from each
+path up to the repository root -- never above it, and not at all outside a repository -- and
+`-NoConfig` turns that off. The file used is printed and recorded in the JSON report as `config`,
+beside `scope.exclude`, `scope.excluded` and `thresholds.overrides`. The command line wins wherever
+it says something. A config that is not valid is refused, naming every fault, and its format ships
+as `schemas/v1/config.schema.json`. Without a config nothing changes: the ceilings are still 15 and
+15. Measure-PSComplexity reads no config.
+
 ## [0.6.0] - 2026-10-15
 
 ### For consumers

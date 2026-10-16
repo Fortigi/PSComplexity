@@ -599,3 +599,63 @@ Describe 'Get-PSCxBaselineDocument' {
         @($doc.units).Count | Should-Be 0
     }
 }
+
+Describe 'per-path ceilings (#164)' {
+    # Every rule that asks "does this unit breach" asks it of the ceilings ITS file faces. The map
+    # holds only files a config override reaches; a unit at 20/30 is over the run's 15/15 and
+    # within an override's 25/35, so each rule below gives a different answer with and without it.
+
+    BeforeAll {
+        $script:Loose = @{ 'src/A.ps1' = [pscustomobject]@{ Cyclomatic = 25; Cognitive = 35 } }
+    }
+
+    It 'reads a file ceiling from the map, and the run ceilings for a file it does not hold' {
+        $c = Get-PSCxUnitCeiling -File 'src/A.ps1' -MaxCyclomatic 15 -MaxCognitive 16 -FileCeiling $script:Loose
+        $c.Cyclomatic | Should-Be 25
+        $c.Cognitive | Should-Be 35
+        $c = Get-PSCxUnitCeiling -File 'src/B.ps1' -MaxCyclomatic 15 -MaxCognitive 16 -FileCeiling $script:Loose
+        $c.Cyclomatic | Should-Be 15
+        $c.Cognitive | Should-Be 16
+    }
+
+    It 'calls a unit over only past a ceiling, on either metric' -ForEach @(
+        @{ Cyc = 15; Cog = 16; Over = $false }
+        @{ Cyc = 16; Cog = 16; Over = $true }
+        @{ Cyc = 15; Cog = 17; Over = $true }
+    ) {
+        Test-PSCxOverCeiling -Unit (Unit -Cyc $Cyc -Cog $Cog) -MaxCyclomatic 15 -MaxCognitive 16 -FileCeiling @{} | Should-Be $Over
+    }
+
+    It 'judges a unit against its file ceiling' {
+        Test-PSCxOverCeiling -Unit (Unit) -MaxCyclomatic 15 -MaxCognitive 15 -FileCeiling $script:Loose | Should-BeFalse
+        Test-PSCxOverCeiling -Unit (Unit -Cyc 26) -MaxCyclomatic 15 -MaxCognitive 15 -FileCeiling $script:Loose | Should-BeTrue
+    }
+
+    It 'does not fail a unit its override permits' {
+        @(Get-PSCxUnacceptedUnit -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -PathComparison $script:PathCmp).Count | Should-Be 1
+        @(Get-PSCxUnacceptedUnit -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -PathComparison $script:PathCmp -FileCeiling $script:Loose).Count | Should-Be 0
+    }
+
+    It 'calls an acceptance stale when the override already permits the unit' {
+        $accept = [pscustomobject]@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' }
+        @($accept | Get-PSCxAcceptanceFault -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15 -PathComparison $script:PathCmp).Count | Should-Be 0
+        $accept | Get-PSCxAcceptanceFault -Unit @(Unit) -MaxCyclomatic 15 -MaxCognitive 15 -PathComparison $script:PathCmp -FileCeiling $script:Loose |
+            Should-BeLikeString '*within both ceilings*'
+    }
+
+    It 'calls a baseline entry stale when the override already permits the unit' {
+        Get-PSCxBaselineScoreFault -Entry (Entry) -Unit (Unit) -MaxCyclomatic 15 -MaxCognitive 15 | Should-BeNull
+        Get-PSCxBaselineScoreFault -Entry (Entry) -Unit (Unit) -MaxCyclomatic 15 -MaxCognitive 15 -FileCeiling $script:Loose |
+            Should-BeLikeString '*now within both ceilings*'
+        (Entry) | Get-PSCxBaselineFault -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -PathComparison $script:PathCmp -FileCeiling $script:Loose |
+            Should-BeLikeString '*now within both ceilings*'
+    }
+
+    It 'neither adds nor records a unit the override permits' {
+        @(Get-PSCxBaselineAddition -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -Map @{} -PathComparison $script:PathCmp).Count | Should-Be 1
+        @(Get-PSCxBaselineAddition -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -Map @{} -PathComparison $script:PathCmp -FileCeiling $script:Loose).Count | Should-Be 0
+        $doc = Get-PSCxBaselineDocument -PathComparison $script:PathCmp -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 `
+            -MetricVersion 1 -SchemaVersion 1 -GeneratedAt ([datetime]'2026-01-02T03:04:05Z') -FileCeiling $script:Loose
+        @($doc.units).Count | Should-Be 0
+    }
+}
