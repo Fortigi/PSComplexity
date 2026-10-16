@@ -1219,3 +1219,53 @@ Describe 'excluding files by config (#164)' {
         $scan.Scope.Excluded.Count | Should-Be 0
     }
 }
+
+Describe 'acceptances a file declares in its code (#165)' {
+
+    BeforeAll {
+        $script:inWork = [System.IO.Path]::GetFullPath((Join-Path ([System.IO.Path]::GetTempPath()) "cxinline-$([System.Guid]::NewGuid().ToString('N'))"))
+        New-Item -ItemType Directory -Path $script:inWork -Force | Out-Null
+        $script:inA = Join-Path $script:inWork 'a.ps1'
+        $script:inB = Join-Path $script:inWork 'b.ps1'
+        $script:inBad = Join-Path $script:inWork 'bad.ps1'
+        Set-Content -LiteralPath $script:inA -Value "# PSCx-Accept: a table`nfunction Get-A { 1 }" -Encoding utf8
+        Set-Content -LiteralPath $script:inB -Value "# PSCx-Accept: lost`n`nfunction Get-B { 1 }" -Encoding utf8
+        Set-Content -LiteralPath $script:inBad -Value "# PSCx-Accept: x`nfunction Get-Bad {" -Encoding utf8
+    }
+
+    AfterAll { Remove-Item $script:inWork -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'reads them with the file, named as its records are' {
+        Push-Location $script:inWork
+        try { $f = Get-PSCxFileScan -File $script:inA -PathComparison $script:PathCmp }
+        finally { Pop-Location }
+        $f.InlineAccept.Count | Should-Be 1
+        $f.InlineAccept[0].File | Should-Be 'a.ps1'
+        $f.InlineAccept[0].Unit | Should-Be 'Get-A'
+        $f.InlineStray.Count | Should-Be 0
+    }
+
+    It 'reads none from a file it could not parse' {
+        $f = Get-PSCxFileScan -File $script:inBad -PathComparison $script:PathCmp
+        $f.SkipReason | Should-NotBeNull
+        ($f.InlineAccept -is [array]) | Should-BeTrue
+        $f.InlineAccept.Count | Should-Be 0
+        ($f.InlineStray -is [array]) | Should-BeTrue
+        $f.InlineStray.Count | Should-Be 0
+    }
+
+    It 'gathers them from every file of the run, and the strays beside them' {
+        Push-Location $script:inWork
+        try { $scan = Get-PSCxScan -Path @('a.ps1', 'b.ps1') }
+        finally { Pop-Location }
+        @($scan.InlineAccept.Unit) | Should-BeCollection @('Get-A')
+        @($scan.InlineStray.File) | Should-BeCollection @('b.ps1')
+    }
+
+    It 'gathers empty lists from files that declare nothing' {
+        $scan = Get-PSCxScan -Path @($script:flat)
+        ($scan.InlineAccept -is [array]) | Should-BeTrue
+        $scan.InlineAccept.Count | Should-Be 0
+        ($scan.InlineStray -is [array]) | Should-BeTrue
+    }
+}

@@ -287,6 +287,41 @@ Three properties worth relying on:
 `File` must match the record's `File` exactly: relative to the working directory with forward
 slashes, or the full path for a file outside it.
 
+**The argument can also sit in the code**, directly above the unit it excuses:
+
+```powershell
+# PSCx-Accept: table-driven lexer; splitting the table across helpers hides it
+function Read-Token {
+    param($Text)
+    ...
+}
+
+class Repo {
+    # PSCx-Accept: one switch over every verb, by design
+    [void] Dispatch([string]$Verb) { ... }
+}
+```
+
+It is the same checked claim, not a suppression comment: the gate throws when the unit is back
+within its ceilings, or when the reason is empty, exactly as for `-Accept`. What it adds is that
+the reason moves with the code -- a renamed file or a moved function takes it along, where a
+`File` + `Unit` entry goes stale.
+
+- **Directly above** means in the comment lines touching the declaration, with no blank line
+  between. It may sit anywhere in that block, so comment-based help written as line comments still
+  works. Functions, filters, class methods, constructors and initialised properties can be accepted
+  this way; the script body cannot, because it has no declaration to stand above -- use `-Accept`.
+- **Whole units only.** A score belongs to a unit, so there is no way to excuse one `if` inside it:
+  that would pass the unit on a number nobody measured.
+- **A declaration that excuses nothing is refused**, not ignored -- a blank line between it and the
+  function, code on its own line, nothing below it, or two units starting on the line below. A
+  reason that drifted away from its function would otherwise sit there believing it excuses
+  something.
+- **A unit accepted both in its code and by `-Accept` or the config is refused**: two arguments for
+  one unit drift apart, and one of them silently does nothing.
+- The JSON report records each acceptance's `source` -- `inline` with its `line`, or `list`.
+- Only `Test-PSComplexity` applies them; `Measure-PSComplexity` measures every unit regardless.
+
 ### Turning the gate on when you are already over the line
 
 A repo with forty units above the ceiling has two options without a baseline, and neither

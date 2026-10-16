@@ -659,3 +659,34 @@ Describe 'per-path ceilings (#164)' {
         @($doc.units).Count | Should-Be 0
     }
 }
+
+Describe 'acceptances written in the code (#165)' {
+
+    BeforeAll {
+        $script:InlineA = [pscustomobject]@{ File = 'src/A.ps1'; Unit = 'Invoke-Thing'; Reason = 'r'; Line = 4; Source = 'inline' }
+    }
+
+    It 'has nothing to say when every declaration names one unit no list names' {
+        @(Get-PSCxInlineAcceptFault -Inline @($script:InlineA) -Stray @() -Listed @() -PathComparison $script:PathCmp).Count | Should-Be 0
+        $other = [pscustomobject]@{ File = 'src/B.ps1'; Unit = 'Invoke-Thing'; Reason = 'r' }
+        @(Get-PSCxInlineAcceptFault -Inline @($script:InlineA) -Stray @() -Listed @($other) -PathComparison $script:PathCmp).Count | Should-Be 0
+    }
+
+    It 'refuses every declaration that excuses no unit, naming file, line and why' {
+        $stray = @(
+            [pscustomobject]@{ File = 'src/A.ps1'; Line = 3; Fault = 'a blank line separates it from the code below' }
+            [pscustomobject]@{ File = 'src/B.ps1'; Line = 9; Fault = 'no code follows it' }
+        )
+        $f = @(Get-PSCxInlineAcceptFault -Inline @() -Stray $stray -Listed @() -PathComparison $script:PathCmp)
+        $f | Should-BeCollection @(
+            'src/A.ps1:3 declares an acceptance, but a blank line separates it from the code below'
+            'src/B.ps1:9 declares an acceptance, but no code follows it'
+        )
+    }
+
+    It 'refuses a unit accepted both in its code and in a list, whatever the case of its name' {
+        $listed = [pscustomobject]@{ File = 'src/A.ps1'; Unit = 'INVOKE-THING'; Reason = 'other' }
+        Get-PSCxInlineAcceptFault -Inline @($script:InlineA) -Stray @() -Listed @($listed) -PathComparison $script:PathCmp |
+            Should-Be 'src/A.ps1 Invoke-Thing is accepted twice, in its code at line 4 and by -Accept or the config -- keep one argument'
+    }
+}

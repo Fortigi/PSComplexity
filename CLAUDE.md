@@ -160,6 +160,10 @@ src/Ast.ps1                    unit discovery, attribution, nesting depth. Share
                                tests/Ast.Tests.ps1 cover it in two seconds.
 src/Cyclomatic.ps1             decision-point counting.
 src/Cognitive.ps1              the SonarSource metric (B1 structural, B2 nesting, B3 level).
+src/InlineAccept.ps1           acceptances written in the code (#165): which unit a comment above
+                               a declaration excuses, and why one excuses none. Pure: text, tokens
+                               and the unit table. Do not START a comment in src/ with the marker
+                               it reads -- the self-gate would read it as a declaration.
 src/Policy.ps1                 which units are excused from the ceilings, and on what terms:
                                acceptances, baselines, and the ONE unit-identity key both use.
                                Pure.

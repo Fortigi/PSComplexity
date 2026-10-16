@@ -28,6 +28,15 @@ it says something. A config that is not valid is refused, naming every fault, an
 as `schemas/v1/config.schema.json`. Without a config nothing changes: the ceilings are still 15 and
 15. Measure-PSComplexity reads no config.
 
+**An acceptance can be written in the code.** A `# PSCx-Accept: <reason>` line comment directly
+above a function, method or constructor excuses that unit, with exactly the checks `-Accept` has:
+the gate fails when the unit is back within its ceilings or the reason is empty. The argument then
+moves with the code instead of going stale in a `File` + `Unit` list. A declaration that excuses
+nothing -- separated by a blank line, sharing a line with code, or above something that is not a
+unit -- is refused rather than ignored, and so is a unit accepted both in its code and in a list.
+Whole units only. The report's `accepted` entries now say where each argument is written, as
+`source` (`inline` or `list`) and the `line` of an inline one.
+
 ## [0.6.0] - 2026-10-15
 
 ### For consumers
