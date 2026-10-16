@@ -46,9 +46,9 @@ function Measure-PSComplexity {
         the artefact needs a verdict.
 
     .PARAMETER Detailed
-        Add a Contributions list to each record: one entry per cognitive increment, carrying
-        the Line it sits on, the Construct that caused it and the Amount it added, in line
-        order. The amounts sum to Cognitive.
+        Add Contributions and LinesOfCode to each record. Contributions holds one entry per
+        cognitive increment -- its Line, Construct and Amount, in source order -- summing to
+        Cognitive. LinesOfCode is SonarQube's ncloc: lines holding code, not blank or comment.
 
         Read the amounts rather than the count. Anything above +1 is a structure plus the
         nesting charged for it, so four +1 rows and one +4 row reach the same total and mean
@@ -69,7 +69,7 @@ function Measure-PSComplexity {
 
     .OUTPUTS
         [pscustomobject] with File, Unit, Line, Cyclomatic, Cognitive, MetricVersion -- one
-        per unit, plus Contributions when -Detailed is given.
+        per unit, plus Contributions and LinesOfCode when -Detailed is given.
 
         These six names, their order and their types are the module's public contract
         alongside the two command names, and a test asserts them exactly: widening the

@@ -162,6 +162,7 @@
         "Cyclomatic": { "type": "integer", "minimum": 1 },
         "Cognitive": { "type": "integer", "minimum": 0 },
         "MetricVersion": { "type": "integer", "minimum": 1 },
+        "LinesOfCode": { "type": "integer", "minimum": 0, "description": "Present only when the run used -Detailed. SonarQube's ncloc for this unit: physical lines holding at least one character that is neither whitespace nor part of a comment, attributed to the innermost unit, so a nested function's lines are not its parent's. Information only; nothing gates on it." },
         "Contributions": {
           "type": "array",
           "description": "Present only when the run used -Detailed. The increments that produced Cognitive, in line order; the amounts sum to it.",

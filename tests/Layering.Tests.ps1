@@ -37,6 +37,9 @@ BeforeAll {
         'Scan.ps1 -> Ast.ps1'
         'Scan.ps1 -> Cognitive.ps1'
         'Scan.ps1 -> Cyclomatic.ps1'
+        # Lines of code (#166) is a measurement too, and the scan is what hands it the tokens and
+        # unit spans. Size.ps1 reaches nothing: it reads tokens and offsets only.
+        'Scan.ps1 -> Size.ps1'
 
         # The composition root. It owns most of the graph on purpose: it is wiring, so it is
         # allowed to know about everything, and nothing is allowed to know about it. It no longer

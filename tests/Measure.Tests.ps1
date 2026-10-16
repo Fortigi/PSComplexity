@@ -331,7 +331,7 @@ Describe 'the shipped help' {
         # The expected list is read off a REAL record rather than written out here, so a field
         # added to the record fails this until the help mentions it.
         $fields = @((Measure-PSComplexity -Path (Join-Path $script:work 'a.ps1') -Detailed)[0].PSObject.Properties.Name)
-        $fields.Count | Should-Be 7 -Because 'six published fields plus Contributions under -Detailed'
+        $fields.Count | Should-Be 8 -Because 'six published fields plus Contributions and LinesOfCode under -Detailed'
         $outputs = ((Get-Help Measure-PSComplexity).returnValues | Out-String) -replace '\s+', ' '
         foreach ($f in $fields) {
             $outputs | Should-BeLikeString "*$f*" -Because "the .OUTPUTS block never names $f"
@@ -845,7 +845,18 @@ function Invoke-Thing {
     It 'adds Contributions when asked' {
         $row = @(Measure-PSComplexity -Path $script:DetailFile -Detailed)[0]
         ($row.PSObject.Properties.Name -join ',') |
-            Should-Be 'File,Unit,Line,Cyclomatic,Cognitive,MetricVersion,Contributions'
+            Should-Be 'File,Unit,Line,Cyclomatic,Cognitive,MetricVersion,Contributions,LinesOfCode'
+    }
+
+    It 'counts each unit''s lines of code the SonarQube way, with -Detailed only (#166)' {
+        $f = Join-Path $script:work "loc-$([System.Guid]::NewGuid().ToString('N')).ps1"
+        "# header`n`nfunction F {`n    # note`n    1`n}`n2" | Set-Content -LiteralPath $f -Encoding utf8
+        try {
+            $rows = @(Measure-PSComplexity -Path $f -Detailed)
+            "$(($rows | Where-Object Unit -eq 'F').LinesOfCode)/$(($rows | Where-Object Unit -eq '<script-body>').LinesOfCode)" | Should-Be '3/1'
+            @(Measure-PSComplexity -Path $f)[0].PSObject.Properties.Name | Should-NotContainCollection 'LinesOfCode'
+        }
+        finally { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }
     }
 
     It 'accounts for every point: the contributions sum to the score' {
