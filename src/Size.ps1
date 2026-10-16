@@ -37,7 +37,7 @@ function Get-PSCxTokenUnit {
     # Outer before inner when two start at one offset: the outer must be on the stack first.
     $order = @($Span.Keys | Sort-Object @{ Expression = { $Span[$_].Start } }, @{ Expression = { $Span[$_].End }; Descending = $true })
     $owner = [string[]]::new($Token.Count)
-    $stack = [string[]]::new($order.Count + 1)
+    $stack = [string[]]::new($order.Count)
     $top = -1
     $next = 0
     for ($i = 0; $i -lt $Token.Count; $i++) {
@@ -73,12 +73,10 @@ function Get-PSCxLinesOfCodeMap {
     for ($i = 0; $i -lt $Token.Count; $i++) {
         $unit = $owner[$i]
         if ($null -eq $unit) { continue }
-        # A token over several lines -- a here-string, a multi-line string, a continuation -- counts
-        # each of its lines that holds a character other than whitespace. Split only then: almost
-        # every token is on one line, and its line is simply where it starts.
-        $first = $Token[$i].Extent.StartLineNumber
-        $lines = ($Token[$i].Extent.EndLineNumber -eq $first) ? @($first) : (Get-PSCxCodeLine -Token $Token[$i])
-        foreach ($line in $lines) {
+        # Every token through the same function, one line or several. A shortcut for the one-line
+        # case gave identical output and, measured over three interleaved rounds on a 545 KB file,
+        # was not faster -- so it was a branch with nothing to show for itself.
+        foreach ($line in (Get-PSCxCodeLine -Token $Token[$i])) {
             if ($line -gt $last[$unit]) { $count[$unit]++; $last[$unit] = $line }
         }
     }
@@ -86,8 +84,9 @@ function Get-PSCxLinesOfCodeMap {
 }
 
 function Get-PSCxCodeLine {
-    # The lines of one multi-line token that hold a character other than whitespace. Called only
-    # for a token over several lines, which is rare, so the call costs nothing that matters.
+    # The lines of one token that hold a character other than whitespace: its own line for almost
+    # every token, and each non-blank line of one spanning several -- a here-string, a multi-line
+    # string, a continuation.
     [OutputType([int[]])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Token)

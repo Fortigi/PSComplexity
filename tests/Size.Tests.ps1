@@ -75,6 +75,12 @@ Outer 1
         (Get-Loc $Code)['F'] | Should-Be 3
     }
 
+    It 'counts the very FIRST token of the file' {
+        # A single token on line 1 and nothing else there: skip it and line 1 is lost.
+        $loc = Get-Loc "1`nfunction F { 2 }"
+        "$($loc['<script-body>'])/$($loc['F'])" | Should-Be '1/1'
+    }
+
     It 'gives a nested function''s lines to it, not to its parent' {
         $loc = Get-Loc "function Outer {`n    function Inner {`n        1`n    }`n    2`n}"
         "$($loc['Outer'])/$($loc['Outer/Inner'])" | Should-Be '3/3'
