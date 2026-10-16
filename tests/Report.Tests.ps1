@@ -51,9 +51,12 @@ function Get-Cool { param($x) $x }
     $script:gateText = [System.IO.File]::ReadAllText($script:gatePath)
 
     function Test-AgainstSchema {
+        # The RETURN VALUE is the verdict, never an exception (#197). PowerShell 7.6.7 returns
+        # False for a document failing an if/then inside allOf but writes no error record, so a
+        # helper waiting for -ErrorAction Stop to throw called it valid. Malformed JSON returns
+        # False as well, so nothing is lost by not catching.
         param([string]$Json)
-        try { Test-Json -Json $Json -Schema $script:schemaText -ErrorAction Stop | Out-Null; return $true }
-        catch { return $false }
+        return (Test-Json -Json $Json -Schema $script:schemaText -ErrorAction SilentlyContinue)
     }
 
     function Get-NestedDocument {
