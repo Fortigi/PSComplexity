@@ -775,3 +775,26 @@ Describe 'what a report says about a config (#164)' {
         (Get-Content -LiteralPath $p -Raw | ConvertFrom-Json).runs[0].results[0].message.text | Should-BeLikeString '*ceiling of 18.'
     }
 }
+
+Describe 'where an acceptance is written (#165)' {
+
+    It 'records an inline acceptance with its line, and a listed one without' {
+        $scan = [pscustomobject]@{
+            Units = @(); Skipped = @(); Unmatched = @(); MetricVersion = 1
+            Scope = [pscustomobject]@{ Path = @('.'); Recurse = $true; Root = '/r'; ChangedFile = $null; Exclude = [string[]]@(); Excluded = [string[]]@() }
+        }
+        $gate = [pscustomobject]@{
+            MaxCyclomatic = 15; MaxCognitive = 15; Passed = $true; Violations = @(); Baselined = @(); Overrides = @(); Config = $null
+            Accepted = @(
+                [pscustomobject]@{ File = 'a.ps1'; Unit = 'A'; Reason = 'in code'; Line = 7; Source = 'inline' }
+                @{ File = 'b.ps1'; Unit = 'B'; Reason = 'listed' }
+            )
+        }
+        $d = Get-PSCxReportDocument -Scan $scan -ModuleVersion '1' -GeneratedAt ([datetime]'2026-01-01Z') -Gate $gate
+        $d.accepted[0].source | Should-Be 'inline'
+        $d.accepted[0].line | Should-Be 7
+        $d.accepted[1].source | Should-Be 'list'
+        $d.accepted[1].Keys -contains 'line' | Should-BeTrue
+        $d.accepted[1].line | Should-BeNull
+    }
+}

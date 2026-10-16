@@ -2045,3 +2045,63 @@ Describe 'a config file (#164)' {
         @($units | Where-Object { $_ -is [System.Management.Automation.InformationRecord] }).Count | Should-Be 0
     }
 }
+
+Describe 'an acceptance written in the code (#165)' {
+
+    BeforeAll {
+        $script:inl = [System.IO.Path]::GetFullPath((Join-Path ([System.IO.Path]::GetTempPath()) "cxinl-$([System.Guid]::NewGuid().ToString('N'))"))
+        New-Item -ItemType Directory -Path $script:inl -Force | Out-Null
+        # Cyclomatic 4: over a ceiling of 3.
+        $script:big = 'function Get-Big { param($a) if ($a) { 1 }; if ($a) { 2 }; if ($a) { 3 } }'
+        function script:Write-Source([string]$Text) {
+            $p = Join-Path $script:inl "s-$([System.Guid]::NewGuid().ToString('N')).ps1"
+            Set-Content -LiteralPath $p -Value $Text -Encoding utf8
+            return $p
+        }
+    }
+
+    AfterAll { Remove-Item -LiteralPath $script:inl -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'excuses the unit below it, and the report says where the argument is written' {
+        $p = Write-Source "# PSCx-Accept: three branches, one per verb`n$script:big"
+        $report = Join-Path $script:inl "r-$([System.Guid]::NewGuid().ToString('N')).json"
+        Test-PSComplexity -Path $p -MaxCyclomatic 3 -NoConfig -ReportPath $report 3>$null | Should-BeTrue
+        $a = (Get-Content -LiteralPath $report -Raw | ConvertFrom-Json).accepted
+        @($a).Count | Should-Be 1
+        $a[0].unit | Should-Be 'Get-Big'
+        $a[0].reason | Should-Be 'three branches, one per verb'
+        $a[0].source | Should-Be 'inline'
+        $a[0].line | Should-Be 1
+    }
+
+    It 'still fails the unit when nothing accepts it' {
+        Test-PSComplexity -Path (Write-Source $script:big) -MaxCyclomatic 3 -NoConfig 3>$null | Should-BeFalse
+    }
+
+    It 'refuses a declaration that excuses nothing' {
+        $p = Write-Source "# PSCx-Accept: drifted`n`n$script:big"
+        { Test-PSComplexity -Path $p -MaxCyclomatic 3 -NoConfig 3>$null } | Should-Throw -ExceptionMessage '*:1 declares an acceptance, but a blank line separates it*'
+    }
+
+    It 'goes stale like any acceptance once the unit is within its ceilings' {
+        $p = Write-Source "# PSCx-Accept: no longer true`n$script:big"
+        { Test-PSComplexity -Path $p -MaxCyclomatic 10 -NoConfig 3>$null } | Should-Throw -ExceptionMessage '*Get-Big is accepted but is within both ceilings*'
+    }
+
+    It 'refuses an acceptance with no reason' {
+        $p = Write-Source "# PSCx-Accept:`n$script:big"
+        { Test-PSComplexity -Path $p -MaxCyclomatic 3 -NoConfig 3>$null } | Should-Throw -ExceptionMessage '*accepted with no reason*'
+    }
+
+    It 'refuses a unit accepted both in its code and by -Accept' {
+        $p = Write-Source "# PSCx-Accept: in code`n$script:big"
+        $file = Get-PSCxRelativePath -Path $p -Root (Get-PSCxWorkingRoot) -PathComparison $script:PathCmp
+        { Test-PSComplexity -Path $p -MaxCyclomatic 3 -NoConfig -Accept @(@{ File = $file; Unit = 'Get-Big'; Reason = 'listed' }) 3>$null } |
+            Should-Throw -ExceptionMessage '*Get-Big is accepted twice, in its code at line 1*'
+    }
+
+    It 'is not applied by Measure-PSComplexity, which measures every unit' {
+        $p = Write-Source "# PSCx-Accept: x`n$script:big"
+        @(Measure-PSComplexity -Path $p).Unit | Should-ContainCollection @('Get-Big')
+    }
+}

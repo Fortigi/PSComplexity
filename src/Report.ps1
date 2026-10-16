@@ -69,6 +69,25 @@ function Get-PSCxReportSummary {
     }
 }
 
+function Get-PSCxReportAcceptance {
+    # One acceptance as the report writes it. Each says where its argument is written (#165): in
+    # the code, at a line, or in a list -- -Accept or the config -- so a reader can go and read it.
+    #
+    # Its own function for the ceiling this module gates itself on: two ternaries inside the
+    # document builder's loop cost their nesting there.
+    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Acceptance)
+    $inline = $Acceptance.Source -eq 'inline'
+    return [ordered]@{
+        file   = [string]$Acceptance.File
+        unit   = [string]$Acceptance.Unit
+        reason = [string]$Acceptance.Reason
+        source = $inline ? 'inline' : 'list'
+        line   = $inline ? [int]$Acceptance.Line : $null
+    }
+}
+
 function Get-PSCxReportDocument {
     # The report as a document. Pure: the version and the timestamp arrive as parameters rather
     # than being read here, so the whole shape is testable without a clock or a manifest.
@@ -151,9 +170,7 @@ function Get-PSCxReportDocument {
         # What the run EXCUSED, with the argument for each. A gate report that reported a pass
         # without saying what it excused would be the mute button the acceptance concept exists
         # instead of.
-        $document['accepted'] = @($Gate.Accepted | ForEach-Object {
-                [ordered]@{ file = [string]$_.File; unit = [string]$_.Unit; reason = [string]$_.Reason }
-            })
+        $document['accepted'] = @($Gate.Accepted | ForEach-Object { Get-PSCxReportAcceptance -Acceptance $_ })
         # And what the BASELINE excused, by the same argument. A baseline routinely excuses far
         # more units than an acceptance ever will, so a report that recorded one and not the other
         # would say "passed" over a set it never named -- the shape of aggregate this project

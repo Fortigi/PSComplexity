@@ -15,6 +15,7 @@
     "src/Config.ps1",
     "src/ConfigFile.ps1",
     "src/Cyclomatic.ps1",
+    "src/InlineAccept.ps1",
     "src/Measure-PSComplexity.ps1",
     "src/Policy.ps1",
     "src/Report.ps1",
@@ -40,6 +41,9 @@
     ],
     "src/Cyclomatic.ps1": [
       "tests/Cyclomatic.Tests.ps1"
+    ],
+    "src/InlineAccept.ps1": [
+      "tests/InlineAccept.Tests.ps1"
     ],
     "src/Measure-PSComplexity.ps1": [
       "tests/Measure.Tests.ps1"

@@ -161,7 +161,9 @@
         "properties": {
           "file": { "type": "string" },
           "unit": { "type": "string" },
-          "reason": { "type": "string" }
+          "reason": { "type": "string" },
+          "source": { "enum": ["inline", "list"], "description": "Where the argument is written: in the code above the unit's declaration, or in a list -- -Accept or the config." },
+          "line": { "type": ["integer", "null"], "minimum": 1, "description": "The line of an inline acceptance's comment; null for a listed one." }
         }
       }
     }

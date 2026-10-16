@@ -111,6 +111,32 @@ function Test-PSCxOverCeiling {
     return ($Unit.Cyclomatic -gt $ceiling.Cyclomatic -or $Unit.Cognitive -gt $ceiling.Cognitive)
 }
 
+function Get-PSCxInlineAcceptFault {
+    # Why the acceptances written in the code (#165) cannot be applied, as text. Nothing when they
+    # can. Whether each still describes the run is the ordinary acceptance check, after this.
+    #
+    # A declaration that excuses no unit is refused, not ignored: it believes it excuses something,
+    # and the unit it was written for is facing the ceiling without anyone having decided that.
+    # And a unit accepted both in its code and in a list is refused, as a unit both baselined and
+    # accepted is: two written arguments for one unit drift apart, and one does nothing.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Inline,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Stray,
+        # -Accept, or the config's list.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Listed,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+    )
+    foreach ($s in $Stray) { "$($s.File):$($s.Line) declares an acceptance, but $($s.Fault)" }
+    $lookup = Get-PSCxPolicyLookup -Record $Listed -PathComparison $PathComparison
+    foreach ($i in $Inline) {
+        if ($lookup.ContainsKey((Get-PSCxPolicyKey -File ([string]$i.File) -Unit ([string]$i.Unit)))) {
+            "$($i.File) $($i.Unit) is accepted twice, in its code at line $($i.Line) and by -Accept or the config -- keep one argument"
+        }
+    }
+}
+
 function Get-PSCxAcceptanceFault {
     # Why ONE acceptance fails to describe this run, as text. Nothing when it holds.
     #

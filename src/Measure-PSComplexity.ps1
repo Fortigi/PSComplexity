@@ -497,7 +497,12 @@ function Test-PSComplexity {
         # Checked BEFORE the verdict, and thrown rather than returned as $false. A stale
         # acceptance is a fault in the policy, not a complaint about the code -- reporting it
         # as a failing gate would send someone to refactor a unit that is fine.
-        $faults = @($Accept | Get-PSCxAcceptanceFault -Unit $units `
+        # The code's own acceptances join the list's (#165), after the two are checked against each
+        # other, and from here on face exactly the checks a listed one does.
+        $faults = @(Get-PSCxInlineAcceptFault -Inline $scan.InlineAccept -Stray $scan.InlineStray `
+                -Listed $Accept -PathComparison $scan.PathComparison)
+        $Accept = @($Accept) + @($scan.InlineAccept)
+        $faults += @($Accept | Get-PSCxAcceptanceFault -Unit $units `
                 -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $scan.PathComparison `
                 -FileCeiling $fileCeiling)
         if ($faults.Count -gt 0) {

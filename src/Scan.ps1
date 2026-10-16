@@ -612,9 +612,11 @@ function Get-PSCxFileScan {
         # The FIRST error. Later ones are usually cascade from it, and a skip that does not say
         # why is the one thing the reason string exists to prevent.
         return [pscustomobject]@{
-            File       = $relative
-            Units      = @()
-            SkipReason = Get-PSCxSkipReason -ParseError $errors[0] -Token $tokens
+            File         = $relative
+            Units        = @()
+            SkipReason   = Get-PSCxSkipReason -ParseError $errors[0] -Token $tokens
+            InlineAccept = @()
+            InlineStray  = @()
         }
     }
 
@@ -670,7 +672,17 @@ function Get-PSCxFileScan {
             -Cyclomatic $cyc[$k] -Cognitive $cog[$k] -MetricVersion $script:PSCxMetricVersion `
             -Contributions $contrib -LinesOfCode ([int]$loc[$k]) -Detailed:$Detailed
     }
-    return [pscustomobject]@{ File = $relative; Units = @($units); SkipReason = $null }
+    # Acceptances written in the code (#165), read here because only here are the text, the
+    # tokens and the unit lines all at hand. Collected on every run and applied only by the gate:
+    # Measure-PSComplexity measures every unit whatever a comment argues.
+    $inline = Get-PSCxInlineAccept -Text $ast.Extent.Text -Token @($tokens) -UnitLine $lines -Display $display -File $relative
+    return [pscustomobject]@{
+        File         = $relative
+        Units        = @($units)
+        SkipReason   = $null
+        InlineAccept = $inline.Accept
+        InlineStray  = $inline.Stray
+    }
 }
 
 function Test-PSCxSelectedFile {
@@ -805,6 +817,8 @@ function Get-PSCxScan {
     )
     $units = [System.Collections.Generic.List[object]]::new()
     $excluded = [System.Collections.Generic.List[string]]::new()
+    $inlineAccept = [System.Collections.Generic.List[object]]::new()
+    $inlineStray = [System.Collections.Generic.List[object]]::new()
     $skipped = [System.Collections.Generic.List[object]]::new()
     $unmatched = [System.Collections.Generic.List[object]]::new()
     $root = Get-PSCxWorkingRoot
@@ -825,6 +839,8 @@ function Get-PSCxScan {
             continue
         }
         $units.AddRange([object[]]$fileScan.Units)
+        $inlineAccept.AddRange([object[]]$fileScan.InlineAccept)
+        $inlineStray.AddRange([object[]]$fileScan.InlineStray)
     }
     # Assigned OUT of the hashtable literal, and typed. A $( ) subexpression UNROLLS a
     # one-element array to the element, so a run filtered to a single file recorded a bare string
@@ -853,6 +869,10 @@ function Get-PSCxScan {
             Excluded    = [string[]]@($excluded | Sort-Object)
         }
         MetricVersion = $script:PSCxMetricVersion
+        # Acceptances the measured files declare in their code, and declarations that excuse no
+        # unit (#165). Facts about the files, so they live in the scan; the gate decides.
+        InlineAccept  = @($inlineAccept)
+        InlineStray   = @($inlineStray)
         # How this run compared file paths. A fact about the run, read by the gate: a baseline keyed
         # by a different rule than the scan used would match the wrong units or none.
         PathComparison = $pathComparison
