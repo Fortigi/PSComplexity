@@ -45,6 +45,25 @@ function Measure-PSComplexity {
         measurement report cannot carry an answer nobody computed. Use Test-PSComplexity when
         the artefact needs a verdict.
 
+    .PARAMETER MarkdownPath
+        Also write a Markdown summary to this path, for a CI step summary or a pull request
+        comment: the most complex units, per-file totals and, with -CompareTo, what is new, worse
+        or better than a previous report. Rendered from the same scan as everything else, so it
+        holds no number the records do not.
+
+        The file is replaced, not appended to. On GitHub Actions, -MarkdownPath
+        $env:GITHUB_STEP_SUMMARY works because each step gets its own summary file.
+
+    .PARAMETER MarkdownTop
+        How many of the most complex units the Markdown summary lists, by cognitive and then
+        cyclomatic. Default 10. Only with -MarkdownPath.
+
+    .PARAMETER CompareTo
+        A previous JSON report (-ReportPath) to compare this run with, for example one saved from
+        the main branch. The summary then lists the units that are new, worse or better than in
+        it, matched by file and unit name. A report measured with another metric version is
+        refused, because its numbers answer a different question. Only with -MarkdownPath.
+
     .PARAMETER Detailed
         Add Contributions and LinesOfCode to each record. Contributions holds one entry per
         cognitive increment -- its Line, Construct and Amount, in source order -- summing to
@@ -130,6 +149,10 @@ function Measure-PSComplexity {
         [string[]]$Path,
         [switch]$Recurse,
         [string]$ReportPath,
+        [string]$MarkdownPath,
+        # Default 10. A parameter default is fine here, unlike the ceilings: nothing else can set it.
+        [ValidateRange(1, [int]::MaxValue)] [int]$MarkdownTop = 10,
+        [string]$CompareTo,
         # Files a caller says changed, restricting the run to units in them. Omit it for a
         # whole-tree run; an EMPTY list is refused rather than treated as "nothing changed",
         # because that is what a diff command returns when it has failed.
@@ -165,13 +188,15 @@ function Measure-PSComplexity {
             Assert-PSCxChangedFile -ChangedFile $ChangedFile
             $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root (Get-PSCxWorkingRoot) -PathComparison $pathComparison
         }
+        # Read and checked before anything is measured, so a wrong -CompareTo costs nothing.
+        $compareBase = Read-PSCxCompareBase -Bound $PSBoundParameters -MetricVersion (Get-PSCxMetricVersion)
     }
     process {
         $asked.AddRange([string[]]$Path)
         # With a report, the whole run is emitted from `end` instead, out of a single scan.
         # Accumulating per file here would need three guards that only save memory -- and a
         # branch that changes no output cannot be told from its own absence by any test.
-        if ($ReportPath) { return }
+        if ($ReportPath -or $MarkdownPath) { return }
         foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -PathComparison $pathComparison -Recurse:$Recurse -Detailed:$Detailed)) {
             # The projection: units to the output stream, a skip to the error stream.
             #
@@ -187,7 +212,7 @@ function Measure-PSComplexity {
         }
     }
     end {
-        if (-not $ReportPath) {
+        if (-not ($ReportPath -or $MarkdownPath)) {
             # The streaming route's own projection of the discovery faults. Written here rather
             # than in `process` because a path is only known to have matched nothing once its
             # invocation is done, and because this command reports a fact per path, not per item.
@@ -211,8 +236,13 @@ function Measure-PSComplexity {
         }
         Write-PSCxUnmatchedPath -Unmatched $scan.Unmatched
         $scan.Units
-        Save-PSCxDocument -Path $ReportPath -Document (Get-PSCxReportDocument -Scan $scan `
-                -ModuleVersion (Get-PSCxModuleVersion) -GeneratedAt (Get-Date))
+        if ($ReportPath) {
+            Save-PSCxDocument -Path $ReportPath -Document (Get-PSCxReportDocument -Scan $scan `
+                    -ModuleVersion (Get-PSCxModuleVersion) -GeneratedAt (Get-Date))
+        }
+        if ($MarkdownPath) {
+            Write-PSCxMarkdown -Path $MarkdownPath -Scan $scan -Top $MarkdownTop -Gate $null -Base $compareBase -BaseName $CompareTo
+        }
     }
 }
 
@@ -294,6 +324,26 @@ function Test-PSComplexity {
         Only the gate writes SARIF. Without ceilings there is no such thing as a finding, so a
         SARIF file from Measure-PSComplexity would be an empty results array claiming a clean
         bill of health.
+
+    .PARAMETER MarkdownPath
+        Also write a Markdown summary to this path, for a CI step summary or a pull request
+        comment: the verdict and every unit over a ceiling, then the most complex units, per-file
+        totals and, with -CompareTo, what is new, worse or better than a previous report. Like
+        the JSON report, it is written only when a verdict is reached, and not by -UpdateBaseline. Rendered from the same scan as everything else, so it
+        holds no number the records do not.
+
+        The file is replaced, not appended to. On GitHub Actions, -MarkdownPath
+        $env:GITHUB_STEP_SUMMARY works because each step gets its own summary file.
+
+    .PARAMETER MarkdownTop
+        How many of the most complex units the Markdown summary lists, by cognitive and then
+        cyclomatic. Default 10. Only with -MarkdownPath.
+
+    .PARAMETER CompareTo
+        A previous JSON report (-ReportPath) to compare this run with, for example one saved from
+        the main branch. The summary then lists the units that are new, worse or better than in
+        it, matched by file and unit name. A report measured with another metric version is
+        refused, because its numbers answer a different question. Only with -MarkdownPath.
 
     .PARAMETER Accept
         Units that are allowed to exceed a ceiling, each carrying the argument for why. One
@@ -423,6 +473,10 @@ function Test-PSComplexity {
         [switch]$Recurse,
         [string]$ReportPath,
         [string]$SarifPath,
+        [string]$MarkdownPath,
+        # Default 10. A parameter default is fine here, unlike the ceilings: nothing else can set it.
+        [ValidateRange(1, [int]::MaxValue)] [int]$MarkdownTop = 10,
+        [string]$CompareTo,
         # Files a caller says changed, restricting the run to units in them. Omit it for a
         # whole-tree run; an EMPTY list is refused rather than treated as "nothing changed",
         # because that is what a diff command returns when it has failed.
@@ -452,6 +506,7 @@ function Test-PSComplexity {
         # The config, the command line and the defaults, settled into what this run applies --
         # including the two refusals about -UpdateBaseline, which now depend on the config.
         $policy = Resolve-PSCxGatePolicy -Bound $PSBoundParameters -Path $paths
+        $compareBase = Read-PSCxCompareBase -Bound $PSBoundParameters -MetricVersion (Get-PSCxMetricVersion)
         $MaxCyclomatic = $policy.MaxCyclomatic
         $MaxCognitive = $policy.MaxCognitive
         $Accept = $policy.Accept
@@ -542,6 +597,14 @@ function Test-PSComplexity {
             -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -Baselined $baselined `
             -Override $policy.Overrides -FileCeiling $fileCeiling -Config ([string]$policy.Config.Display) `
             -ReportPath $ReportPath -SarifPath $SarifPath
+        if ($MarkdownPath) {
+            $gate = [pscustomobject]@{
+                Passed = $passed; Violations = $violations; MaxCyclomatic = $MaxCyclomatic; MaxCognitive = $MaxCognitive
+                Overrides = $policy.Overrides; FileCeiling = $fileCeiling; Config = [string]$policy.Config.Display
+                Accepted = $Accept; Baselined = $baselined
+            }
+            Write-PSCxMarkdown -Path $MarkdownPath -Scan $scan -Top $MarkdownTop -Gate $gate -Base $compareBase -BaseName $CompareTo
+        }
         return $passed
     }
 }

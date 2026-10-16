@@ -2105,3 +2105,86 @@ Describe 'an acceptance written in the code (#165)' {
         @(Measure-PSComplexity -Path $p).Unit | Should-ContainCollection @('Get-Big')
     }
 }
+
+Describe 'a Markdown summary (#167)' {
+
+    BeforeAll {
+        $script:mdDir = [System.IO.Path]::GetFullPath((Join-Path ([System.IO.Path]::GetTempPath()) "cxmdrun-$([System.Guid]::NewGuid().ToString('N'))"))
+        New-Item -ItemType Directory -Path $script:mdDir -Force | Out-Null
+        # Twelve units scoring 1 to 12 cyclomatic (n - 1 sequential ifs), so a top 10 leaves two out.
+        $script:mdSrc = Join-Path $script:mdDir 'many.ps1'
+        $fns = foreach ($n in 1..12) {
+            $body = ($n -gt 1) ? ((1..($n - 1) | ForEach-Object { "if (`$a) { $_ }" }) -join '; ') : '1'
+            "function Get-N$n { param(`$a) $body }"
+        }
+        Set-Content -LiteralPath $script:mdSrc -Value ($fns -join "`n") -Encoding utf8
+        function script:New-MdPath { return Join-Path $script:mdDir "s-$([System.Guid]::NewGuid().ToString('N')).md" }
+    }
+
+    AfterAll { Remove-Item -LiteralPath $script:mdDir -Recurse -Force -ErrorAction SilentlyContinue }
+
+    It 'is written by Measure-PSComplexity, which still emits every record' {
+        $md = New-MdPath
+        $rows = @(Measure-PSComplexity -Path $script:mdSrc -MarkdownPath $md)
+        $rows.Count | Should-Be 13
+        $text = [System.IO.File]::ReadAllText($md)
+        $text | Should-BeLikeString '## PSComplexity*Measured 13 unit(s) in 1 file(s)*### Most complex units (top 10)*'
+    }
+
+    It 'lists ten hotspots by default and as many as -MarkdownTop asks' {
+        $md = New-MdPath
+        Measure-PSComplexity -Path $script:mdSrc -MarkdownPath $md | Out-Null
+        $text = [System.IO.File]::ReadAllText($md)
+        $text | Should-BeLikeString '*| Get-N3 |*'
+        $text | Should-NotBeLikeString '*| Get-N2 |*'
+        Measure-PSComplexity -Path $script:mdSrc -MarkdownPath $md -MarkdownTop 11 | Out-Null
+        [System.IO.File]::ReadAllText($md) | Should-BeLikeString '*| Get-N2 |*'
+    }
+
+    It 'takes a top of one, and refuses zero' {
+        $md = New-MdPath
+        Measure-PSComplexity -Path $script:mdSrc -MarkdownPath $md -MarkdownTop 1 | Out-Null
+        [System.IO.File]::ReadAllText($md) | Should-BeLikeString '*top 1*'
+        { Measure-PSComplexity -Path $script:mdSrc -MarkdownPath $md -MarkdownTop 0 } | Should-Throw
+        { Test-PSComplexity -Path $script:mdSrc -NoConfig -MarkdownPath $md -MarkdownTop 0 } | Should-Throw
+    }
+
+    It 'lists ten hotspots by default from the gate too' {
+        $md = New-MdPath
+        Test-PSComplexity -Path $script:mdSrc -NoConfig -MarkdownPath $md | Should-BeTrue
+        $text = [System.IO.File]::ReadAllText($md)
+        $text | Should-BeLikeString '*top 10*| Get-N3 |*'
+        $text | Should-NotBeLikeString '*| Get-N2 |*'
+    }
+
+    It 'is written by the gate with its verdict and every breach' {
+        $md = New-MdPath
+        Test-PSComplexity -Path $script:mdSrc -MaxCyclomatic 10 -NoConfig -MarkdownPath $md -MarkdownTop 1 3>$null | Should-BeFalse
+        $text = [System.IO.File]::ReadAllText($md)
+        $text | Should-BeLikeString '*Gate failed** -- 2 unit(s) over a ceiling*| Get-N11 |*| Get-N12 |*top 1*'
+    }
+
+    It 'compares with a previous report' {
+        $report = Join-Path $script:mdDir "base-$([System.Guid]::NewGuid().ToString('N')).json"
+        $other = Join-Path $script:mdDir 'other.ps1'
+        Set-Content -LiteralPath $other -Value 'function Get-Other { 1 }' -Encoding utf8
+        Measure-PSComplexity -Path $other -ReportPath $report | Out-Null
+        Set-Content -LiteralPath $other -Value "function Get-Other { param(`$a) if (`$a) { 1 } }`nfunction Get-New { 1 }" -Encoding utf8
+        $md = New-MdPath
+        Test-PSComplexity -Path $other -NoConfig -MarkdownPath $md -CompareTo $report | Should-BeTrue
+        $text = [System.IO.File]::ReadAllText($md)
+        $text | Should-BeLikeString '*1 new, 1 worse, 0 better.*| Get-New |*| Get-Other |*1 -> 2*'
+    }
+
+    It 'refuses -CompareTo or -MarkdownTop without -MarkdownPath, before measuring' {
+        { Measure-PSComplexity -Path $script:mdSrc -MarkdownTop 3 } | Should-Throw -ExceptionMessage '*only apply with -MarkdownPath*'
+        { Test-PSComplexity -Path $script:mdSrc -NoConfig -CompareTo 'x.json' } | Should-Throw -ExceptionMessage '*only apply with -MarkdownPath*'
+    }
+
+    It 'is not written by -UpdateBaseline, whose verdict is manufactured' {
+        $md = New-MdPath
+        $bl = Join-Path $script:mdDir "bl-$([System.Guid]::NewGuid().ToString('N')).json"
+        Test-PSComplexity -Path $script:mdSrc -MaxCyclomatic 10 -NoConfig -BaselineFile $bl -UpdateBaseline -MarkdownPath $md | Should-BeTrue
+        Test-Path -LiteralPath $md | Should-BeFalse
+    }
+}

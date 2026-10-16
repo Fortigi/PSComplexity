@@ -16,6 +16,7 @@
     "src/ConfigFile.ps1",
     "src/Cyclomatic.ps1",
     "src/InlineAccept.ps1",
+    "src/Markdown.ps1",
     "src/Measure-PSComplexity.ps1",
     "src/Policy.ps1",
     "src/Report.ps1",
@@ -44,6 +45,9 @@
     ],
     "src/InlineAccept.ps1": [
       "tests/InlineAccept.Tests.ps1"
+    ],
+    "src/Markdown.ps1": [
+      "tests/Markdown.Tests.ps1"
     ],
     "src/Measure-PSComplexity.ps1": [
       "tests/Measure.Tests.ps1"
@@ -76,7 +80,7 @@
   "_equivalents_comment": "Position = 0 -> 1 on -Path, in both public commands. -Path is the only positional parameter in each, and PowerShell assigns positional arguments in sort order, so 0 and 1 bind identically: checked side by side, the positional and piped calls measured the same units and gave the same verdict, and Get-Command -Syntax printed the same line. Only reflection on the attribute could tell them apart. The Test-PSComplexity key uses a LINE because '0 -> 1' matches four mutants in that function and a declaration must match exactly one; PSMutant fails the run if the line moves and the key stops matching, so it cannot go stale in silence.",
   "equivalents": {
     "src/Measure-PSComplexity.ps1:Measure-PSComplexity:0 -> 1": "-Path is the only positional parameter; Position 0 and 1 bind identically.",
-    "src/Measure-PSComplexity.ps1:415:0 -> 1": "-Path is the only positional parameter; Position 0 and 1 bind identically."
+    "src/Measure-PSComplexity.ps1:465:0 -> 1": "-Path is the only positional parameter; Position 0 and 1 bind identically."
   },
   "thresholds": {
     "high": 90,
