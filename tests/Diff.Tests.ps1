@@ -8,7 +8,7 @@ BeforeAll {
     $src = Join-Path (Split-Path -Parent $PSScriptRoot) 'src'
     foreach ($f in Get-ChildItem $src -Filter *.ps1) { . $f.FullName }
 
-    function script:Diff {
+    function script:ParseDiff {
         param([string[]]$Line)
         return Get-PSCxUnifiedDiff -Text $Line
     }
@@ -53,7 +53,7 @@ Describe 'Get-PSCxDiffPath' {
 Describe 'Get-PSCxUnifiedDiff' {
 
     It 'reads each file and its new-side hunks from git diff --unified=0' {
-        $r = Diff @(
+        $r = ParseDiff @(
             'diff --git a/src/a.ps1 b/src/a.ps1'
             'index 1111111..2222222 100644'
             '--- a/src/a.ps1'
@@ -78,18 +78,18 @@ Describe 'Get-PSCxUnifiedDiff' {
     }
 
     It 'takes the prefixes off a new file, and keeps them without the a/ that shows they are prefixes' {
-        $r = Diff @('--- /dev/null', '+++ b/new.ps1', '@@ -0,0 +1 @@', '+1', '--- b/x.ps1', '+++ b/x.ps1', '@@ -1 +1 @@', '-1', '+2', '--- src/y.ps1', '+++ src/y.ps1', '@@ -1 +1 @@', '-1', '+2')
+        $r = ParseDiff @('--- /dev/null', '+++ b/new.ps1', '@@ -0,0 +1 @@', '+1', '--- b/x.ps1', '+++ b/x.ps1', '@@ -1 +1 @@', '-1', '+2', '--- src/y.ps1', '+++ src/y.ps1', '@@ -1 +1 @@', '-1', '+2')
         @($r.Files.Keys) | Should-BeCollection @('new.ps1', 'b/x.ps1', 'src/y.ps1')
     }
 
     It 'leaves a deleted file out, and its hunk with it' {
-        $r = Diff @('--- a/old.ps1', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-1', '-2', '--- a/k.ps1', '+++ b/k.ps1', '@@ -1 +1 @@', '-1', '+2')
+        $r = ParseDiff @('--- a/old.ps1', '+++ /dev/null', '@@ -1,2 +0,0 @@', '-1', '-2', '--- a/k.ps1', '+++ b/k.ps1', '@@ -1 +1 @@', '-1', '+2')
         @($r.Files.Keys) | Should-BeCollection @('k.ps1')
         Hunks $r 'k.ps1' | Should-BeCollection @('1,1')
     }
 
     It 'skips the body by the counts, so a changed line that looks like a header is not one' {
-        $r = Diff @('--- a/k.ps1', '+++ b/k.ps1', '@@ -1,2 +1,2 @@', '--- x', '-- y', '+++ z', '++ w', '@@ -9 +9 @@', '-a', '+b')
+        $r = ParseDiff @('--- a/k.ps1', '+++ b/k.ps1', '@@ -1,2 +1,2 @@', '--- x', '-- y', '+++ z', '++ w', '@@ -9 +9 @@', '-a', '+b')
         @($r.Files.Keys) | Should-BeCollection @('k.ps1')
         Hunks $r 'k.ps1' | Should-BeCollection @('1,2', '9,1')
     }
@@ -102,32 +102,32 @@ Describe 'Get-PSCxUnifiedDiff' {
         @{ Why = 'a removed line after an added empty one'; Body = @('@@ -1,2 +1,1 @@', '+', '-a', '--- y') }
         @{ Why = 'an added line'; Body = @('@@ -0,0 +1 @@', '+++ q') }
     ) {
-        $r = Diff (@('--- a/k.ps1', '+++ b/k.ps1') + $Body + @('+++ b/z.ps1', '@@ -1 +1 @@', '-1', '+2'))
+        $r = ParseDiff (@('--- a/k.ps1', '+++ b/k.ps1') + $Body + @('+++ b/z.ps1', '@@ -1 +1 @@', '-1', '+2'))
         $r.Fault | Should-BeNull
         @($r.Files.Keys) | Should-BeCollection @('k.ps1', 'z.ps1')
     }
 
     It 'counts a context line on both sides, and a no-newline marker on neither' {
-        $r = Diff @('--- a/k.ps1', '+++ b/k.ps1', '@@ -1,3 +1,3 @@', ' keep', '-old', '\ No newline at end of file', '+new', '\ No newline at end of file', '', '@@ -20 +20 @@', '-a', '+b')
+        $r = ParseDiff @('--- a/k.ps1', '+++ b/k.ps1', '@@ -1,3 +1,3 @@', ' keep', '-old', '\ No newline at end of file', '+new', '\ No newline at end of file', '', '@@ -20 +20 @@', '-a', '+b')
         Hunks $r 'k.ps1' | Should-BeCollection @('1,3', '20,1')
     }
 
     It 'lists a file changed without a hunk -- a rename -- with none' {
-        $r = Diff @('diff --git a/a.ps1 b/c.ps1', 'similarity index 100%', 'rename from a.ps1', 'rename to c.ps1')
+        $r = ParseDiff @('diff --git a/a.ps1 b/c.ps1', 'similarity index 100%', 'rename from a.ps1', 'rename to c.ps1')
         $r.Fault | Should-BeNull
         $r.Files.Count | Should-Be 0
-        $r = Diff @('--- a/a.ps1', '+++ b/c.ps1')
+        $r = ParseDiff @('--- a/a.ps1', '+++ b/c.ps1')
         @($r.Files.Keys) | Should-BeCollection @('c.ps1')
         @($r.Files['c.ps1']).Count | Should-Be 0
     }
 
     It 'pools the hunks of a file named twice' {
-        $r = Diff @('--- a/k.ps1', '+++ b/k.ps1', '@@ -1 +1 @@', '-1', '+2', '--- a/k.ps1', '+++ b/k.ps1', '@@ -5 +5 @@', '-1', '+2')
+        $r = ParseDiff @('--- a/k.ps1', '+++ b/k.ps1', '@@ -1 +1 @@', '-1', '+2', '--- a/k.ps1', '+++ b/k.ps1', '@@ -5 +5 @@', '-1', '+2')
         Hunks $r 'k.ps1' | Should-BeCollection @('1,1', '5,1')
     }
 
     It 'reads one string holding the whole diff, with either line ending' {
-        $r = Diff @("--- a/k.ps1`r`n+++ b/k.ps1`r`n@@ -1 +1,4 @@`r`n-1`r`n+2`n+3`n+4`n+5`n")
+        $r = ParseDiff @("--- a/k.ps1`r`n+++ b/k.ps1`r`n@@ -1 +1,4 @@`r`n-1`r`n+2`n+3`n+4`n+5`n")
         Hunks $r 'k.ps1' | Should-BeCollection @('1,4')
     }
 
@@ -146,7 +146,7 @@ Describe 'Get-PSCxUnifiedDiff' {
     }
 
     It 'refuses a hunk after a file header was read but a new file began without one' {
-        $r = Diff @('--- a/k.ps1', '+++ b/k.ps1', '@@ -1 +1 @@', '-1', '+2', 'diff --git a/m.ps1 b/m.ps1', '@@ -1 +1 @@')
+        $r = ParseDiff @('--- a/k.ps1', '+++ b/k.ps1', '@@ -1 +1 @@', '-1', '+2', 'diff --git a/m.ps1 b/m.ps1', '@@ -1 +1 @@')
         $r.Fault | Should-BeLikeString '-ChangedDiff line 7 starts a hunk*'
     }
 }
