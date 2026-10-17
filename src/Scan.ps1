@@ -711,6 +711,25 @@ function Get-PSCxFileScan {
             InlineStray  = @()
         }
     }
+    return Get-PSCxParsedScan -Ast $ast -Token @($tokens) -File $relative -Hunk $Hunk -Detailed:$Detailed
+}
+
+function Get-PSCxParsedScan {
+    # One parsed file's measurement: the units, the ones a diff changed, and the acceptances its
+    # code declares. Apart from the parse so the editor rule (#163) measures a buffer that is not on
+    # disk exactly as the gate measures a file -- the two cannot disagree about a score.
+    #
+    # The caller has cleared the per-node caches for this tree, as Get-PSCxFileScan does.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Ast,
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Token,
+        # The file as a record names it.
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$File,
+        [AllowNull()] [AllowEmptyCollection()] [object[]]$Hunk,
+        [switch]$Detailed
+    )
 
     # ONCE, shared. Get-PSCxUnitTable used to run three times against the same AST in a single
     # pass -- once here for the line numbers, and once inside each metric map -- each a full
@@ -745,7 +764,7 @@ function Get-PSCxFileScan {
         $byUnit = Get-PSCxContributionMap -Row $cogRows
         # Information only, and only when asked for (#166): one pass over the tokens the parse
         # already produced, attributed to the same units the scores are.
-        $loc = Get-PSCxLinesOfCodeMap -Token @($tokens) -Span (Get-PSCxUnitSpan -Ast $ast)
+        $loc = Get-PSCxLinesOfCodeMap -Token $Token -Span (Get-PSCxUnitSpan -Ast $ast)
     }
     # The units a diff changed (#168): every unit is still measured, because the policy checks
     # acceptances and baseline entries against the whole file, but only these are gated.
@@ -766,7 +785,7 @@ function Get-PSCxFileScan {
         # variable lands back on $null. Assign first, then overwrite.
         $contrib = @()
         if ($byUnit.ContainsKey($k)) { $contrib = $byUnit[$k] }
-        $record = Get-PSCxUnitRecord -File $relative -Unit $display[$k] -Line $lines[$k] `
+        $record = Get-PSCxUnitRecord -File $File -Unit $display[$k] -Line $lines[$k] `
             -Cyclomatic $cyc[$k] -Cognitive $cog[$k] -MetricVersion $script:PSCxMetricVersion `
             -Contributions $contrib -LinesOfCode ([int]$loc[$k]) -Detailed:$Detailed
         if ($null -eq $changed -or $k -in $changed) { $selected.Add($record) }
@@ -775,9 +794,9 @@ function Get-PSCxFileScan {
     # Acceptances written in the code (#165), read here because only here are the text, the
     # tokens and the unit lines all at hand. Collected on every run and applied only by the gate:
     # Measure-PSComplexity measures every unit whatever a comment argues.
-    $inline = Get-PSCxInlineAccept -Text $ast.Extent.Text -Token @($tokens) -UnitLine $lines -Display $display -File $relative
+    $inline = Get-PSCxInlineAccept -Text $ast.Extent.Text -Token $Token -UnitLine $lines -Display $display -File $File
     return [pscustomobject]@{
-        File         = $relative
+        File         = $File
         Units        = @($selected)
         Measured     = @($units)
         SkipReason   = $null

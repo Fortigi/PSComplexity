@@ -664,6 +664,33 @@ The file is replaced, not appended to; each GitHub Actions step gets its own sum
 `$env:GITHUB_STEP_SUMMARY` works. Both commands write it. The gate writes it only when it reaches
 a verdict, and `-UpdateBaseline` writes none.
 
+### In the editor, while you write
+
+The package ships a PSScriptAnalyzer rule, so VS Code (through the PowerShell extension) marks a
+function over its ceiling as you type, not only when the gate runs. Point `CustomRulePath` at the
+rule file inside the installed module:
+
+```powershell
+$rule = Join-Path (Get-Module PSComplexity -ListAvailable)[0].ModuleBase 'rules/PSComplexity.Rules.psm1'
+Invoke-ScriptAnalyzer -Path ./src -Recurse -IncludeDefaultRules -CustomRulePath $rule
+```
+
+For the editor, put the same path in the `PSScriptAnalyzerSettings.psd1` the extension reads
+(`CustomRulePath = '<that path>'`, with `IncludeDefaultRules = $true` to keep the built-in rules).
+Name the file itself: PSScriptAnalyzer does not find the rule from its directory.
+
+- **The gate's verdict, not an approximation.** The rule calls the module's own scoring, from the
+  same installed version, and applies the same policy as `Test-PSComplexity` with nothing on the
+  command line: the `.pscomplexity.json` the file sits under, or 15 and 15; its per-path ceilings
+  and excludes; acceptances in the config and in the code; units held by its baseline. A unit
+  warns exactly when the gate would fail it.
+- **What you see is what you typed.** The editor's text is measured, not the file on disk. An
+  unsaved buffer has no path, so it gets the default ceilings.
+- **Severity Warning**, on the first line of the unit's declaration, naming both scores against
+  the ceilings.
+- **It does not refuse.** The gate throws on a stale acceptance or baseline entry; an editor
+  showing one file has not seen the run, so it applies what it can and leaves that to the gate.
+
 ## Use it in CI
 
 ```yaml

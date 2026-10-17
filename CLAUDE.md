@@ -181,6 +181,10 @@ src/Report.ps1                 the two published formats -- our JSON report and 
 src/Markdown.ps1               the Markdown summary (#167): hotspots, per-file totals, the
                                gate's breaches, a comparison with a previous report. Renders what
                                the scan and the gate decided; Report.ps1 writes the file.
+src/AnalyzerRule.ps1           the editor rule (#163): one file's findings with the gate's verdict,
+                               for rules/PSComplexity.Rules.psm1 -- the thin PSScriptAnalyzer rule
+                               module that ships in the package and calls it through module scope.
+                               It applies the policy and never refuses; refusing is the gate's.
 src/Config.ps1                 what a .pscomplexity.json may say and what it means for one gate
                                run (#164): the faults, the globs, the command line winning, the
                                per-file ceilings. Pure, like Policy.ps1.
@@ -424,7 +428,7 @@ Two subtleties worth knowing before touching `Ast.ps1`:
   CHANGELOG heading and `ReleaseNotes` -- which is CONSISTENCY, not completeness: an entry
   nobody wrote is not something it can miss.
 - **Unless the change ships nothing, in which case it takes neither a bump nor a CHANGELOG
-  entry.** `publish.yml` stages `PSComplexity.psd1`, `PSComplexity.psm1`, `src`, `schemas`,
+  entry.** `publish.yml` stages `PSComplexity.psd1`, `PSComplexity.psm1`, `src`, `schemas`, `rules`,
   `LICENSE` and `README.md`. A branch touching only `.github/`, `tools/`, `tests/`, a config
   or this file leaves the repo at version N building a module byte-identical to the gallery's
   N, so there is nothing for a consumer to observe. The release gate refuses entries under

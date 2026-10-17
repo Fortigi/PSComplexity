@@ -48,6 +48,14 @@ try { Get-Content -LiteralPath $schemaPath -Raw | ConvertFrom-Json | Out-Null }
 catch { throw "The shipped report schema is not valid JSON: $($_.Exception.Message)" }
 Write-Output "  the report schema ships and parses"
 
+# The editor rule (#163) is a file a consumer points PSScriptAnalyzer at, inside the installed
+# module. Left out of the stage it is missing exactly where the README says to find it.
+$rulePath = Join-Path $stage 'rules' -AdditionalChildPath 'PSComplexity.Rules.psm1'
+if (-not (Test-Path -LiteralPath $rulePath)) {
+    throw "The PSScriptAnalyzer rule did not ship: expected it at $rulePath. Check the staging Copy-Item in publish.yml."
+}
+Write-Output "  the PSScriptAnalyzer rule ships"
+
 # --- 3 and 4. import in a FRESH process and measure for real ------------------------------
 # A fresh process, because importing here is indistinguishable from the repo copy already
 # loaded in this session -- and "it worked on my machine, where the real one was loaded" is
