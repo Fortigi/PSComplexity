@@ -145,6 +145,11 @@ function Resolve-PSCxGatePolicy {
     if ($update -and -not $policy.BaselineFile) {
         throw '-UpdateBaseline needs -BaselineFile, or a baselineFile in the config: there is no default path, because a file the gate reads without being told to is one nobody reviews.'
     }
+    # An update writes what the run measured, so from a run filtered to changed files it would
+    # silently drop every entry for the rest of the tree (#203).
+    if ($update -and $Bound.ContainsKey('ChangedFile')) {
+        throw '-UpdateBaseline cannot be combined with -ChangedFile: the update records what the run measured, and a run over the changed files would drop every baseline entry for the rest of the tree. Update the baseline from a whole-tree run.'
+    }
     # Refused rather than ignored: a gate run carrying -AllowNew believes it permitted something,
     # and it permits nothing without an update to apply it to.
     if ([bool]$Bound['AllowNew'] -and -not $update) {

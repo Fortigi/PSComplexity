@@ -491,6 +491,11 @@ if (-not (Test-PSComplexity ./src -Recurse -ChangedFile $changed)) {
 Together with `-BaselineFile` it covers both halves of the question: **the baseline stops old code
 degrading, the diff scope stops new code arriving over the line.**
 
+A filtered run checks the baseline entries and acceptances for the files it read, and leaves out the
+ones for files it did not: it cannot tell whether those still hold. `-UpdateBaseline` is refused
+with `-ChangedFile`, because the update records what the run measured and would drop every entry
+for the rest of the tree; update the baseline from a whole-tree run.
+
 **You decide what changed, and that is deliberate.** There is no `-ChangedSince <ref>` that shells
 out to git, because a diff is not a fact this module can compute. It needs a base to compare
 against, and every way that goes wrong goes wrong in the *caller's* environment: a shallow clone

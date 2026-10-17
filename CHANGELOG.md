@@ -44,6 +44,16 @@ cover. With `-CompareTo` and a previous JSON report it also lists the units that
 better than in that report; a report from another metric version is refused. Rendered from the same
 scan as the records and the JSON report, so it holds no number they do not.
 
+### Fixed
+
+**A run over the changed files no longer refuses policy for the files it did not read (#203).** With
+a baseline, or any acceptance, `-ChangedFile` threw that a unit "was not measured" for every entry
+naming another file, so a repository using either could not gate a pull request on its changed
+files. Such an entry is now left out of the checks and of the report's `accepted`; entries for the
+files the run did read are checked as before. And `-UpdateBaseline` together with `-ChangedFile` is
+refused: the update records what the run measured, and it silently dropped every baseline entry for
+the rest of the tree.
+
 ## [0.6.0] - 2026-10-15
 
 ### For consumers

@@ -554,6 +554,10 @@ function Test-PSComplexity {
         # as a failing gate would send someone to refactor a unit that is fine.
         # The code's own acceptances join the list's (#165), after the two are checked against each
         # other, and from here on face exactly the checks a listed one does.
+        # A run filtered to changed files checks only the listed acceptances for files it read
+        # (#203): one for a file it never opened cannot be judged either way.
+        $filtered = $null -ne $scan.Scope.ChangedFile
+        $Accept = @(Select-PSCxScopedEntry -Entry @($Accept) -Unit $units -Filtered $filtered -PathComparison $scan.PathComparison)
         $faults = @(Get-PSCxInlineAcceptFault -Inline $scan.InlineAccept -Stray $scan.InlineStray `
                 -Listed $Accept -PathComparison $scan.PathComparison)
         $Accept = @($Accept) + @($scan.InlineAccept)
@@ -577,7 +581,7 @@ function Test-PSComplexity {
 
         $baselineMap = Get-PSCxBaselineState -Path $policy.BaselineFile -Unit $units -Accept $Accept `
             -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -FileCeiling $fileCeiling `
-            -MetricVersion (Get-PSCxMetricVersion) -PathComparison $scan.PathComparison
+            -MetricVersion (Get-PSCxMetricVersion) -PathComparison $scan.PathComparison -Filtered $filtered
 
         $violations = @(Get-PSCxUnacceptedUnit -Unit $units -Accept $Accept `
                 -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -BaselineMap $baselineMap `

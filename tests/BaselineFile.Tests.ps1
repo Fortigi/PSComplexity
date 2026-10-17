@@ -86,6 +86,18 @@ Describe 'Get-PSCxBaselineState' {
             Should-Throw -ExceptionMessage '*Ghost*Phantom*'
     }
 
+    It 'checks only the entries for files a filtered run read, and every entry otherwise (#203)' {
+        $p = Baseline -Units @((Entry), (Entry -File 'src/Unread.ps1' -Name 'Elsewhere'))
+        $m = Get-PSCxBaselineState -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 -Filtered $true
+        $m.Count | Should-Be 1
+        { Get-PSCxBaselineState -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
+            Should-Throw -ExceptionMessage '*Elsewhere is recorded but no such unit was measured*'
+        # A unit gone from a file it did read is still a fault.
+        $q = Baseline -Units @((Entry), (Entry -Name 'Ghost'))
+        { Get-PSCxBaselineState -PathComparison $script:PathCmp -Path $q -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 -Filtered $true } |
+            Should-Throw -ExceptionMessage '*Ghost is recorded but no such unit was measured*'
+    }
+
     It 'accepts a baseline with no entries at all' {
         # Paired with the refusals above: an empty baseline is a legitimate state -- everything
         # was fixed -- and refusing it would make the last cleanup fail the build.

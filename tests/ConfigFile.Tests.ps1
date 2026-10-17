@@ -232,6 +232,12 @@ Describe 'the policy a gate run resolves' {
             Should-Throw -ExceptionMessage '-UpdateBaseline needs -BaselineFile, or a baselineFile in the config*'
     }
 
+    It 'refuses -UpdateBaseline over the changed files only, and takes -ChangedFile without it (#203)' {
+        { Resolve @{ UpdateBaseline = [switch]$true; ChangedFile = @('a.ps1') } 6>$null } |
+            Should-Throw -ExceptionMessage '-UpdateBaseline cannot be combined with -ChangedFile*whole-tree run.'
+        (Resolve @{ UpdateBaseline = [switch]$false; ChangedFile = @('a.ps1') } 6>$null).BaselineFile | Should-BeLikeString '*b.json'
+    }
+
     It 'refuses -AllowNew without -UpdateBaseline, and takes it with one' {
         { Resolve @{ AllowNew = [switch]$true } 6>$null } | Should-Throw -ExceptionMessage '-AllowNew only applies with -UpdateBaseline*'
         { Resolve @{ AllowNew = [switch]$true; UpdateBaseline = [switch]$false } 6>$null } | Should-Throw -ExceptionMessage '-AllowNew only*'

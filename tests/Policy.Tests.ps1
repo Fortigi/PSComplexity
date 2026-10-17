@@ -158,6 +158,31 @@ Describe 'Get-PSCxBaselineMap' {
     }
 }
 
+Describe 'Select-PSCxScopedEntry (#203)' {
+    It 'keeps every entry for a whole-tree run, a file it did not read included' {
+        $r = Select-PSCxScopedEntry -Entry @((Entry -File 'src/A.ps1'), (Entry -File 'src/Z.ps1')) -Unit @(Unit) -Filtered $false -PathComparison $script:PathCmp
+        @($r.file) | Should-BeCollection @('src/A.ps1', 'src/Z.ps1')
+    }
+
+    It 'keeps only the entries for files a filtered run read, acceptances and baseline entries alike' {
+        $units = @((Unit -File 'src/A.ps1'), (Unit -File 'src/B.ps1'), (Unit -File 'src/B.ps1' -Name 'Other'))
+        $r = Select-PSCxScopedEntry -Entry @((Entry -File 'src/B.ps1'), (Entry -File 'src/Z.ps1'), (Entry -File 'src/A.ps1')) -Unit $units -Filtered $true -PathComparison $script:PathCmp
+        @($r.file) | Should-BeCollection @('src/B.ps1', 'src/A.ps1')
+        $accept = [pscustomobject]@{ File = 'src/B.ps1'; Unit = 'X'; Reason = 'r' }
+        @(Select-PSCxScopedEntry -Entry @($accept) -Unit $units -Filtered $true -PathComparison $script:PathCmp).Count | Should-Be 1
+    }
+
+    It 'returns nothing when a filtered run read none of their files' {
+        @(Select-PSCxScopedEntry -Entry @((Entry -File 'src/Z.ps1')) -Unit @(Unit) -Filtered $true -PathComparison $script:PathCmp).Count | Should-Be 0
+    }
+
+    It 'matches files as the run compares them' {
+        $entry = @((Entry -File 'src/a.ps1'))
+        @(Select-PSCxScopedEntry -Entry $entry -Unit @(Unit) -Filtered $true -PathComparison Ordinal).Count | Should-Be 0
+        @(Select-PSCxScopedEntry -Entry $entry -Unit @(Unit) -Filtered $true -PathComparison OrdinalIgnoreCase).Count | Should-Be 1
+    }
+}
+
 Describe 'Get-PSCxUnacceptedUnit' {
     It 'reports a unit over a ceiling that nothing excuses' {
         @(Get-PSCxUnacceptedUnit -PathComparison $script:PathCmp -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15).Count |
