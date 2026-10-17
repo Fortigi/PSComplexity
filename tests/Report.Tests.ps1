@@ -798,3 +798,21 @@ Describe 'where an acceptance is written (#165)' {
         $d.accepted[1].line | Should-BeNull
     }
 }
+
+Describe 'writing a text artefact (#167)' {
+
+    It 'creates the directory it is written into, and writes the text exactly' {
+        $p = Join-Path $script:work "txt-$([System.Guid]::NewGuid().ToString('N'))/deeper/s.md"
+        Save-PSCxText -Path $p -Text "a`nb`n"
+        [System.IO.File]::ReadAllText($p) | Should-Be "a`nb`n"
+    }
+
+    It 'writes a bare file name into the current directory' {
+        $dir = Join-Path $script:work "txt-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        Push-Location $dir
+        try { Save-PSCxText -Path 'bare.md' -Text 'x' }
+        finally { Pop-Location }
+        [System.IO.File]::ReadAllText((Join-Path $dir 'bare.md')) | Should-Be 'x'
+    }
+}

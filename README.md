@@ -604,6 +604,32 @@ The same file works in Azure DevOps -- see [Azure Pipelines](#azure-pipelines).
 Only the gate writes SARIF. Without ceilings there is no such thing as a finding, so a SARIF file
 from `Measure-PSComplexity` would be an empty results array claiming a clean bill of health.
 
+### A summary a person can read
+
+`-MarkdownPath` writes a Markdown summary of the same run, for a CI step summary or a pull request
+comment. It holds no number the records do not -- it is rendered from the same scan:
+
+```yaml
+- name: Complexity gate
+  shell: pwsh
+  run: Test-PSComplexity ./src -Recurse -MarkdownPath $env:GITHUB_STEP_SUMMARY -CompareTo ./main-report.json
+```
+
+- **The headline** -- the gate's verdict and the ceilings it applied, or what was measured -- and,
+  beside it, what the numbers do not cover: a diff-scoped run, excluded or unreadable files, the
+  config that set the policy, and how many units were accepted or held to a baseline.
+- **Every unit over a ceiling** (the gate only), each with the ceiling it faced. Never cut to the
+  top N: a summary showing ten of twelve breaches would read as a smaller problem than it is.
+- **The most complex units**, by cognitive then cyclomatic. Ten by default; `-MarkdownTop` sets it.
+- **Per-file totals** -- units, summed cognitive, and the highest score of each metric.
+- **With `-CompareTo`**, a previous JSON report (`-ReportPath`), for example one saved from the
+  main branch: the units that are new, worse or better than in it, matched by file and unit name. A
+  report from another metric version is refused, because its numbers answer a different question.
+
+The file is replaced, not appended to; each GitHub Actions step gets its own summary file, so
+`$env:GITHUB_STEP_SUMMARY` works. Both commands write it. The gate writes it only when it reaches
+a verdict, and `-UpdateBaseline` writes none.
+
 ## Use it in CI
 
 ```yaml

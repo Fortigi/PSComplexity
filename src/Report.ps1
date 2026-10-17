@@ -410,6 +410,20 @@ function Save-PSCxDocument {
     $json | Set-Content -LiteralPath $Path -Encoding utf8 -ErrorAction Stop
 }
 
+function Save-PSCxText {
+    # A text artefact -- the Markdown summary (#167) -- written the way Save-PSCxDocument writes
+    # JSON: the parent made if missing, and a write that fails failing the run.
+    [OutputType([void])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyString()] [string]$Text,
+        [Parameter(Mandatory)] [string]$Path
+    )
+    $parent = Split-Path -Parent $Path
+    if ($parent) { [System.IO.Directory]::CreateDirectory($parent) | Out-Null }
+    Set-Content -LiteralPath $Path -Value $Text -NoNewline -Encoding utf8 -ErrorAction Stop
+}
+
 function Read-PSCxDocument {
     # A JSON document off disk, or a throw naming the path and what was wrong with it.
     #

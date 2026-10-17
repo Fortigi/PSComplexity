@@ -37,6 +37,13 @@ unit -- is refused rather than ignored, and so is a unit accepted both in its co
 Whole units only. The report's `accepted` entries now say where each argument is written, as
 `source` (`inline` or `list`) and the `line` of an inline one.
 
+**A Markdown summary, for a CI step summary or a pull request comment.** `-MarkdownPath` on both
+commands writes the run as Markdown: the verdict and every unit over a ceiling (the gate), the ten
+most complex units (`-MarkdownTop` changes the number), per-file totals, and what the numbers do not
+cover. With `-CompareTo` and a previous JSON report it also lists the units that are new, worse or
+better than in that report; a report from another metric version is refused. Rendered from the same
+scan as the records and the JSON report, so it holds no number they do not.
+
 ## [0.6.0] - 2026-10-15
 
 ### For consumers

@@ -176,6 +176,9 @@ src/Measure-PSComplexity.ps1   the two public projections over the scan: Measure
                                and Test-PSComplexity. Wiring, and nothing else.
 src/Report.ps1                 the two published formats -- our JSON report and SARIF -- and
                                the two functions that touch a file.
+src/Markdown.ps1               the Markdown summary (#167): hotspots, per-file totals, the
+                               gate's breaches, a comparison with a previous report. Renders what
+                               the scan and the gate decided; Report.ps1 writes the file.
 src/Config.ps1                 what a .pscomplexity.json may say and what it means for one gate
                                run (#164): the faults, the globs, the command line winning, the
                                per-file ceilings. Pure, like Policy.ps1.

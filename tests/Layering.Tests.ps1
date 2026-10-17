@@ -67,6 +67,13 @@ BeforeAll {
         'ConfigFile.ps1 -> Scan.ps1'
         'Measure-PSComplexity.ps1 -> Config.ps1'
         'Measure-PSComplexity.ps1 -> ConfigFile.ps1'
+
+        # The Markdown summary (#167) renders what the scan and the gate already decided. It keys
+        # units as the policy does, so a comparison and an acceptance agree on "the same unit",
+        # and leaves reading and writing files to Report.ps1.
+        'Markdown.ps1 -> Policy.ps1'
+        'Markdown.ps1 -> Report.ps1'
+        'Measure-PSComplexity.ps1 -> Markdown.ps1'
     )
 
     function Get-SrcAst {
