@@ -596,6 +596,12 @@ Describe 'Get-PSCxSubsetNotice' {
         $notice | Should-BeLikeString '*not the whole tree*'
         $notice | Should-BeLikeString '*1 changed file(s)*'
     }
+
+    It 'names the units gated and the files for a run given a diff (#168)' {
+        $diff = (Get-PSCxUnifiedDiff -Text @("--- $script:flat", "+++ $script:flat", '@@ -1 +1 @@')).Files
+        $notice = Get-PSCxSubsetNotice -Scan (Get-PSCxScan -Path @($script:work) -Recurse -ChangedDiff $diff)
+        $notice | Should-Be 'Gated 1 unit(s) owning lines changed in 1 file(s), not the whole tree. This verdict covers only what -ChangedDiff changed; it is not a statement about the rest of the code.'
+    }
 }
 
 Describe 'Get-PSCxScan -ChangedFile' {
@@ -632,6 +638,134 @@ Describe 'Get-PSCxScan -ChangedFile' {
         $scan = Get-PSCxScan -Path @($script:work) -Recurse -ChangedFile @('notes.txt')
         @($scan.Units).Count | Should-Be 0
         $scan.Scope.ChangedFile | Should-NotBeNull
+    }
+}
+
+Describe 'Get-PSCxScan -ChangedDiff (#168)' {
+    BeforeAll {
+        # Without prefixes, so the absolute path a temp fixture has reads as itself.
+        function script:FlatDiff {
+            param([string]$Hunk)
+            $parsed = Get-PSCxUnifiedDiff -Text @("--- $script:flat", "+++ $script:flat", $Hunk)
+            return $parsed.Files
+        }
+    }
+
+    It 'gates only the units owning a changed line, and still measures the rest of the file' {
+        # Line 2 of flat.ps1 is `$top = 1`: the script body's, not Get-Flat's.
+        $scan = Get-PSCxScan -Path @($script:work) -Recurse -ChangedDiff (FlatDiff '@@ -2 +2 @@')
+        @($scan.Units | ForEach-Object Unit) | Should-BeCollection @('<script-body>')
+        @($scan.Measured | ForEach-Object Unit) | Should-BeCollection @('Get-Flat', '<script-body>')
+        @($scan.Units.File | Select-Object -Unique) | Should-BeCollection @($scan.Measured[0].File)
+    }
+
+    It 'gates the function when its line changed' {
+        $scan = Get-PSCxScan -Path @($script:work) -Recurse -ChangedDiff (FlatDiff '@@ -1 +1 @@')
+        @($scan.Units | ForEach-Object Unit) | Should-BeCollection @('Get-Flat')
+    }
+
+    It 'records the files and the hunks in Scope' {
+        $scan = Get-PSCxScan -Path @($script:work) -Recurse -ChangedDiff (FlatDiff '@@ -1,0 +2,3 @@')
+        @($scan.Scope.ChangedFile).Count | Should-Be 1
+        $file = @($scan.Scope.ChangedLines.Keys)[0]
+        $file | Should-Be $scan.Scope.ChangedFile[0]
+        "$($scan.Scope.ChangedLines[$file][0].Start),$($scan.Scope.ChangedLines[$file][0].Count)" | Should-Be '2,3'
+    }
+
+    It 'gates nothing in a file the diff changed without a hunk' {
+        $scan = Get-PSCxScan -Path @($script:work) -Recurse -ChangedDiff (Get-PSCxUnifiedDiff -Text @("--- $script:flat", "+++ $script:flat")).Files
+        @($scan.Units).Count | Should-Be 0
+        @($scan.Measured).Count | Should-Be 2
+    }
+
+    It 'measures every unit as Measured too, and records no lines, without a diff' {
+        $scan = Get-PSCxScan -Path @($script:work) -Recurse
+        @($scan.Measured).Count | Should-Be @($scan.Units).Count
+        $scan.Scope.ChangedLines | Should-BeNull
+        (Get-PSCxScan -Path @($script:work) -Recurse -ChangedFile @($script:flat)).Scope.ChangedLines | Should-BeNull
+    }
+}
+
+Describe 'Get-PSCxChangedLine' {
+    It 'keys the hunks by File, pooling two spellings of one file' {
+        $root = [System.IO.Path]::GetFullPath('/repo')
+        $diff = [ordered]@{ 'src/a.ps1' = @([pscustomobject]@{ Start = 1; Count = 1 }); './src/a.ps1' = @([pscustomobject]@{ Start = 5; Count = 0 }) }
+        $lines = Get-PSCxChangedLine -Diff $diff -Root $root -PathComparison $script:PathCmp
+        @($lines.Keys) | Should-BeCollection @('src/a.ps1')
+        @($lines['src/a.ps1'].Start) | Should-BeCollection @(1, 5)
+    }
+
+    It 'compares files as the run does' {
+        $root = [System.IO.Path]::GetFullPath('/repo')
+        $diff = [ordered]@{ 'src/a.ps1' = @([pscustomobject]@{ Start = 1; Count = 1 }) }
+        (Get-PSCxChangedLine -Diff $diff -Root $root -PathComparison Ordinal).ContainsKey('SRC/A.PS1') | Should-BeFalse
+        (Get-PSCxChangedLine -Diff $diff -Root $root -PathComparison OrdinalIgnoreCase).ContainsKey('SRC/A.PS1') | Should-BeTrue
+    }
+}
+
+Describe 'Get-PSCxChangeScope' {
+    BeforeAll {
+        function script:Scope {
+            param([hashtable]$Bound)
+            Push-Location $script:work
+            try { return Get-PSCxChangeScope -Bound $Bound -Root $script:work -PathComparison $script:PathCmp }
+            finally { Pop-Location }
+        }
+    }
+
+    It 'restricts nothing when neither is given' {
+        $s = Scope @{}
+        $s.Set | Should-BeNull
+        $s.Line | Should-BeNull
+        $s.Diff | Should-BeNull
+    }
+
+    It 'gives -ChangedFile a set and no lines' {
+        $s = Scope @{ ChangedFile = @('flat.ps1') }
+        $s.Set.Contains('flat.ps1') | Should-BeTrue
+        $s.Line | Should-BeNull
+    }
+
+    It 'gives -ChangedDiff a set, the lines and the diff' {
+        $s = Scope @{ ChangedDiff = @('--- a/flat.ps1', '+++ b/flat.ps1', '@@ -1 +1 @@', '-1', '+2') }
+        $s.Set.Contains('flat.ps1') | Should-BeTrue
+        $s.Line['flat.ps1'][0].Start | Should-Be 1
+        @($s.Diff.Keys) | Should-BeCollection @('flat.ps1')
+    }
+
+    It 'refuses an empty -ChangedFile' {
+        { Scope @{ ChangedFile = @() } } | Should-Throw -ExceptionMessage '-ChangedFile was given no files*'
+    }
+}
+
+Describe 'Read-PSCxChangedDiff' {
+    BeforeAll {
+        function script:ReadDiff {
+            param([hashtable]$Bound)
+            Push-Location $script:work
+            try { return Read-PSCxChangedDiff -Bound $Bound }
+            finally { Pop-Location }
+        }
+    }
+
+    It 'refuses -ChangedFile beside it' {
+        { ReadDiff @{ ChangedDiff = @('--- a/flat.ps1', '+++ b/flat.ps1'); ChangedFile = @('flat.ps1') } } |
+            Should-Throw -ExceptionMessage '-ChangedFile and -ChangedDiff cannot be combined*Pass one.'
+    }
+
+    It 'refuses a diff it cannot read, with the reason' {
+        { ReadDiff @{ ChangedDiff = @() } } | Should-Throw -ExceptionMessage '-ChangedDiff was given an empty diff*'
+    }
+
+    It 'refuses PowerShell files that are not there, and not a missing README' {
+        { ReadDiff @{ ChangedDiff = @('--- a/gone.ps1', '+++ b/gone.ps1', '--- a/gone.md', '+++ b/gone.md') } } |
+            Should-Throw -ExceptionMessage "-ChangedDiff names 1 PowerShell file(s) that do not exist from*: gone.ps1. *run from the root."
+        @((ReadDiff @{ ChangedDiff = @('--- a/flat.ps1', '+++ b/flat.ps1', '--- a/gone.md', '+++ b/gone.md') }).Keys) |
+            Should-BeCollection @('flat.ps1', 'gone.md')
+    }
+
+    It 'takes a diff naming no PowerShell file' {
+        @((ReadDiff @{ ChangedDiff = @('--- a/notes.md', '+++ b/notes.md', '@@ -1 +1 @@', '-a', '+b') }).Keys) | Should-BeCollection @('notes.md')
     }
 }
 

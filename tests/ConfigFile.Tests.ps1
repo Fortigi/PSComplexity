@@ -236,6 +236,8 @@ Describe 'the policy a gate run resolves' {
         { Resolve @{ UpdateBaseline = [switch]$true; ChangedFile = @('a.ps1') } 6>$null } |
             Should-Throw -ExceptionMessage '-UpdateBaseline cannot be combined with -ChangedFile*whole-tree run.'
         (Resolve @{ UpdateBaseline = [switch]$false; ChangedFile = @('a.ps1') } 6>$null).BaselineFile | Should-BeLikeString '*b.json'
+        { Resolve @{ UpdateBaseline = [switch]$true; ChangedDiff = @('x') } 6>$null } |
+            Should-Throw -ExceptionMessage '-UpdateBaseline cannot be combined with -ChangedFile or -ChangedDiff*'
     }
 
     It 'refuses -AllowNew without -UpdateBaseline, and takes it with one' {

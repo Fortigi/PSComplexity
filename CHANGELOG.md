@@ -44,6 +44,16 @@ cover. With `-CompareTo` and a previous JSON report it also lists the units that
 better than in that report; a report from another metric version is refused. Rendered from the same
 scan as the records and the JSON report, so it holds no number they do not.
 
+**Gate only the functions a change touched.** `-ChangedDiff` on both commands takes a unified diff
+-- `git diff --unified=0 origin/main...HEAD` -- and restricts the run to the units owning a changed
+line, where `-ChangedFile` takes every unit in a touched file. A changed line belongs to the
+innermost unit holding it, so editing a nested function does not drag in its parent; a pure deletion
+belongs to the unit it was deleted from; a line outside every function belongs to the script body.
+Only the `+++` and `@@` headers are read, and the module still runs no git. An empty diff, text that
+is not a diff, a PowerShell file the diff names that is not there, and `-ChangedFile` beside it are
+refused. Acceptances and baseline entries are still checked against every unit of the changed files.
+The JSON report records the hunks as `scope.changedLines`.
+
 ### Fixed
 
 **A run over the changed files no longer refuses policy for the files it did not read (#203).** With

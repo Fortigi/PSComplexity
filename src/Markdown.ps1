@@ -139,7 +139,8 @@ function Get-PSCxMarkdownScopeLine {
         [AllowNull()] $Gate
     )
     $notes = [System.Collections.Generic.List[string]]::new()
-    if ($null -ne $Scan.Scope.ChangedFile) { $notes.Add("Only the $(@($Scan.Scope.ChangedFile).Count) changed file(s) were measured, not the whole tree.") }
+    if ($null -ne $Scan.Scope.ChangedLines) { $notes.Add("Only the units owning lines changed in $(@($Scan.Scope.ChangedFile).Count) file(s) were gated, not the whole tree.") }
+    elseif ($null -ne $Scan.Scope.ChangedFile) { $notes.Add("Only the $(@($Scan.Scope.ChangedFile).Count) changed file(s) were measured, not the whole tree.") }
     if (@($Scan.Scope.Excluded).Count -gt 0) { $notes.Add("$(@($Scan.Scope.Excluded).Count) file(s) excluded by the config.") }
     if (@($Scan.Skipped).Count -gt 0) { $notes.Add("$(@($Scan.Skipped).Count) file(s) could not be measured.") }
     # Filtered, never @($Gate.X) alone: for a measurement there is no gate, and @() around $null

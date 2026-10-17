@@ -16,10 +16,10 @@ BeforeAll {
         return [pscustomobject]@{ File = $File; Unit = $Name; Line = $Line; Cyclomatic = $Cyc; Cognitive = $Cog; MetricVersion = 3 }
     }
     function script:Scan {
-        param([object[]]$Units = @(), $ChangedFile = $null, [string[]]$Excluded = @(), [object[]]$Skipped = @())
+        param([object[]]$Units = @(), $ChangedFile = $null, [string[]]$Excluded = @(), [object[]]$Skipped = @(), $ChangedLines = $null)
         return [pscustomobject]@{
             Units = @($Units); Skipped = @($Skipped); Unmatched = @(); MetricVersion = 3; PathComparison = $script:PathCmp
-            Scope = [pscustomobject]@{ Path = @('.'); Recurse = $true; Root = '/r'; ChangedFile = $ChangedFile; Exclude = @(); Excluded = $Excluded }
+            Scope = [pscustomobject]@{ Path = @('.'); Recurse = $true; Root = '/r'; ChangedFile = $ChangedFile; ChangedLines = $ChangedLines; Exclude = @(); Excluded = $Excluded }
         }
     }
     function script:Gate {
@@ -133,6 +133,11 @@ Describe 'what the summary says it did not cover' {
             '1 unit(s) accepted with a written reason.'
             '1 unit(s) held to a baseline.'
         )
+    }
+
+    It 'names the changed lines of a diff scope instead (#168)' {
+        $scan = Scan -ChangedFile @('a.ps1', 'b.ps1') -ChangedLines ([ordered]@{ 'a.ps1' = @(); 'b.ps1' = @() })
+        Get-PSCxMarkdownScopeLine -Scan $scan -Gate $null | Should-BeCollection @('Only the units owning lines changed in 2 file(s) were gated, not the whole tree.')
     }
 }
 

@@ -88,6 +88,20 @@ function Get-PSCxReportAcceptance {
     }
 }
 
+function Get-PSCxReportChangedLine {
+    # The report's scope.changedLines: File -> the hunks -ChangedDiff gave, each file's a list even
+    # when it holds one, or $null for a run that gated whole files (#168).
+    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Scan)
+    if ($null -eq $Scan.Scope.ChangedLines) { return $null }
+    $lines = [ordered]@{}
+    foreach ($f in $Scan.Scope.ChangedLines.Keys) {
+        $lines[$f] = [object[]]@($Scan.Scope.ChangedLines[$f] | ForEach-Object { [ordered]@{ start = $_.Start; count = $_.Count } })
+    }
+    return $lines
+}
+
 function Get-PSCxReportDocument {
     # The report as a document. Pure: the version and the timestamp arrive as parameters rather
     # than being read here, so the whole shape is testable without a clock or a manifest.
@@ -110,6 +124,7 @@ function Get-PSCxReportDocument {
     # published schema promises a list.
     $changedFile = $null
     if ($null -ne $Scan.Scope.ChangedFile) { $changedFile = [string[]]@($Scan.Scope.ChangedFile) }
+    $changedLines = Get-PSCxReportChangedLine -Scan $Scan
     $document = [ordered]@{
         # Provenance first, so a reader opening the file sees what produced it before what it says.
         generatedFrom = 'PSComplexity'
@@ -133,6 +148,8 @@ function Get-PSCxReportDocument {
             # score has to be able to tell which subset it describes, and absent is a different
             # answer from empty: only one of them may be read as a full measurement.
             changedFile = $changedFile
+            # The changed lines a -ChangedDiff run gated on, per file; null when it gated whole files.
+            changedLines = $changedLines
             # What a config excluded (#164), patterns and files, by the argument skipped is
             # written for: a number has to say what it left out. Empty, never absent, without one.
             exclude     = [string[]]@($Scan.Scope.Exclude)
