@@ -64,6 +64,23 @@ function Measure-PSComplexity {
         it, matched by file and unit name. A report measured with another metric version is
         refused, because its numbers answer a different question. Only with -MarkdownPath.
 
+    .PARAMETER ChangedFile
+        The files a change touched, for example from `git diff --name-only --diff-filter=d`. Only
+        the units in those files are measured; every unit of a named file is. An empty list is
+        refused, because a failed diff command prints nothing. Paths are resolved against the
+        current directory, so run from the repository root.
+
+    .PARAMETER ChangedDiff
+        A unified diff, for example the output of `git diff --unified=0 origin/main...HEAD`. Only
+        the units owning a changed line are measured: the innermost unit holding the line, so editing
+        a nested function does not drag in its parent, and for a pure deletion the unit it was
+        deleted from. Lines outside every function belong to the script body.
+
+        Only the `+++` and `@@` headers are read. With context lines in the diff, those count as
+        changed too, so pass --unified=0. An empty diff is refused for the reason an empty
+        -ChangedFile is, and so is text that is not a diff. It cannot be combined with
+        -ChangedFile.
+
     .PARAMETER Detailed
         Add Contributions and LinesOfCode to each record. Contributions holds one entry per
         cognitive increment -- its Line, Construct and Amount, in source order -- summing to
@@ -157,6 +174,9 @@ function Measure-PSComplexity {
         # whole-tree run; an EMPTY list is refused rather than treated as "nothing changed",
         # because that is what a diff command returns when it has failed.
         [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ChangedFile,
+        # A unified diff, restricting the run to the units owning a changed line (#168). Refused
+        # when empty, for the reason an empty -ChangedFile is, and beside -ChangedFile.
+        [AllowNull()] [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ChangedDiff,
         # Off by default because the DEFAULT SHAPE IS A CONTRACT: CI consumers parse these
         # records, and a field that appears unbidden is a breaking change dressed as a feature.
         [switch]$Detailed
@@ -183,11 +203,7 @@ function Measure-PSComplexity {
         # exactly the bug this had while the two were wired separately.
         #
         # Validated here too, so an empty list is refused whichever route the run takes.
-        $changedSet = $null
-        if ($PSBoundParameters.ContainsKey('ChangedFile')) {
-            Assert-PSCxChangedFile -ChangedFile $ChangedFile
-            $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root (Get-PSCxWorkingRoot) -PathComparison $pathComparison
-        }
+        $change = Get-PSCxChangeScope -Bound $PSBoundParameters -Root (Get-PSCxWorkingRoot) -PathComparison $pathComparison
         # Read and checked before anything is measured, so a wrong -CompareTo costs nothing.
         $compareBase = Read-PSCxCompareBase -Bound $PSBoundParameters -MetricVersion (Get-PSCxMetricVersion)
     }
@@ -197,7 +213,7 @@ function Measure-PSComplexity {
         # Accumulating per file here would need three guards that only save memory -- and a
         # branch that changes no output cannot be told from its own absence by any test.
         if ($ReportPath -or $MarkdownPath) { return }
-        foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -PathComparison $pathComparison -Recurse:$Recurse -Detailed:$Detailed)) {
+        foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $change.Set -ChangedLine $change.Line -PathComparison $pathComparison -Recurse:$Recurse -Detailed:$Detailed)) {
             # The projection: units to the output stream, a skip to the error stream.
             #
             # Write-Error rather than a warning: CI logs routinely swallow warnings, and this
@@ -223,10 +239,9 @@ function Measure-PSComplexity {
         # streaming path does. What it gives up is emitting as it goes, which is the price of a
         # report that has to describe the whole run at once.
         $scanArgs = @{ Path = $asked.ToArray(); Recurse = $Recurse; Detailed = $Detailed }
-        if ($PSBoundParameters.ContainsKey('ChangedFile')) {
-            Assert-PSCxChangedFile -ChangedFile $ChangedFile
-            $scanArgs.ChangedFile = $ChangedFile
-        }
+        # Checked in `begin`, so whichever route the run takes refuses the same input.
+        if ($PSBoundParameters.ContainsKey('ChangedFile')) { $scanArgs.ChangedFile = $ChangedFile }
+        if ($PSBoundParameters.ContainsKey('ChangedDiff')) { $scanArgs.ChangedDiff = $change.Diff }
         $scan = Get-PSCxScan @scanArgs
         # The same projection the streaming path makes: units out, a skip to the error stream.
         # Rendered here too, so -ReportPath does not quietly silence the one thing the command
@@ -345,6 +360,26 @@ function Test-PSComplexity {
         it, matched by file and unit name. A report measured with another metric version is
         refused, because its numbers answer a different question. Only with -MarkdownPath.
 
+    .PARAMETER ChangedFile
+        The files a change touched, for example from `git diff --name-only --diff-filter=d`. Only
+        the units in those files are gated; every unit of a named file is. An empty list is
+        refused, because a failed diff command prints nothing. Paths are resolved against the
+        current directory, so run from the repository root.
+
+    .PARAMETER ChangedDiff
+        A unified diff, for example the output of `git diff --unified=0 origin/main...HEAD`. Only
+        the units owning a changed line are gated: the innermost unit holding the line, so editing
+        a nested function does not drag in its parent, and for a pure deletion the unit it was
+        deleted from. Lines outside every function belong to the script body.
+
+        Only the `+++` and `@@` headers are read. With context lines in the diff, those count as
+        changed too, so pass --unified=0. An empty diff is refused for the reason an empty
+        -ChangedFile is, and so is text that is not a diff. It cannot be combined with
+        -ChangedFile.
+
+        Acceptances and baseline entries are still checked against every unit of the changed
+        files, so one that has gone stale fails the run as it would on the whole tree.
+
     .PARAMETER Accept
         Units that are allowed to exceed a ceiling, each carrying the argument for why. One
         entry per unit, with File, Unit and Reason -- for example
@@ -446,6 +481,11 @@ function Test-PSComplexity {
         Test-PSComplexity ./src -Recurse -BaselineFile ./complexity-baseline.json
 
     .EXAMPLE
+        # Gate only the functions a pull request changed, not every function in the files it touched:
+        $diff = git diff --unified=0 origin/main...HEAD
+        Test-PSComplexity ./src -Recurse -ChangedDiff $diff
+
+    .EXAMPLE
         # Gate a pull request on what it changed, and render findings inline:
         $changed = git diff --name-only --diff-filter=d origin/main...HEAD
         Test-PSComplexity ./src -Recurse -ChangedFile $changed -SarifPath ./reports/complexity.sarif
@@ -481,6 +521,8 @@ function Test-PSComplexity {
         # whole-tree run; an EMPTY list is refused rather than treated as "nothing changed",
         # because that is what a diff command returns when it has failed.
         [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ChangedFile,
+        # A unified diff, restricting the run to the units owning a changed line (#168).
+        [AllowNull()] [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$ChangedDiff,
 
         # Empty is the normal case, and an empty array must bind rather than be rejected.
         [AllowEmptyCollection()] [object[]]$Accept,
@@ -515,10 +557,9 @@ function Test-PSComplexity {
         # which swallowed every OTHER error into the same variable and then described it to
         # the caller as a file that did not parse.
         $scanArgs = @{ Path = $paths; Recurse = $Recurse; Exclude = $policy.Exclude }
-        if ($PSBoundParameters.ContainsKey('ChangedFile')) {
-            Assert-PSCxChangedFile -ChangedFile $ChangedFile
-            $scanArgs.ChangedFile = $ChangedFile
-        }
+        $change = Get-PSCxChangeScope -Bound $PSBoundParameters -Root (Get-PSCxWorkingRoot) -PathComparison (Get-PSCxRunPathComparison -Root (Get-PSCxWorkingRoot))
+        if ($PSBoundParameters.ContainsKey('ChangedFile')) { $scanArgs.ChangedFile = $ChangedFile }
+        if ($null -ne $change.Diff) { $scanArgs.ChangedDiff = $change.Diff }
         $scan = Get-PSCxScan @scanArgs
         # Parse failures are refused rather than allowed past. A file the gate could not read
         # is a file it cannot vouch for, and "no unit exceeded a ceiling" is trivially true of
@@ -533,7 +574,9 @@ function Test-PSComplexity {
                 ". Fix the fault named, or exclude the file from the path you gate on.")
         }
         $units = $scan.Units
-        $fileCeiling = Get-PSCxFileCeiling -Unit $units -Override $policy.Overrides -MaxCyclomatic $MaxCyclomatic `
+        # Every unit of the files read, the gated ones among them: what the policy is checked against.
+        $measured = $scan.Measured
+        $fileCeiling = Get-PSCxFileCeiling -Unit $measured -Override $policy.Overrides -MaxCyclomatic $MaxCyclomatic `
             -MaxCognitive $MaxCognitive -Root $scan.Scope.Root -PathComparison $scan.PathComparison
 
         # Before the verdict, so it is on screen whether the run passes or fails. A pass is the
@@ -546,7 +589,7 @@ function Test-PSComplexity {
         # scan-level refusals are sequenced there, because which one fires first is itself a
         # decision -- see Get-PSCxScanFault.
         $scanFault = Get-PSCxScanFault -Scan $scan -Path $paths `
-            -Recurse:$Recurse -Filtered $PSBoundParameters.ContainsKey('ChangedFile')
+            -Recurse:$Recurse -Filtered ($null -ne $scan.Scope.ChangedFile)
         if ($scanFault) { throw $scanFault }
 
         # Checked BEFORE the verdict, and thrown rather than returned as $false. A stale
@@ -557,11 +600,11 @@ function Test-PSComplexity {
         # A run filtered to changed files checks only the listed acceptances for files it read
         # (#203): one for a file it never opened cannot be judged either way.
         $filtered = $null -ne $scan.Scope.ChangedFile
-        $Accept = @(Select-PSCxScopedEntry -Entry @($Accept) -Unit $units -Filtered $filtered -PathComparison $scan.PathComparison)
+        $Accept = @(Select-PSCxScopedEntry -Entry @($Accept) -Unit $measured -Filtered $filtered -PathComparison $scan.PathComparison)
         $faults = @(Get-PSCxInlineAcceptFault -Inline $scan.InlineAccept -Stray $scan.InlineStray `
                 -Listed $Accept -PathComparison $scan.PathComparison)
         $Accept = @($Accept) + @($scan.InlineAccept)
-        $faults += @($Accept | Get-PSCxAcceptanceFault -Unit $units `
+        $faults += @($Accept | Get-PSCxAcceptanceFault -Unit $measured `
                 -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -PathComparison $scan.PathComparison `
                 -FileCeiling $fileCeiling)
         if ($faults.Count -gt 0) {
@@ -579,7 +622,7 @@ function Test-PSComplexity {
             return $true
         }
 
-        $baselineMap = Get-PSCxBaselineState -Path $policy.BaselineFile -Unit $units -Accept $Accept `
+        $baselineMap = Get-PSCxBaselineState -Path $policy.BaselineFile -Unit $measured -Accept $Accept `
             -MaxCyclomatic $MaxCyclomatic -MaxCognitive $MaxCognitive -FileCeiling $fileCeiling `
             -MetricVersion (Get-PSCxMetricVersion) -PathComparison $scan.PathComparison -Filtered $filtered
 

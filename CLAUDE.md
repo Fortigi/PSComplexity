@@ -164,6 +164,8 @@ src/InlineAccept.ps1           acceptances written in the code (#165): which uni
                                a declaration excuses, and why one excuses none. Pure: text, tokens
                                and the unit table. Do not START a comment in src/ with the marker
                                it reads -- the self-gate would read it as a declaration.
+src/Diff.ps1                   changed lines from a unified diff (#168): the `+++` and `@@` headers,
+                               and which unit owns each changed line. Pure: text and a span table.
 src/Policy.ps1                 which units are excused from the ceilings, and on what terms:
                                acceptances, baselines, and the ONE unit-identity key both use.
                                Pure.
@@ -286,6 +288,12 @@ the ref was never fetched, a detached HEAD, a merge base that is not what the re
 Resolving it here would turn those into a complexity tool refusing to run, several layers from the
 shell where they can be fixed. It also keeps this module free of an external process, which it has
 never had.
+
+`-ChangedDiff` (#168) keeps that decision: the caller still produces the diff, and the module reads
+only its headers. It narrows `-ChangedFile` to the units owning a changed line, but the policy is
+still checked against every unit of the files read -- the scan carries `Measured` beside `Units` for
+exactly that -- so an acceptance for an untouched unit in a touched file is judged, not mistaken for
+a renamed one.
 
 The guard that earns its place is the **empty list**: a `git diff` that fails prints nothing and
 exits 0, and taken at face value that is a confident pass over zero units. So an empty

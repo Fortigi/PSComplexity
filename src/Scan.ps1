@@ -298,6 +298,53 @@ function Get-PSCxChangedSet {
     Write-Output -InputObject $set -NoEnumerate
 }
 
+function Get-PSCxChangedLine {
+    # -ChangedDiff's hunks keyed by File as a record spells it, so the walk can look a file up the
+    # way the changed set does. Two spellings of one file in a diff -- which git does not write --
+    # pool their hunks rather than one hiding the other.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseLiteralInitializerForHashtable', '',
+        Justification = 'The literal @{} ignores case; the run path comparison decides instead (#151).')]
+    [OutputType([hashtable])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [System.Collections.IDictionary]$Diff,
+        [Parameter(Mandatory)] [string]$Root,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+    )
+    $lines = [hashtable]::new([System.StringComparer]::FromComparison($PathComparison))
+    foreach ($file in $Diff.Keys) {
+        $relative = Get-PSCxRelativePath -Path $file -Root $Root -PathComparison $PathComparison
+        if (-not $lines.ContainsKey($relative)) { $lines[$relative] = [System.Collections.Generic.List[object]]::new() }
+        $lines[$relative].AddRange([object[]]@($Diff[$file]))
+    }
+    return $lines
+}
+
+function Get-PSCxChangeScope {
+    # What a command's -ChangedFile or -ChangedDiff restricts the run to, checked: the changed set
+    # the walk filters files by, the hunks per file for a diff, and the diff as read. Each $null
+    # when not given, which is what tells the walk to read everything.
+    [OutputType([pscustomobject])]
+    [CmdletBinding()]
+    param(
+        # The command's $PSBoundParameters.
+        [Parameter(Mandatory)] [System.Collections.IDictionary]$Bound,
+        [Parameter(Mandatory)] [string]$Root,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+    )
+    $scope = [pscustomobject]@{ Set = $null; Line = $null; Diff = $null }
+    if ($Bound.ContainsKey('ChangedDiff')) {
+        $scope.Diff = Read-PSCxChangedDiff -Bound $Bound
+        $scope.Line = Get-PSCxChangedLine -Diff $scope.Diff -Root $Root -PathComparison $PathComparison
+        $scope.Set = Get-PSCxChangedSet -ChangedFile @($scope.Line.Keys) -Root $Root -PathComparison $PathComparison
+    }
+    elseif ($Bound.ContainsKey('ChangedFile')) {
+        Assert-PSCxChangedFile -ChangedFile $Bound['ChangedFile']
+        $scope.Set = Get-PSCxChangedSet -ChangedFile $Bound['ChangedFile'] -Root $Root -PathComparison $PathComparison
+    }
+    return $scope
+}
+
 function Get-PSCxUnmatchedPath {
     # One record for a requested path that produced no source file: what was asked for, why it
     # produced nothing, and whether the path is THERE at all.
@@ -389,6 +436,10 @@ function Get-PSCxSubsetNotice {
     if ($null -eq $Scan.Scope.ChangedFile) { return $null }
     $files = @($Scan.Scope.ChangedFile).Count
     $units = @($Scan.Units).Count
+    if ($null -ne $Scan.Scope.ChangedLines) {
+        return ("Gated $units unit(s) owning lines changed in $files file(s), not the whole tree. This verdict " +
+            'covers only what -ChangedDiff changed; it is not a statement about the rest of the code.')
+    }
     return ("Measured $units unit(s) from $files changed file(s), not the whole tree. This verdict " +
         'covers only what -ChangedFile named; it is not a statement about the rest of the code.')
 }
@@ -454,14 +505,51 @@ function Assert-PSCxChangedFile {
             'clone whose base ref is missing. If nothing changed, skip the gate rather than asking it ' +
             'to measure an empty set.')
     }
-    $missing = @($listed | Where-Object {
+    $fault = Get-PSCxMissingChangeFault -File $listed -Parameter '-ChangedFile'
+    if ($fault) { throw ($fault + ' A file the change deleted has nothing left to measure: list changes with ' +
+            '`git diff --name-only --diff-filter=d`.') }
+}
+
+function Get-PSCxMissingChangeFault {
+    # Why the PowerShell files a change names are not all there, as text, or nothing when they are.
+    # Only .ps1 and .psm1 are checked: a missing README changes no answer.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [string[]]$File,
+        [Parameter(Mandatory)] [string]$Parameter
+    )
+    $missing = @($File | Where-Object {
             [System.IO.Path]::GetExtension($_) -in '.ps1', '.psm1' -and -not (Test-Path -LiteralPath $_ -PathType Leaf) })
     if ($missing.Count -eq 0) { return }
-    throw ("-ChangedFile names $($missing.Count) PowerShell file(s) that do not exist from " +
+    return ("$Parameter names $($missing.Count) PowerShell file(s) that do not exist from " +
         "'$(Get-PSCxWorkingRoot)': " + ($missing -join ', ') + '. The list is resolved against the ' +
         'current directory, and git prints paths relative to the repository root -- run from the ' +
-        'root. A file the change deleted has nothing left to measure: list changes with ' +
-        '`git diff --name-only --diff-filter=d`.')
+        'root.')
+}
+
+function Read-PSCxChangedDiff {
+    # -ChangedDiff's text as files and hunks, refusing a diff that cannot be read, one naming
+    # PowerShell files not there, and -ChangedFile beside it. Checked before any route scans, like
+    # -ChangedFile, so Measure-PSComplexity refuses it too.
+    #
+    # A diff naming no PowerShell file at all -- a docs-only change -- is not refused: like a
+    # -ChangedFile list holding only a README, it measures nothing and the run says so.
+    [OutputType([System.Collections.Specialized.OrderedDictionary])]
+    [CmdletBinding()]
+    param(
+        # The command's $PSBoundParameters.
+        [Parameter(Mandatory)] [System.Collections.IDictionary]$Bound
+    )
+    if ($Bound.ContainsKey('ChangedFile')) {
+        throw '-ChangedFile and -ChangedDiff cannot be combined: one gates every unit in the files it names and the other only the units a diff changed. Pass one.'
+    }
+    $diff = Get-PSCxUnifiedDiff -Text $Bound['ChangedDiff']
+    if ($diff.Fault) { throw $diff.Fault }
+    # A deleted file never reaches the list, so unlike -ChangedFile there is no filter to suggest.
+    $fault = Get-PSCxMissingChangeFault -File @($diff.Files.Keys) -Parameter '-ChangedDiff'
+    if ($fault) { throw $fault }
+    return $diff.Files
 }
 
 function Write-PSCxUnmatchedPath {
@@ -595,6 +683,9 @@ function Get-PSCxFileScan {
     param(
         [Parameter(Mandatory)] [string]$File,
         [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
+        # The file's changed lines from -ChangedDiff, as Get-PSCxUnifiedDiff gives them, or $null to
+        # gate every unit in it.
+        [AllowNull()] [AllowEmptyCollection()] [object[]]$Hunk,
         [switch]$Detailed
     )
     $errors = $null
@@ -615,6 +706,7 @@ function Get-PSCxFileScan {
             File         = $relative
             Units        = @()
             SkipReason   = Get-PSCxSkipReason -ParseError $errors[0] -Token $tokens
+            Measured     = @()
             InlineAccept = @()
             InlineStray  = @()
         }
@@ -655,6 +747,12 @@ function Get-PSCxFileScan {
         # already produced, attributed to the same units the scores are.
         $loc = Get-PSCxLinesOfCodeMap -Token @($tokens) -Span (Get-PSCxUnitSpan -Ast $ast)
     }
+    # The units a diff changed (#168): every unit is still measured, because the policy checks
+    # acceptances and baseline entries against the whole file, but only these are gated.
+    $changed = $null
+    # Wrapped, because no unit changed is an empty answer and unrolled it would read as no filter.
+    if ($null -ne $Hunk) { $changed = @(Get-PSCxChangedUnit -Span (Get-PSCxUnitSpan -Ast $ast) -Hunk $Hunk) }
+    $selected = [System.Collections.Generic.List[object]]::new()
     $units = foreach ($k in $ordered) {
         # Two traps stacked here, and the empty list has to survive BOTH.
         #
@@ -668,9 +766,11 @@ function Get-PSCxFileScan {
         # variable lands back on $null. Assign first, then overwrite.
         $contrib = @()
         if ($byUnit.ContainsKey($k)) { $contrib = $byUnit[$k] }
-        Get-PSCxUnitRecord -File $relative -Unit $display[$k] -Line $lines[$k] `
+        $record = Get-PSCxUnitRecord -File $relative -Unit $display[$k] -Line $lines[$k] `
             -Cyclomatic $cyc[$k] -Cognitive $cog[$k] -MetricVersion $script:PSCxMetricVersion `
             -Contributions $contrib -LinesOfCode ([int]$loc[$k]) -Detailed:$Detailed
+        if ($null -eq $changed -or $k -in $changed) { $selected.Add($record) }
+        $record
     }
     # Acceptances written in the code (#165), read here because only here are the text, the
     # tokens and the unit lines all at hand. Collected on every run and applied only by the gate:
@@ -678,7 +778,8 @@ function Get-PSCxFileScan {
     $inline = Get-PSCxInlineAccept -Text $ast.Extent.Text -Token @($tokens) -UnitLine $lines -Display $display -File $relative
     return [pscustomobject]@{
         File         = $relative
-        Units        = @($units)
+        Units        = @($selected)
+        Measured     = @($units)
         SkipReason   = $null
         InlineAccept = $inline.Accept
         InlineStray  = $inline.Stray
@@ -747,6 +848,8 @@ function Get-PSCxPathScan {
         # filter was asked for" are different answers -- so the public commands refuse an empty
         # list rather than passing one down.
         [System.Collections.Generic.HashSet[string]]$ChangedSet,
+        # -ChangedDiff's hunks: File -> hunks, keyed as ChangedSet is, or $null to gate whole files.
+        [hashtable]$ChangedLine,
         # The config's excludes and the list the files they matched go into; both $null without one.
         $Exclude,
         [System.Collections.Generic.List[string]]$Excluded,
@@ -786,7 +889,9 @@ function Get-PSCxPathScan {
             # CI gate calls, and a gate that chatters gets its output filtered, which takes
             # the parse errors with it.
             Write-Verbose "Measuring $file"
-            Get-PSCxFileScan -File $file -PathComparison $PathComparison -Detailed:$Detailed
+            $hunk = $null
+            if ($null -ne $ChangedLine) { $hunk = $ChangedLine[(Get-PSCxRelativePath -Path $file -Root $root -PathComparison $PathComparison)] }
+            Get-PSCxFileScan -File $file -PathComparison $PathComparison -Hunk $hunk -Detailed:$Detailed
         }
     }
 }
@@ -810,12 +915,16 @@ function Get-PSCxScan {
         # recorded in Scope, because a number over a subset that cannot say WHICH subset is worse
         # than no number: it reads as a stronger claim than it is.
         [AllowEmptyCollection()] [string[]]$ChangedFile,
+        # -ChangedDiff's files and hunks, as Get-PSCxUnifiedDiff gives them, or omitted. Restricts the
+        # run to the units owning a changed line, and is recorded in Scope like ChangedFile.
+        [System.Collections.IDictionary]$ChangedDiff,
         # The resolved config's Exclude, or $null. Recorded in Scope beside the files it matched.
         $Exclude,
         [switch]$Recurse,
         [switch]$Detailed
     )
     $units = [System.Collections.Generic.List[object]]::new()
+    $measured = [System.Collections.Generic.List[object]]::new()
     $excluded = [System.Collections.Generic.List[string]]::new()
     $inlineAccept = [System.Collections.Generic.List[object]]::new()
     $inlineStray = [System.Collections.Generic.List[object]]::new()
@@ -833,12 +942,18 @@ function Get-PSCxScan {
     if ($PSBoundParameters.ContainsKey('ChangedFile')) {
         $changedSet = Get-PSCxChangedSet -ChangedFile $ChangedFile -Root $root -PathComparison $pathComparison
     }
-    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -Exclude $Exclude -Excluded $excluded -PathComparison $pathComparison -Recurse:$Recurse -Detailed:$Detailed)) {
+    $changedLine = $null
+    if ($PSBoundParameters.ContainsKey('ChangedDiff')) {
+        $changedLine = Get-PSCxChangedLine -Diff $ChangedDiff -Root $root -PathComparison $pathComparison
+        $changedSet = Get-PSCxChangedSet -ChangedFile @($changedLine.Keys) -Root $root -PathComparison $pathComparison
+    }
+    foreach ($fileScan in (Get-PSCxPathScan -Path $Path -Seen $seen -Unmatched $unmatched -ChangedSet $changedSet -ChangedLine $changedLine -Exclude $Exclude -Excluded $excluded -PathComparison $pathComparison -Recurse:$Recurse -Detailed:$Detailed)) {
         if ($fileScan.SkipReason) {
             $skipped.Add([pscustomobject]@{ File = $fileScan.File; Reason = $fileScan.SkipReason })
             continue
         }
         $units.AddRange([object[]]$fileScan.Units)
+        $measured.AddRange([object[]]$fileScan.Measured)
         $inlineAccept.AddRange([object[]]$fileScan.InlineAccept)
         $inlineStray.AddRange([object[]]$fileScan.InlineStray)
     }
@@ -848,8 +963,18 @@ function Get-PSCxScan {
     # published schema rejects. Same trap as returning an empty HashSet.
     $changed = $null
     if ($null -ne $changedSet) { $changed = [string[]]@($changedSet | Sort-Object) }
+    # Sorted by file for the report, each file's hunks as the diff gave them.
+    $lineScope = $null
+    if ($null -ne $changedLine) {
+        $lineScope = [ordered]@{}
+        foreach ($f in @($changedLine.Keys | Sort-Object)) { $lineScope[$f] = @($changedLine[$f]) }
+    }
     return [pscustomobject]@{
         Units         = @($units)
+        # Every unit of every file read, the gated ones among them. The same as Units unless
+        # -ChangedDiff picked some out: the policy is checked against these, so an acceptance for a
+        # unit the diff did not touch is still judged rather than mistaken for a renamed one.
+        Measured      = @($measured)
         Skipped       = @($skipped)
         # Paths that produced no source file. Beside Skipped rather than folded into it: a file
         # found and not measured and a path never found at all are answered by different fixes,
@@ -863,6 +988,8 @@ function Get-PSCxScan {
             # answers here: a consumer has to be able to tell a whole-tree run from one filtered
             # down to nothing, and only one of those may be read as a full measurement.
             ChangedFile = $changed
+            # -ChangedDiff's hunks per file, or $null when the run gated whole files.
+            ChangedLines = $lineScope
             # What the config excluded: its patterns, and the files they kept out of this run.
             # Both empty without a config, which is the true answer rather than an absent one.
             Exclude     = [string[]]@($Exclude.Pattern | Where-Object { $null -ne $_ })

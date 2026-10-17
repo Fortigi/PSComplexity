@@ -43,6 +43,9 @@ BeforeAll {
         # Acceptances written in the code (#165) are read where the text, the tokens and the unit
         # lines are all at hand. InlineAccept.ps1 reaches nothing: it reads tokens and a table.
         'Scan.ps1 -> InlineAccept.ps1'
+        # Changed lines from a diff (#168), applied where the unit spans are at hand. Diff.ps1
+        # reaches nothing: it reads text and a span table.
+        'Scan.ps1 -> Diff.ps1'
 
         # The composition root. It owns most of the graph on purpose: it is wiring, so it is
         # allowed to know about everything, and nothing is allowed to know about it. It no longer

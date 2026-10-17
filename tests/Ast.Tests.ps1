@@ -240,7 +240,12 @@ Describe 'Get-PSCxUnitSpan (#166)' {
         $spans = Get-PSCxUnitSpan -Ast (Tree $code)
         (@($spans.Keys | ForEach-Object { Bare $_ } | Sort-Object) -join ',') | Should-Be 'C.M,C.P,F'
         $f = $spans[@($spans.Keys | Where-Object { (Bare $_) -eq 'F' })[0]]
-        "$($f.Start)/$($f.End)/$($f.StartLine)" | Should-Be '0/16/1'
+        "$($f.Start)/$($f.End)/$($f.StartLine)/$($f.EndLine)" | Should-Be '0/16/1/1'
+    }
+
+    It 'gives the line each unit ends on (#168)' {
+        $spans = Get-PSCxUnitSpan -Ast (Tree "`nfunction F {`n  1`n}`n")
+        $spans[@($spans.Keys)[0]].EndLine | Should-Be 4
     }
 
     It 'gives a method the extent of the MEMBER, not of its body' {

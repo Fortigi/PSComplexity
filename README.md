@@ -542,8 +542,37 @@ measurement of everything under `path`.
 that is an ordinary outcome rather than an error -- the refusal for a run that measured nothing
 applies to whole-tree runs, where it means the gate was pointed at the wrong place.
 
-**Files, not lines.** A file you touched is measured whole. Restricting to units whose own lines
-changed would be sharper and needs hunk data rather than filenames; it is not what this does.
+### Gating only the changed functions
+
+`-ChangedFile` gates every unit in a touched file, so a one-line fix in a legacy file surfaces every
+old breach in it. `-ChangedDiff` takes the diff itself and gates only the units owning a changed
+line:
+
+```powershell
+$diff = git diff --unified=0 origin/main...HEAD
+if (-not (Test-PSComplexity ./src -Recurse -ChangedDiff $diff)) {
+    throw 'Complexity gate failed'
+}
+```
+
+- **A changed line belongs to the innermost unit holding it**, the same rule lines of code follow.
+  Editing a nested function does not drag in its parent. A line outside every function belongs to
+  the script body.
+- **A pure deletion belongs to the unit it was deleted from**, because removing a branch changes
+  that unit. A deletion between two functions belongs to the script body.
+- **Only the headers are read**: `+++` for the file and `@@` for the new-side line range. Context
+  lines count as changed, so use `--unified=0`. The module stays git-free: any tool that writes a
+  unified diff works.
+- **The same refusals as `-ChangedFile`.** An empty diff is refused, because a failed `git diff`
+  prints nothing. So is text that is not a diff (a list of file names belongs to `-ChangedFile`), a
+  PowerShell file the diff names that is not there from the current directory, and giving both
+  parameters. A diff that changes no PowerShell passes.
+- **The policy still sees the whole file.** Acceptances and baseline entries for the changed files
+  are checked against every unit in them, so a stale one fails the run as it would on the whole
+  tree. `-UpdateBaseline` is refused with either parameter.
+- **It says so.** The warning reads `Gated 2 unit(s) owning lines changed in 1 file(s), not the
+  whole tree.`, and the JSON report records the hunks under `scope.changedLines`, beside the files
+  in `scope.changedFile`.
 
 ### A report something else can read
 

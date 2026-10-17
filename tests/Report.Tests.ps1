@@ -696,6 +696,30 @@ Describe 'a report says which subset it describes' {
         @($d.scope.changedFile).Count | Should-Be 1
         @($d.units | ForEach-Object unit) | Should-NotContainCollection 'Get-Two'
         Should-BeTrue -Actual (Test-AgainstSchema -Json $raw)
+        $d.scope.changedLines | Should-BeNull
+    }
+
+    It 'records the changed lines of a diff, each file a list of hunks (#168)' {
+        $p = Join-Path $script:subDir 'diff.json'
+        Push-Location $script:subDir
+        try {
+            Measure-PSComplexity -Path . -ChangedDiff @('--- a/one.ps1', '+++ b/one.ps1', '@@ -1 +1 @@', '-x', '+y', '--- a/two.ps1', '+++ b/two.ps1', '@@ -1,0 +2,3 @@', '+a', '+b', '+c', '@@ -9 +11,0 @@', '-d') `
+                -ReportPath $p | Out-Null
+        }
+        finally { Pop-Location }
+        $raw = [System.IO.File]::ReadAllText($p)
+        $d = $raw | ConvertFrom-Json
+        $d.scope.changedLines.'one.ps1'.Count | Should-Be 1
+        "$($d.scope.changedLines.'one.ps1'[0].start),$($d.scope.changedLines.'one.ps1'[0].count)" | Should-Be '1,1'
+        @($d.scope.changedLines.'two.ps1' | ForEach-Object { "$($_.start),$($_.count)" }) | Should-BeCollection @('2,3', '11,0')
+        @($d.scope.changedFile) | Should-BeCollection @('one.ps1', 'two.ps1')
+        Should-BeTrue -Actual (Test-AgainstSchema -Json $raw)
+    }
+
+    It 'refuses a changedLines entry that is not a list of hunks' {
+        $bad = $script:measureText -replace '"changedFile":\s*null', '"changedFile": [], "changedLines": { "a.ps1": [ { "start": 1 } ] }'
+        $bad | Should-NotBe $script:measureText
+        Should-BeFalse -Actual (Test-AgainstSchema -Json $bad)
     }
 }
 

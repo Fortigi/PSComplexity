@@ -1762,6 +1762,96 @@ Describe 'the gate, measuring only what changed, with a policy (#203)' {
     }
 }
 
+Describe 'gating only the changed lines (#168)' {
+    # -ChangedFile gates every unit of a touched file, so editing one line of a legacy file surfaces
+    # every old breach in it. -ChangedDiff gates only the units owning a changed line.
+
+    BeforeAll {
+        $script:d168 = Join-Path $script:work "diff-168-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:d168 -Force | Out-Null
+        # Old breaches the ceilings below; New does not.
+        Set-Content -LiteralPath (Join-Path $script:d168 'legacy.ps1') -Encoding utf8 -Value @(
+            'function Old {'
+            '  param($a) if ($a) { if ($a) { if ($a) { 1 } } }'
+            '}'
+            'function New {'
+            '  1'
+            '}'
+        )
+        $script:d168Ceil = @{ MaxCyclomatic = 2; MaxCognitive = 1; NoConfig = $true; WarningAction = 'SilentlyContinue' }
+        function script:LegacyDiff {
+            param([string]$Hunk)
+            return @('diff --git a/legacy.ps1 b/legacy.ps1', '--- a/legacy.ps1', '+++ b/legacy.ps1', $Hunk, '-0', '+1')
+        }
+        function script:InD168 {
+            param([scriptblock]$Do)
+            Push-Location $script:d168
+            try { return & $Do }
+            finally { Pop-Location }
+        }
+    }
+
+    It 'passes an edit to a clean function in a file whose other function breaches' {
+        InD168 { Test-PSComplexity -Path . @script:d168Ceil -ChangedFile @('legacy.ps1') } | Should-BeFalse
+        InD168 { Test-PSComplexity -Path . @script:d168Ceil -ChangedDiff (LegacyDiff '@@ -5 +5 @@') } | Should-BeTrue
+    }
+
+    It 'fails an edit to the function that breaches' {
+        InD168 { Test-PSComplexity -Path . @script:d168Ceil -ChangedDiff (LegacyDiff '@@ -2 +2 @@') } | Should-BeFalse
+    }
+
+    It 'says out loud that it gated the changed lines only' {
+        $warnings = @()
+        Push-Location $script:d168
+        try { Test-PSComplexity -Path . -NoConfig -ChangedDiff (LegacyDiff '@@ -5 +5 @@') -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null }
+        finally { Pop-Location }
+        (@($warnings) -join ' ') | Should-BeLikeString '*Gated 1 unit(s) owning lines changed in 1 file(s)*'
+    }
+
+    It 'still judges an acceptance for an untouched unit in a changed file' {
+        # Old is untouched and still over the ceilings, so its acceptance holds; a unit that is not
+        # there at all is refused, as in a whole-tree run.
+        InD168 { Test-PSComplexity -Path . @script:d168Ceil -ChangedDiff (LegacyDiff '@@ -5 +5 @@') `
+                -Accept @(@{ File = 'legacy.ps1'; Unit = 'Old'; Reason = 'legacy' }) } | Should-BeTrue
+        { InD168 { Test-PSComplexity -Path . @script:d168Ceil -ChangedDiff (LegacyDiff '@@ -5 +5 @@') `
+                    -Accept @(@{ File = 'legacy.ps1'; Unit = 'Ghost'; Reason = 'x' }) } } |
+            Should-Throw -ExceptionMessage '*Ghost is accepted but no such unit was measured*'
+    }
+
+    It 'still judges a baseline entry for an untouched unit in a changed file' {
+        $bl = Join-Path $script:d168 "bl-$([System.Guid]::NewGuid().ToString('N')).json"
+        InD168 { Test-PSComplexity -Path . @script:d168Ceil -BaselineFile $bl -UpdateBaseline } | Should-BeTrue
+        InD168 { Test-PSComplexity -Path . @script:d168Ceil -ChangedDiff (LegacyDiff '@@ -2 +2 @@') -BaselineFile $bl } | Should-BeTrue
+        { InD168 { Test-PSComplexity -Path . @script:d168Ceil -ChangedDiff (LegacyDiff '@@ -2 +2 @@') -BaselineFile $bl -UpdateBaseline } } |
+            Should-Throw -ExceptionMessage '-UpdateBaseline cannot be combined*'
+    }
+
+    It 'measures only the units owning a changed line, on both routes' {
+        $rp = Join-Path $script:d168 'diff-report.json'
+        $streamed = @(InD168 { Measure-PSComplexity -Path . -ChangedDiff (LegacyDiff '@@ -5 +5 @@') })
+        $reported = @(InD168 { Measure-PSComplexity -Path . -ChangedDiff (LegacyDiff '@@ -5 +5 @@') -ReportPath $rp })
+        @($streamed.Unit) | Should-BeCollection @('New')
+        @($reported.Unit) | Should-BeCollection @('New')
+        (Get-Content -LiteralPath $rp -Raw | ConvertFrom-Json).scope.changedLines.'legacy.ps1'[0].start | Should-Be 5
+    }
+
+    It 'refuses <Why>, on both commands' -ForEach @(
+        @{ Why = 'an empty diff'; Extra = @{ ChangedDiff = @() }; Like = '-ChangedDiff was given an empty diff*' }
+        @{ Why = 'a list of file names'; Extra = @{ ChangedDiff = @('legacy.ps1') }; Like = '*not a unified diff*' }
+        @{ Why = '-ChangedFile beside it'; Extra = @{ ChangedDiff = @('--- a/legacy.ps1', '+++ b/legacy.ps1'); ChangedFile = @('legacy.ps1') }; Like = '-ChangedFile and -ChangedDiff cannot be combined*' }
+        @{ Why = 'a PowerShell file that is not there'; Extra = @{ ChangedDiff = @('--- a/gone.ps1', '+++ b/gone.ps1') }; Like = '-ChangedDiff names 1 PowerShell file(s)*gone.ps1*' }
+    ) {
+        $extra = $Extra
+        { InD168 { Test-PSComplexity -Path . -NoConfig @extra } } | Should-Throw -ExceptionMessage $Like
+        { InD168 { Measure-PSComplexity -Path . @extra } } | Should-Throw -ExceptionMessage $Like
+        { InD168 { Measure-PSComplexity -Path . @extra -ReportPath (Join-Path $script:d168 'never.json') } } | Should-Throw -ExceptionMessage $Like
+    }
+
+    It 'passes a diff that changes no PowerShell' {
+        InD168 { Test-PSComplexity -Path . @script:d168Ceil -ChangedDiff @('--- a/notes.md', '+++ b/notes.md', '@@ -1 +1 @@', '-a', '+b') } | Should-BeTrue
+    }
+}
+
 Describe 'a path the gate cannot read is refused, not skipped' {
     # The failure this whole module exists to name, aimed inward. Get-PSCxEmptyScanFault counts
     # UNITS, so it can only see a run that measured nothing at all -- and a single valid path

@@ -562,7 +562,7 @@ function Test-PSCxAssignable {
 
 function Get-PSCxUnitSpan {
     # Every unit except the script body, with the offsets its text starts and ends at: unit key ->
-    # [pscustomobject]@{ Start; End; StartLine }. The ONE enumeration of units -- Get-PSCxUnitTable
+    # [pscustomobject]@{ Start; End; StartLine; EndLine }. The ONE enumeration of units -- Get-PSCxUnitTable
     # is derived from it -- so the units a line count is attributed to and the units that are
     # scored cannot disagree about which units exist.
     [OutputType([hashtable])]
@@ -585,6 +585,7 @@ function Get-PSCxUnitSpan {
             $unit = Resolve-PSCxUnitBoundary -Boundary $node
             $spans[(Get-PSCxUnitName -Boundary $unit)] = [pscustomobject]@{
                 Start = $unit.Extent.StartOffset; End = $unit.Extent.EndOffset; StartLine = $unit.Extent.StartLineNumber
+                EndLine = $unit.Extent.EndLineNumber
             }
         }
     }
