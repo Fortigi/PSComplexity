@@ -1716,6 +1716,52 @@ Describe 'the gate, measuring only what changed' {
     }
 }
 
+Describe 'the gate, measuring only what changed, with a policy (#203)' {
+    # A baseline or an acceptance for a file the run never read cannot be judged either way, and
+    # refusing it made any repository with one unable to gate a pull request on what it changed.
+
+    BeforeAll {
+        # A tree of its own: the shared one gathers files from other tests.
+        $script:p203 = Join-Path $script:work "policy-203-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:p203 -Force | Out-Null
+        $script:p203A = Join-Path $script:p203 'a.ps1'
+        Set-Content -LiteralPath $script:p203A "function Get-A { 1 }" -Encoding utf8
+        Set-Content -LiteralPath (Join-Path $script:p203 'b.ps1') "function Get-B { param(`$y) foreach (`$i in `$y) { if (`$i) { 1 } } }" -Encoding utf8
+        # Get-B breaches these ceilings; Get-A does not.
+        $script:p203B = @(Measure-PSComplexity -Path $script:p203 | Where-Object Unit -EQ 'Get-B')[0]
+        $script:p203Ceil = @{ MaxCyclomatic = 2; MaxCognitive = 1; NoConfig = $true; WarningAction = 'SilentlyContinue' }
+        $script:p203Accept = @{ File = $script:p203B.File; Unit = 'Get-B'; Reason = 'a fixture' }
+    }
+
+    It 'leaves out an acceptance for a file it did not read, and still applies it to a whole-tree run' {
+        Test-PSComplexity -Path $script:p203 @script:p203Ceil -ChangedFile @($script:p203A) `
+            -Accept @($script:p203Accept) | Should-BeTrue
+        Test-PSComplexity -Path $script:p203 @script:p203Ceil -Accept @($script:p203Accept) | Should-BeTrue
+    }
+
+    It 'still refuses an acceptance for a unit missing from a file it did read' {
+        { Test-PSComplexity -Path $script:p203 @script:p203Ceil -ChangedFile @($script:p203A) `
+                -Accept @(@{ File = (@(Measure-PSComplexity -Path $script:p203A)[0].File); Unit = 'Ghost'; Reason = 'x' }) } |
+            Should-Throw -ExceptionMessage '*Ghost is accepted but no such unit was measured*'
+    }
+
+    It 'leaves out a baseline entry for a file it did not read, and keeps the file intact' {
+        $bl = Join-Path $script:p203 "bl203-$([System.Guid]::NewGuid().ToString('N')).json"
+        Test-PSComplexity -Path $script:p203 @script:p203Ceil -BaselineFile $bl -UpdateBaseline | Should-BeTrue
+        $before = Get-Content -LiteralPath $bl -Raw
+        Test-PSComplexity -Path $script:p203 @script:p203Ceil -ChangedFile @($script:p203A) -BaselineFile $bl | Should-BeTrue
+        Test-PSComplexity -Path $script:p203 @script:p203Ceil -BaselineFile $bl | Should-BeTrue
+        Get-Content -LiteralPath $bl -Raw | Should-Be $before
+    }
+
+    It 'refuses to update a baseline from a run over the changed files' {
+        $bl = Join-Path $script:p203 "bl203u-$([System.Guid]::NewGuid().ToString('N')).json"
+        { Test-PSComplexity -Path $script:p203 @script:p203Ceil -ChangedFile @($script:p203A) -BaselineFile $bl -UpdateBaseline } |
+            Should-Throw -ExceptionMessage '-UpdateBaseline cannot be combined with -ChangedFile*'
+        Test-Path -LiteralPath $bl | Should-BeFalse
+    }
+}
+
 Describe 'a path the gate cannot read is refused, not skipped' {
     # The failure this whole module exists to name, aimed inward. Get-PSCxEmptyScanFault counts
     # UNITS, so it can only see a run that measured nothing at all -- and a single valid path

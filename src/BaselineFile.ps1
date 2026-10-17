@@ -31,7 +31,9 @@ function Get-PSCxBaselineState {
         [Parameter(Mandatory)] [int]$MetricVersion,
         [Parameter(Mandatory)] [System.StringComparison]$PathComparison,
         # File -> ceilings, for the files a per-path override reaches (#164). Empty: the run's ceilings.
-        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{}
+        [AllowEmptyCollection()] [hashtable]$FileCeiling = @{},
+        # A run filtered to changed files checks only the entries for files it read (#203).
+        [bool]$Filtered = $false
     )
     if (-not $Path) { return @{} }
     $document = Read-PSCxDocument -Path $Path
@@ -39,7 +41,7 @@ function Get-PSCxBaselineState {
         -MetricVersion $MetricVersion -SchemaVersion (Get-PSCxBaselineSchemaVersion)
     if ($documentFault) { throw "Cannot use the baseline $Path : $documentFault." }
 
-    $entries = @($document.units)
+    $entries = @(Select-PSCxScopedEntry -Entry @($document.units) -Unit $Unit -Filtered $Filtered -PathComparison $PathComparison)
     # Thrown, not returned as a failing gate. A baseline entry that no longer describes the run
     # is a fault in the policy rather than a complaint about the code, and reporting it as a
     # failure would send somebody to refactor a unit that is fine.

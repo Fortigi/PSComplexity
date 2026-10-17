@@ -77,6 +77,37 @@ function Get-PSCxPolicyLookup {
     return $lookup
 }
 
+function Select-PSCxScopedEntry {
+    # The acceptances or baseline entries this run can check: all of them for a whole-tree run,
+    # and for a run filtered to changed files only those naming a file it read (#203).
+    #
+    # An entry for a file the run never read cannot be judged either way -- not stale, not holding
+    # -- and refusing it as "no such unit was measured" made a repository with a baseline or one
+    # acceptance unable to gate a pull request at all. An entry for a file it DID read is still
+    # checked in full, so a unit renamed away inside a changed file still fails the run.
+    #
+    # Whole-tree runs keep the refusal. There the caller chose the paths, and an entry outside them
+    # is as likely a mistyped path as a deliberate one.
+    #
+    # Unrolled on the way out; every caller wraps the call in @(). Both types declared, because the
+    # analyzer reads the whole-tree arm as returning the array itself.
+    [OutputType([object], [object[]])]
+    [CmdletBinding()]
+    param(
+        # Acceptances (File) or baseline entries (file): PowerShell reads either spelling.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Entry,
+        # The measured units. Every file read yields at least its script body, so their files are
+        # exactly the files read.
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Unit,
+        [Parameter(Mandatory)] [bool]$Filtered,
+        [Parameter(Mandatory)] [System.StringComparison]$PathComparison
+    )
+    if (-not $Filtered) { return $Entry }
+    $read = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::FromComparison($PathComparison))
+    foreach ($u in $Unit) { [void]$read.Add([string]$u.File) }
+    return $Entry | Where-Object { $read.Contains([string]$_.File) }
+}
+
 function Get-PSCxUnitCeiling {
     # The ceilings units in one file face: a per-path override's (#164), or the run's.
     #
