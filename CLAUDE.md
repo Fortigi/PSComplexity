@@ -67,10 +67,11 @@ id. Reads of `$env:` are fine and common; the scan tells a read from a write by 
 text. The order-independence gate does not cover this: it sees a variable a test leaks, not one
 written and restored, which is still a race between workers.
 
-**If a leg goes inexplicably red straight after a local self-mutation run, suspect the installed
-Pester before the code.** A PSMutant run here once left Pester unable to run a trivial `1 + 1`
-test until it was reinstalled (PR #114). The bug is PSMutant's, open as Fortigi/PSMutant#156;
-remove this note when that closes.
+**If every test fails with no error record -- even one with no assertion in it -- suspect the
+installed Pester before the code.** It happened here once (PR #114) and a reinstall of that one
+version fixed it. It was blamed on PSMutant at the time; Fortigi/PSMutant#156 reproduced it in a
+fresh process that never loaded PSMutant, so it was a damaged install, and PSMutant's own red
+baseline now says to reinstall when no failing test carried an error.
 
 `Push-Location` is fine, checked rather than assumed: a location is per-runspace, and a child
 setting its own leaves both `$PWD` and `[Environment]::CurrentDirectory` alone in the parent.
