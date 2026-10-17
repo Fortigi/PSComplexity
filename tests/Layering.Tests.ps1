@@ -77,6 +77,16 @@ BeforeAll {
         'Markdown.ps1 -> Policy.ps1'
         'Markdown.ps1 -> Report.ps1'
         'Measure-PSComplexity.ps1 -> Markdown.ps1'
+
+        # The editor rule (#163) is a second composition root beside the commands: it reaches what
+        # the gate reaches -- the scan, the config, the policy and the baseline file -- to give one
+        # file the gate's verdict, and nothing reaches it but rules/PSComplexity.Rules.psm1.
+        'AnalyzerRule.ps1 -> Ast.ps1'
+        'AnalyzerRule.ps1 -> Config.ps1'
+        'AnalyzerRule.ps1 -> ConfigFile.ps1'
+        'AnalyzerRule.ps1 -> Policy.ps1'
+        'AnalyzerRule.ps1 -> Report.ps1'
+        'AnalyzerRule.ps1 -> Scan.ps1'
     )
 
     function Get-SrcAst {

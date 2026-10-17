@@ -54,6 +54,14 @@ is not a diff, a PowerShell file the diff names that is not there, and `-Changed
 refused. Acceptances and baseline entries are still checked against every unit of the changed files.
 The JSON report records the hunks as `scope.changedLines`.
 
+**A PSScriptAnalyzer rule, for warnings in the editor.** The package now ships
+`rules/PSComplexity.Rules.psm1`; point PSScriptAnalyzer's `CustomRulePath` at it and VS Code marks
+each unit over its ceiling as you type. It uses the module's own scoring and the gate's verdict --
+the `.pscomplexity.json` the file sits under or 15 and 15, per-path ceilings, excludes, acceptances
+in the config and in the code, and the config's baseline -- so the editor and the gate cannot
+disagree. It measures the editor's text, gives an unsaved buffer the defaults, warns on the first
+line of the unit's declaration, and never refuses: stale policy stays the gate's to report.
+
 ### Fixed
 
 **A run over the changed files no longer refuses policy for the files it did not read (#203).** With
