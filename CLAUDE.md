@@ -428,6 +428,14 @@ Two subtleties worth knowing before touching `Ast.ps1`:
   in the same edit. `tools/Test-PSCxRelease.ps1` checks the three agree -- `ModuleVersion`, the
   CHANGELOG heading and `ReleaseNotes` -- which is CONSISTENCY, not completeness: an entry
   nobody wrote is not something it can miss.
+
+  **`ReleaseNotes` is a list of headlines, not the entries.** The gallery prints it as plain
+  text -- line breaks kept, no Markdown -- and the whole consumer block arrived there as literal
+  `**` and backticks broken mid-sentence. So it holds each `### For consumers` entry's bold
+  opening sentence, one line apiece, and a link to the GitHub release, whose body
+  `publish.yml` takes from the same CHANGELOG section where GitHub renders it. An entry is a
+  paragraph that OPENS bold; the gate refuses a block that does not, because its first entry
+  would vanish from the list. `-Apply` regenerates it.
 - **Unless the change ships nothing, in which case it takes neither a bump nor a CHANGELOG
   entry.** `publish.yml` stages `PSComplexity.psd1`, `PSComplexity.psm1`, `src`, `schemas`, `rules`,
   `LICENSE` and `README.md`. A branch touching only `.github/`, `tools/`, `tests/`, a config

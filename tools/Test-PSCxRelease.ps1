@@ -34,20 +34,24 @@ $manifest = Import-PowerShellDataFile -LiteralPath $ManifestPath
 $moduleVersion = [string]$manifest.ModuleVersion
 $actual = [string]$manifest.PrivateData.PSData.ReleaseNotes
 
-# Derived from ProjectUri rather than written out, so the repository is named in one place
-# and a fork does not publish a link back to this one.
-$projectUri = [string]$manifest.PrivateData.PSData.ProjectUri
-$detailUrl = if ($projectUri) { "$($projectUri.TrimEnd('/'))/blob/main/CHANGELOG.md" } else { '' }
-
 $changelogVersion = Get-PSCxNewestVersion -Lines $lines
 $notes = if ($changelogVersion) { Get-PSCxConsumerNotes -Lines $lines -Version $changelogVersion } else { $null }
+
+# The GitHub release for the version, which publish.yml creates from the same CHANGELOG section
+# once the gallery accepts it. Derived from ProjectUri rather than written out, so the repository
+# is named in one place and a fork does not publish a link back to this one.
+$projectUri = [string]$manifest.PrivateData.PSData.ProjectUri
+$releaseUrl = if ($projectUri -and $changelogVersion) { "$($projectUri.TrimEnd('/'))/releases/tag/v$changelogVersion" } else { '' }
 
 if ($Apply) {
     if (-not $changelogVersion) { throw 'Cannot apply: CHANGELOG.md has no released version heading.' }
     if ([string]::IsNullOrWhiteSpace($notes)) {
         throw "Cannot apply: CHANGELOG.md has no '### For consumers' block under [$changelogVersion]."
     }
-    $expected = Get-PSCxExpectedReleaseNotes -Version $changelogVersion -Notes $notes -DetailUrl $detailUrl
+    if (-not $notes.StartsWith('**')) {
+        throw "Cannot apply: the '### For consumers' block under [$changelogVersion] does not open with a bold sentence, and the gallery lists only those."
+    }
+    $expected = Get-PSCxExpectedReleaseNotes -Version $changelogVersion -Notes $notes -ReleaseUrl $releaseUrl
     $text = Get-Content -LiteralPath $ManifestPath -Raw
     Get-PSCxRewrittenManifest -ManifestText $text -Notes $expected |
         Set-Content -LiteralPath $ManifestPath -NoNewline -Encoding utf8
@@ -59,7 +63,7 @@ if ($Apply) {
 
 $faults = [System.Collections.Generic.List[string]]::new()
 $faults.AddRange([string[]]@(Get-PSCxReleaseFault -ModuleVersion $moduleVersion -ChangelogVersion $changelogVersion `
-        -ConsumerNotes $notes -ActualNotes $actual -DetailUrl $detailUrl))
+        -ConsumerNotes $notes -ActualNotes $actual -ReleaseUrl $releaseUrl))
 
 if ($CheckGallery) {
     # Reachability FIRST, and separately. Find-Module returns nothing both when a version was

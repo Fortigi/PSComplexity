@@ -39,9 +39,11 @@ Describe 'Get-PSCxNewestVersion' {
 }
 
 Describe 'Get-PSCxConsumerNotes' {
-    It 'collects the block as one line' {
+    It 'collects the block with its lines intact' {
+        # Not collapsed to one line: the blank line between two entries is how the headlines
+        # are found.
         Get-PSCxConsumerNotes -Lines $script:Changelog -Version '1.2.3' |
-            Should-Be 'A thing changed. It changed for a reason.'
+            Should-Be "A thing changed.`nIt changed for a reason."
     }
     It 'stops at the next ### heading, so internal entries never reach the gallery' {
         # The paired half of the test above: if the block ran on, the Fixed bullet would
@@ -56,6 +58,41 @@ Describe 'Get-PSCxConsumerNotes' {
     It 'returns null when the version has no For consumers block' {
         $lines = @('## [9.9.9] - 2026-01-01', '### Fixed', '- something')
         Get-PSCxConsumerNotes -Lines $lines -Version '9.9.9' | Should-BeNull
+    }
+}
+
+Describe 'Get-PSCxReleaseHeadline' {
+    It 'takes the bold opening of each entry, as plain text' {
+        $notes = @(
+            '**`-Detailed` reports lines', 'of code.** Then the detail, with **emphasis** inside.'
+            ''
+            'A second paragraph of the same entry, which is not a headline.'
+            '   '
+            '**A [linked](https://x/y) thing.** More.'
+        ) -join "`n"
+        Get-PSCxReleaseHeadline -Notes $notes | Should-BeCollection @('-Detailed reports lines of code.', 'A linked thing.')
+    }
+    It 'reads a block checked out with CRLF line endings the same way' {
+        Get-PSCxReleaseHeadline -Notes "**One.** a`r`n`r`n**Two.** b" | Should-BeCollection @('One.', 'Two.')
+    }
+    It 'returns an empty list for a block with no bold opening' {
+        @(Get-PSCxReleaseHeadline -Notes "plain`n`ntext").Count | Should-Be 0
+    }
+}
+
+Describe 'Get-PSCxReleaseSection' {
+    It 'takes every block under the version, up to the next version' {
+        Get-PSCxReleaseSection -Lines $script:Changelog -Version '1.2.3' |
+            Should-Be "### For consumers`n`nA thing changed.`nIt changed for a reason.`n`n### Fixed`n- an internal detail nobody outside needs"
+    }
+    It 'runs to the end of the file for the oldest version' {
+        Get-PSCxReleaseSection -Lines $script:Changelog -Version '1.2.2' | Should-Be "### For consumers`nThe previous release."
+    }
+    It 'returns null when the version has no heading' {
+        Get-PSCxReleaseSection -Lines $script:Changelog -Version '9.9.9' | Should-BeNull
+    }
+    It 'matches the version exactly, not as a pattern' {
+        Get-PSCxReleaseSection -Lines @('## [1x2x3] - d', 'wrong', '## [1.2.3] - d', 'right') -Version '1.2.3' | Should-Be 'right'
     }
 }
 
@@ -80,6 +117,12 @@ Describe 'the real CHANGELOG, as the gallery will see it' {
         ($refs -join ', ') | Should-Be ''
     }
 
+    It 'gives the gallery a headline for every entry, with no Markdown left in it' {
+        $h = @(Get-PSCxReleaseHeadline -Notes $script:RealConsumer)
+        $h.Count | Should-Be @([regex]::Matches($script:RealConsumer, '(?m)^\*\*')).Count
+        ($h -join ' ') | Should-NotMatchString '[*`]'
+    }
+
     It 'would catch one, so the check above is not vacuous' {
         $planted = 'A fix (#159). And `Get-Thing#1` is code.'
         @([regex]::Matches($planted, '(?<![\w`])#\d+') | ForEach-Object Value) -join ',' | Should-Be '#159'
@@ -87,15 +130,15 @@ Describe 'the real CHANGELOG, as the gallery will see it' {
 }
 
 Describe 'Get-PSCxExpectedReleaseNotes' {
-    It 'prefixes the version and appends the link' {
-        Get-PSCxExpectedReleaseNotes -Version '1.2.3' -Notes 'A thing.' -DetailUrl 'https://x/CHANGELOG.md' |
-            Should-Be '1.2.3: A thing. Full changelog: https://x/CHANGELOG.md'
+    It 'names the release, lists the headlines and appends the link' {
+        Get-PSCxExpectedReleaseNotes -Version '1.2.3' -Notes "**A thing.** Why.`n`n**Another.** How." -ReleaseUrl 'https://x/releases/tag/v1.2.3' |
+            Should-Be "PSComplexity 1.2.3`n`n- A thing.`n- Another.`n`nFull release notes: https://x/releases/tag/v1.2.3"
     }
     It 'omits the link entirely when there is no url' {
         # Paired with the case above: appending an empty url would publish a dangling
-        # "Full changelog:" with nothing after it.
-        Get-PSCxExpectedReleaseNotes -Version '1.2.3' -Notes 'A thing.' -DetailUrl '' |
-            Should-Be '1.2.3: A thing.'
+        # "Full release notes:" with nothing after it.
+        Get-PSCxExpectedReleaseNotes -Version '1.2.3' -Notes '**A thing.** Why.' -ReleaseUrl '' |
+            Should-Be "PSComplexity 1.2.3`n`n- A thing."
     }
 }
 
@@ -151,7 +194,7 @@ Describe 'Get-PSCxReleaseFault' {
     BeforeAll {
         $script:Good = @{
             ModuleVersion = '1.2.3'; ChangelogVersion = '1.2.3'
-            ConsumerNotes = 'A thing changed.'; ActualNotes = '1.2.3: A thing changed.'; DetailUrl = ''
+            ConsumerNotes = '**A thing changed.** Why.'; ActualNotes = "PSComplexity 1.2.3`n`n- A thing changed."; ReleaseUrl = ''
         }
     }
     It 'reports nothing when all three agree' {
@@ -167,8 +210,18 @@ Describe 'Get-PSCxReleaseFault' {
     }
     It 'catches notes that drifted from the changelog' {
         # The exact failure this gate exists for: the two were edited separately.
-        $a = $script:Good.Clone(); $a.ActualNotes = '1.2.3: Something else entirely.'
+        $a = $script:Good.Clone(); $a.ActualNotes = "PSComplexity 1.2.3`n`n- Something else entirely."
         (@(Get-PSCxReleaseFault @a) -join ' ') | Should-BeLikeString '*do not match the CHANGELOG*'
+    }
+    It 'accepts notes checked out with CRLF line endings' {
+        $a = $script:Good.Clone(); $a.ActualNotes = "PSComplexity 1.2.3`r`n`r`n- A thing changed."
+        @(Get-PSCxReleaseFault @a).Count | Should-Be 0
+    }
+    It 'refuses a block that does not open with a bold sentence, which the gallery list would drop' {
+        $a = $script:Good.Clone(); $a.ConsumerNotes = "A thing changed.`n`n**Another.** b"
+        $f = @(Get-PSCxReleaseFault @a)
+        $f.Count | Should-Be 1
+        $f[0] | Should-BeLikeString '*does not open with a bold sentence*'
     }
     It 'refuses a changelog with no released version, and says so first' {
         $a = $script:Good.Clone(); $a.ChangelogVersion = $null
