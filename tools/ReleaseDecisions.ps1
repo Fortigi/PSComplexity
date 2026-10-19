@@ -18,7 +18,7 @@ function Get-PSCxNewestVersion {
 }
 
 function Get-PSCxConsumerNotes {
-    # The `### For consumers` block under a given version heading, as one line.
+    # The `### For consumers` block under a given version heading, its paragraphs intact.
     #
     # Returns $null when the version has no such block, so the caller can refuse rather than
     # publish an empty field. A gate that treats "absent" as "nothing to check" is the shape
@@ -52,23 +52,62 @@ function Get-PSCxConsumerNotes {
     }
     if (-not $inBlock -and $body.Count -eq 0) { return $null }
 
-    # Collapse to one line: the manifest field is a single string, and a newline in it does
-    # not survive being read back off the gallery page.
+    # Kept as lines, not collapsed to one: the blank line between two entries is what
+    # Get-PSCxReleaseHeadline splits on, and a single line has no entries left to find.
+    return ($body -join "`n").Trim()
+}
+
+function Get-PSCxReleaseHeadline {
+    # Pure: the bold opening sentence of each entry in a consumer block, as plain text.
     #
-    # It also keeps the release gate platform-independent, which is not obvious and is worth
-    # knowing before someone preserves the newlines here. Git rewrites line endings inside a
-    # stored string on checkout, so a multi-line value reads LF on a Linux runner and CRLF on
-    # a Windows one and an exact comparison then reports on the checkout rather than the
-    # release. That bit another repository -- CI green, gate red on every maintainer machine.
-    # .gitattributes pins eol=lf so the cause is gone either way.
-    $text = ($body -join ' ') -replace '\s+', ' '
-    return $text.Trim()
+    # The gallery prints ReleaseNotes as text -- it keeps line breaks and renders no Markdown --
+    # so the whole block arrived there as literal ** and backticks, broken mid-sentence where the
+    # changelog wraps. Every entry opens with one bold sentence saying what changed, which is the
+    # list a reader deciding whether to upgrade wants; the rest is on the GitHub release.
+    #
+    # An entry is a paragraph that OPENS bold. A paragraph that does not is the previous entry
+    # continuing, and bold text later in a paragraph is emphasis, not a headline.
+    [OutputType([string[]])]
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string]$Notes)
+    $out = [System.Collections.Generic.List[string]]::new()
+    foreach ($paragraph in (($Notes -replace "`r`n", "`n") -split '\n[ \t]*\n')) {
+        $flat = ($paragraph -replace '\s+', ' ').Trim()
+        if ($flat -notmatch '^\*\*(.+?)\*\*') { continue }
+        # Plain text: a link keeps its words, code loses its backticks.
+        $out.Add(($Matches[1] -replace '\[([^\]]+)\]\([^)]*\)', '$1' -replace '`', '').Trim())
+    }
+    return $out.ToArray()
+}
+
+function Get-PSCxReleaseSection {
+    # Pure: everything under one version's heading, up to the next version heading, as Markdown.
+    # The GitHub release carries it, where it renders; $null when there is no such heading.
+    [OutputType([string])]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [AllowEmptyCollection()] [AllowEmptyString()] [string[]]$Lines,
+        [Parameter(Mandatory)] [string]$Version
+    )
+    $body = $null
+    foreach ($line in $Lines) {
+        if ($line -match '^##\s*\[') {
+            if ($null -ne $body) { break }
+            if ($line -match ('^##\s*\[' + [regex]::Escape($Version) + '\]')) {
+                $body = [System.Collections.Generic.List[string]]::new()
+            }
+            continue
+        }
+        if ($null -ne $body) { $body.Add($line) }
+    }
+    if ($null -eq $body) { return $null }
+    return ($body -join "`n").Trim()
 }
 
 function Get-PSCxExpectedReleaseNotes {
-    # What the manifest's ReleaseNotes must contain, derived from the changelog. Prefixed
-    # with the version so a reader of the gallery page knows which release they are looking
-    # at without cross-referencing.
+    # What the manifest's ReleaseNotes must contain, derived from the changelog: the module and
+    # version, so a reader of the gallery page knows which release they are looking at, then one
+    # line per entry -- its headline -- and a link to the GitHub release, which has the rest.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '',
         Justification = 'ReleaseNotes is the name of the manifest field this produces. A singular "ReleaseNote" would name something that does not exist.')]
     [OutputType([string])]
@@ -76,15 +115,17 @@ function Get-PSCxExpectedReleaseNotes {
     param(
         [Parameter(Mandatory)] [string]$Version,
         [Parameter(Mandatory)] [string]$Notes,
-        [AllowEmptyString()] [string]$DetailUrl
+        [AllowEmptyString()] [string]$ReleaseUrl
     )
-    $text = "${Version}: $Notes"
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.AddRange([string[]]@("PSComplexity $Version", ''))
+    foreach ($headline in (Get-PSCxReleaseHeadline -Notes $Notes)) { $lines.Add("- $headline") }
 
     # A link, because this field is read where a browser may not be -- `Find-Module | Select
     # ReleaseNotes` in a console -- and the summary has to stand alone there while still
     # leading somewhere complete. Appended rather than substituted for that reason.
-    if (-not [string]::IsNullOrWhiteSpace($DetailUrl)) { $text += " Full changelog: $DetailUrl" }
-    return $text
+    if (-not [string]::IsNullOrWhiteSpace($ReleaseUrl)) { $lines.AddRange([string[]]@('', "Full release notes: $ReleaseUrl")) }
+    return $lines -join "`n"
 }
 
 function Get-PSCxReleaseFault {
@@ -100,7 +141,7 @@ function Get-PSCxReleaseFault {
         [AllowNull()] [string]$ChangelogVersion,
         [AllowNull()] [string]$ConsumerNotes,
         [AllowNull()] [string]$ActualNotes,
-        [AllowEmptyString()] [string]$DetailUrl
+        [AllowEmptyString()] [string]$ReleaseUrl
     )
     $faults = [System.Collections.Generic.List[string]]::new()
 
@@ -119,8 +160,18 @@ function Get-PSCxReleaseFault {
         return $faults.ToArray()
     }
 
-    $expected = Get-PSCxExpectedReleaseNotes -Version $ChangelogVersion -Notes $ConsumerNotes -DetailUrl $DetailUrl
-    if ($ActualNotes -ne $expected) {
+    # The gallery list is built from the entries' headlines, so an opening paragraph without one
+    # would be left out of it silently.
+    if (-not $ConsumerNotes.TrimStart().StartsWith('**')) {
+        $faults.Add("The '### For consumers' block under [$ChangelogVersion] does not open with a bold sentence. " +
+            'Each entry opens with one, saying what changed: the gallery lists those sentences and nothing else.')
+        return $faults.ToArray()
+    }
+
+    $expected = Get-PSCxExpectedReleaseNotes -Version $ChangelogVersion -Notes $ConsumerNotes -ReleaseUrl $ReleaseUrl
+    # Line endings normalised: the value spans lines now, and how git checks it out is not the
+    # release's business. .gitattributes pins eol=lf as well.
+    if (($ActualNotes -replace "`r`n", "`n") -ne $expected) {
         $faults.Add('The manifest ReleaseNotes do not match the CHANGELOG. Run ' +
             './tools/Test-PSCxRelease.ps1 -Apply to regenerate them from the changelog, which is the source.')
     }
