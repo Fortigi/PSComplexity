@@ -175,6 +175,11 @@ Describe 'the lists in a config' {
         $f | Should-BeCollection @("overrides[1] names 'tests' again -- one override per path")
     }
 
+    It 'names a nested override path with forward slashes when it is given twice' {
+        $f = @(Fault '{"schemaVersion": 1, "overrides": [{"path": "src/deep", "maxCyclomatic": 3}, {"path": "./src//deep/", "maxCognitive": 3}]}')
+        $f | Should-BeCollection @("overrides[1] names 'src/deep' again -- one override per path")
+    }
+
     It 'compares override paths as the file system compares names' {
         $json = '{"schemaVersion": 1, "overrides": [{"path": "tests", "maxCyclomatic": 3}, {"path": "Tests", "maxCognitive": 3}]}'
         (Fault $json -Cmp Ordinal).Count | Should-Be 0
@@ -282,6 +287,11 @@ Describe 'a resolved config' {
         $c = Get-PSCxConfigPolicy -Document (Doc '{"schemaVersion": 1, "overrides": [{"path": "t", "maxCyclomatic": 7}]}') -Path $script:ConfigPath -Root $script:Root -PathComparison $script:PathCmp
         $c.Overrides[0].MaxCyclomatic | Should-Be 7
         $c.Overrides[0].MaxCognitive | Should-BeNull
+    }
+
+    It 'keeps a nested override path as one forward-slashed string' {
+        $c = Get-PSCxConfigPolicy -Document (Doc '{"schemaVersion": 1, "overrides": [{"path": "./src//deep/", "maxCyclomatic": 7}]}') -Path $script:ConfigPath -Root $script:Root -PathComparison $script:PathCmp
+        $c.Overrides[0].Path | Should-Be 'src/deep'
     }
 
     It 'joins a path onto a directory with this platform separator' {

@@ -569,6 +569,15 @@ Describe 'Test-PSComplexity' {
         { Test-PSComplexity -Path $script:broken -Recurse } |
             Should-Throw -ExceptionMessage '*Fix the fault named*'
     }
+    It 'names every file it could not measure, one apart from the next' {
+        $two = Join-Path $TestDrive 'two-broken'
+        New-Item -ItemType Directory -Path $two -Force | Out-Null
+        Set-Content (Join-Path $two 'a.ps1') 'function Oops { param(' -Encoding utf8
+        Set-Content (Join-Path $two 'b.ps1') 'function Oops { param(' -Encoding utf8
+        { Test-PSComplexity -Path $two } |
+            Should-Throw -ExceptionMessage '*2 file(s) it could not measure: *a.ps1 -- *; *b.ps1 -- *Fix the fault named*'
+    }
+
     It 'throws rather than passing when it measured nothing' {
         # A directory with no PowerShell in it. Returning $true here is the same answer
         # the gate gives for code that is entirely within its ceilings, so a gate aimed
@@ -1069,6 +1078,16 @@ function Get-Cool { param($x) $x }
         { Test-PSComplexity -Path $script:accPath -MaxCyclomatic 1 -MaxCognitive 1 -Accept $ghost `
                 -WarningAction SilentlyContinue } |
             Should-Throw -ExceptionMessage '*no such unit was measured*ageing quietly*'
+    }
+
+    It 'names every stale acceptance, one apart from the next' {
+        $ghosts = @(
+            @{ File = $script:accFile; Unit = 'Invoke-Ghost'; Reason = 'r' }
+            @{ File = $script:accFile; Unit = 'Invoke-Phantom'; Reason = 'r' }
+        )
+        { Test-PSComplexity -Path $script:accPath -MaxCyclomatic 1 -MaxCognitive 1 -Accept $ghosts `
+                -WarningAction SilentlyContinue } |
+            Should-Throw -ExceptionMessage '*Invoke-Ghost is accepted*being gated; *Invoke-Phantom is accepted*ageing quietly*'
     }
 
     It 'throws when the accepted unit is back within both ceilings' {
