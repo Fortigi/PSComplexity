@@ -75,7 +75,7 @@
   },
   "_coveredLinesOnly_comment": "OFF, and safe to be off only because coverage is gated at 100% (tools/Measure-PSCxCoverage.ps1). With every command covered, the only lines the tracer cannot see are the ones no command spans -- parameter declarations -- so this adds exactly those mutants and no guaranteed survivors: 564 candidates where coveredLinesOnly gave 560. Left on, they were skipped in silence, and a param() default could move with nothing in the gate noticing. If coverage ever drops below 100%, this has to come back on first, or every uncovered mutant becomes a survivor.",
   "coveredLinesOnly": false,
-  "_operators_comment": "The three opt-in operators PSMutant itself runs. Without them the gate sees only expressions, so structural logic -- a guard, an early return, a fencepost -- scores a vacuous 100%. StringLiteral stays off: high volume, low signal.",
+  "_operators_comment": "Every opt-in operator except StringLiteral. ConditionForcing, ReturnValue and ConditionalBoundary are there because without them the gate sees only expressions, so structural logic -- a guard, an early return, a fencepost -- scores a vacuous 100%. The four from PSMutant 0.8.0 reach what BinaryOperator never touched: -eq against -ceq and -like (ComparisonOperator, CaseSensitivity), -band and -bor (BitwiseOperator), and -join, -split and -replace dropped outright (StringOperatorRemoval). Their first run's survivors, apart from the two equivalents declared below, were untested separators -- lists no test had given two items -- and #211 killed them before this switched them on. StringLiteral stays off: high volume, low signal.",
   "operators": [
     "BinaryOperator",
     "BooleanLiteral",
@@ -83,12 +83,18 @@
     "NegationRemoval",
     "ConditionalBoundary",
     "ConditionForcing",
-    "ReturnValue"
+    "ReturnValue",
+    "ComparisonOperator",
+    "CaseSensitivity",
+    "BitwiseOperator",
+    "StringOperatorRemoval"
   ],
-  "_equivalents_comment": "Position = 0 -> 1 on -Path, in both public commands. -Path is the only positional parameter in each, and PowerShell assigns positional arguments in sort order, so 0 and 1 bind identically: checked side by side, the positional and piped calls measured the same units and gave the same verdict, and Get-Command -Syntax printed the same line. Only reflection on the attribute could tell them apart. The Test-PSComplexity key uses a LINE because '0 -> 1' matches four mutants in that function and a declaration must match exactly one; PSMutant fails the run if the line moves and the key stops matching, so it cannot go stale in silence.",
+  "_equivalents_comment": "Position = 0 -> 1 on -Path, in both public commands. -Path is the only positional parameter in each, and PowerShell assigns positional arguments in sort order, so 0 and 1 bind identically: checked side by side, the positional and piped calls measured the same units and gave the same verdict, and Get-Command -Syntax printed the same line. Only reflection on the attribute could tell them apart. The Test-PSComplexity key uses a LINE because '0 -> 1' matches four mutants in that function and a declaration must match exactly one; PSMutant fails the run if the line moves and the key stops matching, so it cannot go stale in silence. The two StringOperatorRemoval declarations drop a -join whose result is consumed by something that joins or splits the same way anyway: in Get-PSCxUnifiedDiff the joined text is split again, and -split applied to an array splits each element and flattens, so the lines come out identical -- one string, many lines, or none; in Get-PSCxMarkdownDocument the joined scope goes into a [string[]] cast, which joins an inner array with $OFS, a single space, which is the separator the -join names.",
   "equivalents": {
     "src/Measure-PSComplexity.ps1:Measure-PSComplexity:0 -> 1": "-Path is the only positional parameter; Position 0 and 1 bind identically.",
-    "src/Measure-PSComplexity.ps1:505:0 -> 1": "-Path is the only positional parameter; Position 0 and 1 bind identically."
+    "src/Measure-PSComplexity.ps1:505:0 -> 1": "-Path is the only positional parameter; Position 0 and 1 bind identically.",
+    "src/Diff.ps1:Get-PSCxUnifiedDiff:$Text -join \"`n\" -> $Text": "The result is split on line breaks next, and -split on an array splits each element and flattens, so the lines are identical with or without the join.",
+    "src/Markdown.ps1:Get-PSCxMarkdownDocument:$scope -join ' ' -> $scope": "The result goes into a [string[]] cast, which joins an inner array with $OFS -- a single space, the separator this -join names."
   },
   "thresholds": {
     "high": 90,
