@@ -5,7 +5,7 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
-## [0.7.0] - 2026-10-16
+## [0.7.0] - 2026-10-19
 
 ### For consumers
 
