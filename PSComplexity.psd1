@@ -1,6 +1,6 @@
 @{
     RootModule           = 'PSComplexity.psm1'
-    ModuleVersion        = '0.7.0'
+    ModuleVersion        = '0.7.1'
     GUID                 = '961aa886-4f8e-40c0-9d25-68fd4c52e69f'
     Author               = 'Fortigi'
     CompanyName          = 'Fortigi'
@@ -19,16 +19,11 @@
             Tags         = @('complexity', 'cyclomatic', 'cognitive', 'code-quality', 'ast', 'metrics', 'maintainability', 'lint', 'ci')
             LicenseUri   = 'https://github.com/Fortigi/PSComplexity/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/Fortigi/PSComplexity'
-            ReleaseNotes = 'PSComplexity 0.7.0
+            ReleaseNotes = 'PSComplexity 0.7.1
 
-- -Detailed reports each unit''s lines of code.
-- The gate''s policy can live in a committed .pscomplexity.json.
-- An acceptance can be written in the code.
-- A Markdown summary, for a CI step summary or a pull request comment.
-- Gate only the functions a change touched.
-- A PSScriptAnalyzer rule, for warnings in the editor.
+- Config paths are resolved the same way on every supported PowerShell.
 
-Full release notes: https://github.com/Fortigi/PSComplexity/releases/tag/v0.7.0'
+Full release notes: https://github.com/Fortigi/PSComplexity/releases/tag/v0.7.1'
         }
     }
 }

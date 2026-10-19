@@ -5,6 +5,17 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-19
+
+### For consumers
+
+**Config paths are resolved the same way on every supported PowerShell.** PowerShell 7.6 made
+`Join-Path -ChildPath` take a list, which left the `-join` that turned a `.pscomplexity.json` path into
+a full one doing nothing on 7.6 and all the work on 7.0 to 7.5 -- correct on both, but impossible to
+test on the newest, where the suite runs. The path's segments now go in through
+`-AdditionalChildPath`, which behaves the same from PowerShell 6.0 on. Every path resolves exactly as
+before; no score moves and no command changed.
+
 ## [0.7.0] - 2026-10-19
 
 ### For consumers

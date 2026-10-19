@@ -238,8 +238,12 @@ function Get-PSCxConfigFull {
         [Parameter(Mandatory)] [string]$Directory,
         [Parameter(Mandatory)] [string]$Path
     )
-    $relative = (Get-PSCxConfigPathSegment -Path $Path) -join [System.IO.Path]::DirectorySeparatorChar
-    return [System.IO.Path]::GetFullPath((Join-Path $Directory $relative))
+    # The segments go in as -AdditionalChildPath rather than joined first: PowerShell 7.6 made
+    # -ChildPath a list, so a -join here does nothing there and is needed below it -- code no test on
+    # the newest host can pin. -AdditionalChildPath reads the same from 6.0 on, and the '.' it hangs
+    # off is gone after GetFullPath.
+    $segments = Get-PSCxConfigPathSegment -Path $Path
+    return [System.IO.Path]::GetFullPath((Join-Path -Path $Directory -ChildPath '.' -AdditionalChildPath $segments))
 }
 
 function Get-PSCxConfigPolicy {
