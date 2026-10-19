@@ -84,6 +84,9 @@ Describe 'Get-PSCxBaselineState' {
         $p = Baseline -Units @((Entry -Name 'Ghost'), (Entry -Name 'Phantom'))
         { Get-PSCxBaselineState -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
             Should-Throw -ExceptionMessage '*Ghost*Phantom*'
+        # And one apart from the next: a separator is only observable with two of them.
+        { Get-PSCxBaselineState -PathComparison $script:PathCmp -Path $p -Unit @(Unit) -Accept @() -MaxCyclomatic 15 -MaxCognitive 15 -MetricVersion 1 } |
+            Should-Throw -ExceptionMessage '*Ghost is recorded*being gated; src/*Phantom is recorded*'
     }
 
     It 'checks only the entries for files a filtered run read, and every entry otherwise (#203)' {

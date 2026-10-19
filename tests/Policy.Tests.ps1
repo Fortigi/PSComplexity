@@ -507,6 +507,11 @@ Describe 'Get-PSCxBaselineUpdateFault' {
             Should-BeLikeString '*src/A.ps1 Invoke-Thing is now cyclomatic 21, cognitive 30*worse than recorded*'
     }
 
+    It 'names every raised unit, one apart from the next' {
+        Get-PSCxBaselineUpdateFault -Raised @((Unit -Cyc 21 -Cog 30), (Unit -Name 'B' -Cyc 16 -Cog 17)) -Added @() |
+            Should-BeLikeString '*Invoke-Thing is now cyclomatic 21, cognitive 30; src/A.ps1 B is now cyclomatic 16, cognitive 17 -- worse than recorded*'
+    }
+
     It 'refuses a raise even with -AllowNew' {
         Get-PSCxBaselineUpdateFault -Raised @(Unit) -Added @() -AllowNew | Should-BeLikeString '*worse than recorded*'
     }

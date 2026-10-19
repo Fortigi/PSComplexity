@@ -915,6 +915,15 @@ Describe 'Get-PSCxSourceFile returns an array, whatever it found' {
     }
 }
 
+Describe 'Get-PSCxMissingChangeFault' {
+    It 'names every missing file, one apart from the next' {
+        $a = "cxgone-$([guid]::NewGuid().ToString('N')).ps1"
+        $b = "cxgone-$([guid]::NewGuid().ToString('N')).psm1"
+        Get-PSCxMissingChangeFault -File @($a, 'notes.md', $b) -Parameter '-ChangedFile' |
+            Should-BeLikeString "-ChangedFile names 2 PowerShell file(s) that do not exist from '*': $a, $b. The list is resolved*"
+    }
+}
+
 Describe 'Get-PSCxUnmatchedPathFault' {
     It 'is silent when every path matched something' {
         Get-PSCxUnmatchedPathFault -Unmatched @() | Should-BeNull
@@ -931,6 +940,7 @@ Describe 'Get-PSCxUnmatchedPathFault' {
         $fault | Should-BeLikeString '*/nope -- no such path*'
         $fault | Should-BeLikeString '*./docs -- holds no .ps1 or .psm1 file*'
         $fault | Should-BeLikeString '*2 of the path(s)*'
+        $fault | Should-BeLikeString '*: /nope -- no such path; ./docs -- holds no .ps1 or .psm1 file. A gate*'
     }
 }
 
