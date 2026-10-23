@@ -379,6 +379,7 @@ Describe 'Test-PSCxSelfCall' {
     # A command with no name can still run the function it sits in (#182).
     It 'is true for <Name>' -ForEach @(
         @{ Name = 'its body through the function drive'; Code = 'function Get-Thing { & ${function:Get-Thing} }' }
+        @{ Name = 'the function drive, with an argument after it'; Code = 'function Get-Thing { & ${function:Get-Thing} 1 }' }
         @{ Name = 'the function drive, dot-sourced'; Code = 'function Get-Thing { . ${function:Get-Thing} }' }
         @{ Name = 'the function drive, from a function defined with a scope modifier'; Code = 'function global:Get-Thing { & ${function:Get-Thing} }' }
         @{ Name = 'an unhyphenated name, which needs no braces'; Code = 'function fib { & $function:fib }' }
@@ -750,6 +751,21 @@ class D : B { D([int]$x) : base($x) { } }'
         # continue, break, continue -- source order. Bucket order would be break, continue, continue.
         ($merged | ForEach-Object { $_.GetType().Name }) -join ',' |
             Should-Be 'ContinueStatementAst,BreakStatementAst,ContinueStatementAst'
+    }
+
+    It 'merges buckets into document order, not its reverse' {
+        # The case above reads the same backwards, so a walk numbered downwards sorted it
+        # correctly too. This one does not: break, continue, continue reversed is continue first.
+        $t = Tree 'outer: foreach ($i in 1..3) {
+    if ($i -eq 1) { break outer }
+    if ($i -eq 2) { continue outer }
+    if ($i -eq 3) { continue outer }
+}'
+        $merged = (Get-PSCxNodeByKind -Ast $t -Type (
+                [System.Management.Automation.Language.BreakStatementAst],
+                [System.Management.Automation.Language.ContinueStatementAst]))
+        ($merged | ForEach-Object { $_.GetType().Name }) -join ',' |
+            Should-Be 'BreakStatementAst,ContinueStatementAst,ContinueStatementAst'
     }
 
     It 'returns an empty result when no bucket matches a kind' {

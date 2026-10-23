@@ -35,8 +35,8 @@ nothing ran. The gate's 15 / 15 ceiling defaults USED to be among them; since #1
 line nor a config sets a ceiling and a parameter default cannot tell "not given" from "given as
 15". `tests/Config.Tests.ps1` kills its mutants, and `tests/Measure.Tests.ps1` still sits a unit on
 each side of each ceiling end to end. The declarations that remain are
-`Position = 0 -> 1` on `-Path`, **declared equivalent** in the config: `-Path` is each command's
-only positional parameter, so 0 and 1 bind identically. If coverage ever drops below 100%,
+`Position = 0 -> 1` and `0 -> (-1)` on `-Path`, **declared equivalent** in the config: `-Path` is each
+command's only positional parameter, so 0, 1 and -1 bind identically. If coverage ever drops below 100%,
 `coveredLinesOnly` has to come back on first, or every uncovered mutant becomes a survivor.
 
 ---

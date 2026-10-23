@@ -32,6 +32,7 @@ function Get-PSCxTokenIndexAt {
     )
     $offsets = [int[]]@($Token.Extent.StartOffset)
     $found = [System.Array]::BinarySearch($offsets, $Offset)
+    # PSMutant-Equivalent: 0 -> (-1): a search that misses answers -1 or less, and -1 is exactly what the miss arm returns.
     return ($found -ge 0) ? $found : -1
 }
 
@@ -52,6 +53,7 @@ function Get-PSCxInlineTarget {
         return [pscustomobject]@{ Line = $null; Fault = 'it shares its line with code -- put it on its own line, directly above the unit' }
     }
     $newLines = 0
+    # PSMutant-Equivalent: 1 -> 0: Token[Index] is the declaration's own comment, and a comment is skipped without touching the count, so starting one token early changes nothing.
     for ($i = $Index + 1; $i -lt $Token.Count; $i++) {
         $t = $Token[$i]
         if ($t.Kind -eq $kind::NewLine) {
@@ -111,6 +113,7 @@ function Get-PSCxInlineAccept {
             $stray.Add([pscustomobject]@{ File = $File; Line = $line; Fault = $fault })
             continue
         }
+        # PSMutant-Equivalent: 0 -> (-1): no fault means exactly one unit starts on the target line, so its first key and its last are the same one.
         $key = $byLine[$target.Line][0]
         $claimed[$key] = $line
         $accept.Add([pscustomobject]@{ File = $File; Unit = [string]$Display[$key]; Reason = $match.Groups[1].Value.Trim(); Line = $line; Source = 'inline' })
@@ -136,5 +139,7 @@ function Get-PSCxInlineFault {
     # Two units starting on one line -- `function A { } function B { }` -- cannot be told apart by
     # where a comment sits, so the declaration names neither rather than guessing.
     if ($keys.Count -gt 1) { return "$($keys.Count) units start on line $($Target.Line), so it cannot say which one it excuses" }
-    if ($Claimed.ContainsKey($keys[0])) { return "the unit below it is already accepted by the declaration on line $($Claimed[$keys[0]])" }
+    # PSMutant-Equivalent: 0 -> (-1): none and several returned above, so exactly one key is left and its first and its last are the same one.
+    $only = $keys[0]
+    if ($Claimed.ContainsKey($only)) { return "the unit below it is already accepted by the declaration on line $($Claimed[$only])" }
 }

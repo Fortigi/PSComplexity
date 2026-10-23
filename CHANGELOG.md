@@ -5,6 +5,16 @@ All notable changes to PSComplexity are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-10-23
+
+### For consumers
+
+**A report names the version of the code that wrote it, even with two versions loaded.** The
+`producedBy` version in a JSON or SARIF report came from `Get-Module`'s first answer, so with two
+versions of PSComplexity imported side by side it named whichever PowerShell listed first. It now reads
+the manifest beside the code, which is always the version that ran. With one version loaded, nothing
+changes.
+
 ## [0.7.1] - 2026-10-19
 
 ### For consumers

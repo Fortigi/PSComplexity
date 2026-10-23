@@ -133,6 +133,14 @@ Describe 'finding the config for a run' {
         { Find-PSCxRunConfigFile -Path $one, $none -Root $script:work -PathComparison $script:PathCmp } |
             Should-Throw -ExceptionMessage "*$none -> no config*"
     }
+
+    It 'names the config as the first path spells it, when a case-insensitive comparison joins two spellings' {
+        # Two spellings of one directory are one config where paths compare without case, so the
+        # run is not refused -- and the name it reports is the first path's, not the last's.
+        Mock Find-PSCxConfigFile { (Split-Path -Parent $Path) + '/.pscomplexity.json' }
+        Find-PSCxRunConfigFile -Path 'R/One/a', 'r/one/b' -Root $script:work -PathComparison ([System.StringComparison]::OrdinalIgnoreCase) |
+            Should-BeString -CaseSensitive 'R/One/.pscomplexity.json'
+    }
 }
 
 Describe 'reading a config' {

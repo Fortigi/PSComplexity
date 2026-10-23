@@ -72,6 +72,7 @@ Describe 'a declaration that excuses nothing' {
 
     It 'is refused when <Why>' -ForEach @(
         @{ Why = 'a blank line follows it'; Source = "# PSCx-Accept: x`n`nfunction Big { 1 }"; Like = '*blank line*' }
+        @{ Why = 'a blank line follows a further comment'; Source = "# PSCx-Accept: x`n# more`n`nfunction Big { 1 }"; Like = '*blank line*' }
         @{ Why = 'it shares a line with code'; Source = "`$x = 1 # PSCx-Accept: x`nfunction Big { 1 }"; Like = '*shares its line with code*' }
         @{ Why = 'it follows the first token of the file'; Source = "x # PSCx-Accept: x`nfunction Big { 1 }"; Like = '*shares its line with code*' }
         @{ Why = 'nothing follows it'; Source = "function Big { 1 }`n# PSCx-Accept: x"; Like = '*no code follows it*' }

@@ -50,7 +50,13 @@ function Get-PSCxUnifiedDiff {
     }
     # Minus: the last `---` path. Current: the file hunks go to, $null inside a deleted one.
     # Old, New: body lines still to skip on each side after the last hunk header.
-    $state = [pscustomobject]@{ Files = [ordered]@{}; Minus = $null; Current = $null; InFile = $false; SawFile = $false; Old = 0; New = 0 }
+    $state = [pscustomobject]@{
+        Files = [ordered]@{}; Minus = $null; Current = $null; InFile = $false; SawFile = $false
+        # PSMutant-Equivalent: 0 -> (-1): the counters are read only as -gt 0 until a hunk header sets them, and -1 is no more than 0 is.
+        Old = 0
+        # PSMutant-Equivalent: 0 -> (-1): the counters are read only as -gt 0 until a hunk header sets them, and -1 is no more than 0 is.
+        New = 0
+    }
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $fault = Read-PSCxDiffLine -State $state -Line $lines[$i] -Number ($i + 1)
         if ($fault) { return [pscustomobject]@{ Files = [ordered]@{}; Fault = $fault } }

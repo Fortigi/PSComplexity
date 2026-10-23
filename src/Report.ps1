@@ -12,9 +12,11 @@
 $script:PSCxSchemaVersion = 1
 
 function Get-PSCxModuleVersion {
-    # What goes in the report's producedBy. Prefers the loaded module and falls back to the
-    # manifest beside src/, because the suite dot-sources these files without importing a module
-    # and a report written from there must still say which version shaped it.
+    # What goes in the report's producedBy: the manifest beside src/, which is always the version
+    # of THIS copy of the code -- imported, installed or dot-sourced alike.
+    #
+    # It used to ask Get-Module first and take the first answer. With two versions loaded side by
+    # side, that named whichever PowerShell listed first rather than the one writing the report.
     #
     # Returns the literal 'unknown' when it can find neither, rather than throwing or inventing
     # something plausible. Three options, and the middle one is the trap:
@@ -30,8 +32,6 @@ function Get-PSCxModuleVersion {
     [OutputType([string])]
     [CmdletBinding()]
     param()
-    $loaded = @(Get-Module -Name PSComplexity)
-    if ($loaded.Count -gt 0) { return "$($loaded[0].Version)" }
     $manifest = Join-Path -Path (Split-Path -Parent $PSScriptRoot) -ChildPath 'PSComplexity.psd1'
     if (-not (Test-Path -LiteralPath $manifest)) { return 'unknown' }
     return "$((Import-PowerShellDataFile -LiteralPath $manifest).ModuleVersion)"
