@@ -137,7 +137,9 @@ Describe 'finding the config for a run' {
     It 'names the config as the first path spells it, when a case-insensitive comparison joins two spellings' {
         # Two spellings of one directory are one config where paths compare without case, so the
         # run is not refused -- and the name it reports is the first path's, not the last's.
-        Mock Find-PSCxConfigFile { (Split-Path -Parent $Path) + '/.pscomplexity.json' }
+        # Cut at the last '/' by hand: Split-Path rejoins with the platform separator, so on
+        # Windows it would answer 'R\One' and the assertion would be testing the platform.
+        Mock Find-PSCxConfigFile { $Path.Substring(0, $Path.LastIndexOf('/')) + '/.pscomplexity.json' }
         Find-PSCxRunConfigFile -Path 'R/One/a', 'r/one/b' -Root $script:work -PathComparison ([System.StringComparison]::OrdinalIgnoreCase) |
             Should-BeString -CaseSensitive 'R/One/.pscomplexity.json'
     }
