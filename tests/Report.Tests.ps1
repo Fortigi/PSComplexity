@@ -516,20 +516,20 @@ Describe 'the SARIF log' {
 
 Describe 'the version a report claims it came from' {
 
-    It 'takes the version from the loaded module when there is one' {
-        # The normal path for a consumer, and the one the suite never exercises on its own:
-        # these tests dot-source src/ rather than importing a module, so without a mock this
-        # branch is unreachable from here and ships unmeasured.
-        Mock Get-Module { [pscustomobject]@{ Version = '9.9.9' } }
-        Get-PSCxModuleVersion | Should-Be '9.9.9'
+    It 'reads the manifest beside src, not whatever version is loaded' {
+        # It used to take Get-Module's first answer, which with two versions loaded side by side
+        # names whichever PowerShell lists first. The manifest beside src/ is always this copy's.
+        Mock Get-Module { [pscustomobject]@{ Version = '9.9.9' }, [pscustomobject]@{ Version = '8.8.8' } }
+        Mock Test-Path { $true }
+        Mock Import-PowerShellDataFile { @{ ModuleVersion = '1.2.3' } }
+        Get-PSCxModuleVersion | Should-Be '1.2.3'
     }
 
-    It 'falls back to the manifest beside src when nothing is loaded' {
+    It 'reads the version from the manifest beside src' {
         # Mocked rather than reading the real manifest, because a covering suite has to be
         # SELF-CONTAINED: the mutation sandbox copies src/, tests/ and schemas/ and no manifest,
         # so a test that reaches the repo root fails there while passing everywhere else.
         # It did, and it turned the baseline red.
-        Mock Get-Module { @() }
         Mock Test-Path { $true }
         Mock Import-PowerShellDataFile { @{ ModuleVersion = '1.2.3' } }
         Get-PSCxModuleVersion | Should-Be '1.2.3'
@@ -543,7 +543,6 @@ Describe 'the version a report claims it came from' {
         #
         # 'unknown' rather than '0.0.0' because a plausible-looking version is the worse
         # failure: it sits in a stored artefact claiming every such run came from one release.
-        Mock Get-Module { @() }
         # A default mock as well as the filtered one: Pester 6 removed fall-through, so a call
         # matching no filter throws rather than reaching the real command.
         Mock Test-Path { $true }

@@ -664,6 +664,7 @@ function Test-PSCxDscSchemaFault {
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Token
     )
     if ($ParseError.ErrorId -ne 'ParserError') { return $false }
+    # PSMutant-Equivalent: 1 -> 0: Token[-1] is the EndOfInput token the parser always ends with, which is never the Configuration keyword.
     for ($i = 1; $i -lt $Token.Count; $i++) {
         if ($Token[$i - 1].Kind -eq 'Configuration' -and
             $Token[$i].Extent.StartOffset -eq $ParseError.Extent.StartOffset) { return $true }

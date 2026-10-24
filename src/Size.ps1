@@ -67,9 +67,15 @@ function Get-PSCxLinesOfCodeMap {
         [Parameter(Mandatory)] [hashtable]$Span
     )
     $count = @{ '<script-body>' = 0 }
+    # PSMutant-Equivalent: 0 -> (-1): a line number is 1 or more, so it is greater than 0 and -1 alike.
     $last = @{ '<script-body>' = 0 }
-    foreach ($k in $Span.Keys) { $count[$k] = 0; $last[$k] = 0 }
+    foreach ($k in $Span.Keys) {
+        $count[$k] = 0
+        # PSMutant-Equivalent: 0 -> (-1): a line number is 1 or more, so it is greater than 0 and -1 alike.
+        $last[$k] = 0
+    }
     $owner = Get-PSCxTokenUnit -Token $Token -Span $Span
+    # PSMutant-Equivalent: 0 -> (-1): Token[-1] is the EndOfInput token the parser always ends with, which holds no code line; an empty list owns nothing.
     for ($i = 0; $i -lt $Token.Count; $i++) {
         $unit = $owner[$i]
         if ($null -eq $unit) { continue }

@@ -86,7 +86,9 @@ function Find-PSCxRunConfigFile {
         throw ('The paths of this run fall under different configs: ' + ($named -join '; ') +
             '. Gate them in separate runs, or name the one that applies with -ConfigFile.')
     }
-    return ($found[0]) ? $found[0] : $null
+    # The first path's spelling, when a case-insensitive comparison let two spellings through.
+    $first = $found[0]
+    return $first ? $first : $null
 }
 
 function Read-PSCxConfig {
