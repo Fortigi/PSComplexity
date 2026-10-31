@@ -15,8 +15,8 @@ function Get-PSCxModuleVersion {
     # What goes in the report's producedBy: the manifest beside src/, which is always the version
     # of THIS copy of the code -- imported, installed or dot-sourced alike.
     #
-    # It used to ask Get-Module first and take the first answer. With two versions loaded side by
-    # side, that named whichever PowerShell listed first rather than the one writing the report.
+    # Not Get-Module's first answer: with two versions loaded side by side, that names whichever
+    # PowerShell listed first rather than the one writing the report.
     #
     # Returns the literal 'unknown' when it can find neither, rather than throwing or inventing
     # something plausible. Three options, and the middle one is the trap:

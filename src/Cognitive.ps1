@@ -37,9 +37,8 @@ function Test-PSCxLogicalRunStart {
 function Get-PSCxCogIfRow {
     # if leading clause: 1 + nesting; each else-if and the else: +1 (no nesting bonus).
     #
-    # One row per CLAUSE, each at its own line (#157). The chain used to be one row at the `if`
-    # carrying every clause's point, so -Detailed could not say which branch cost what. An
-    # elseif sits at its condition's line; the else at its block's, since the AST keeps no
+    # One row per CLAUSE, each at its own line (#157), so -Detailed can say which branch cost
+    # what. An elseif sits at its condition's line; the else at its block's, since the AST keeps no
     # extent for the `else` keyword itself -- and `} else {` puts the two on one line.
     [OutputType([pscustomobject])]
     [CmdletBinding()]
@@ -224,8 +223,8 @@ function Get-PSCxContributionMap {
     [CmdletBinding()]
     param(
         # The same rows Get-PSCxCognitiveMap sums. Collected once per file by the caller and
-        # handed to both: -Detailed used to collect them a second time here, which was eighteen
-        # more traversals of the tree for rows the sum had just built.
+        # handed to both: collecting them here too would be eighteen more traversals of the tree
+        # for rows the sum has just built.
         [Parameter(Mandatory)] [AllowEmptyCollection()] [object[]]$Row
     )
     $byUnit = @{}
