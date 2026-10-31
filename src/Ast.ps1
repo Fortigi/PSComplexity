@@ -184,9 +184,8 @@ function Initialize-PSCxAstIndex {
     # Unconditional: it REBUILDS. Confirm-PSCxAstIndex below is the idempotent entry point, and
     # the split is deliberate rather than tidy -- Get-PSCxUnitBoundary and Get-PSCxNesting call
     # this one on a cache miss, and their tests prove the memo hits by planting a value and
-    # checking a rebuild would overwrite it. Guarding here made that rebuild an early return, so
-    # the planted value survived and two mutants that used to die started living. Measured, on
-    # the run that introduced it.
+    # checking a rebuild would overwrite it. Guarding here makes that rebuild an early return, so
+    # the planted value survives and two mutants live. Measured.
     [OutputType([void])]
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Root)

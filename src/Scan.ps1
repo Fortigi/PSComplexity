@@ -221,11 +221,9 @@ function Get-PSCxCaseTwinScan {
 function Get-PSCxRelativePath {
     # A path two machines can agree on.
     #
-    # File used to be absolute and platform-separated, so the same source measured on the two
-    # CI legs produced disjoint key sets -- C:\...\src\A.ps1 against /home/.../src/A.ps1 --
-    # and anything comparing runs across them matched nothing while looking like it worked.
-    # The README had rendered it relative all along, so the absolute form was not a decision
-    # anyone recorded.
+    # Not absolute and platform-separated, or the same source measured on the two CI legs
+    # produces disjoint key sets -- C:\...\src\A.ps1 against /home/.../src/A.ps1 -- and anything
+    # comparing runs across them matches nothing while looking like it works.
     #
     # Separators are normalised to '/' because that is the half that does not vary: a Windows
     # reader understands src/A.ps1, and a key containing a backslash cannot be matched by a
@@ -732,9 +730,8 @@ function Get-PSCxParsedScan {
         [switch]$Detailed
     )
 
-    # ONCE, shared. Get-PSCxUnitTable used to run three times against the same AST in a single
-    # pass -- once here for the line numbers, and once inside each metric map -- each a full
-    # FindAll with a PowerShell predicate per node. It reads the index's buckets now (#155).
+    # ONCE, shared: this table gives the line numbers and is handed to each metric map, rather
+    # than each building its own against the same AST.
     $lines = Get-PSCxUnitTable -Ast $ast
     # Each row set collected ONCE, here, and projected into whatever the run needs. The cognitive
     # rows are needed twice -- summed into the map, and grouped per unit for -Detailed -- and
