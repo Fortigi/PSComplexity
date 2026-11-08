@@ -451,6 +451,11 @@ Two subtleties worth knowing before touching `Ast.ps1`:
   upgrade for nothing. The packaged README catches up at the next release that ships code. This is
   decided the same way in both Fortigi modules, which gate each other; a rule one states and the
   other contradicts is the drift the parity rules exist to stop for workflows.
+
+  **A change to comments in `src/` alone takes no bump either**, although `src/` is staged, and for
+  the same reason: nothing a consumer runs is different. The packaged files catch up at the next
+  release that ships code. A comment-only change has no `### For consumers` entry to write, and the
+  gate would force one that says nothing.
 - **ASCII only** in `src/` and `tests/` — non-ASCII without a BOM trips
   `PSUseBOMForUnicodeEncodedFile` and fails lint.
 - Reference scores are the contract: `tests/Cognitive.Tests.ps1` pins the SonarSource
@@ -870,3 +875,16 @@ and expensive to rebuild, and because each one has already earned its keep.
   Coverage was claimed here at 100% long before anything measured it; it is
   `tools/Measure-PSCxCoverage.ps1` now. Where a sentence states something checkable -- the pins
   above are the example -- a test in `tests/Release.Tests.ps1` holds it to the source.
+
+- **A comment says why the code is right; why it was once wrong goes in the CHANGELOG or the
+  issue.** State the invariant and the wrong assumption it kills. "Used to", "this comment
+  previously claimed" and how a bug was found are history, and history in a comment goes stale
+  without anything failing: `PSMutant.psm1` said nothing enforced the layering long after
+  `tests/Layering.Tests.ps1` did, and `PSComplexity.psm1` said "these four" over fifteen files.
+  `CLAUDE.md` is not a home a comment can lean on for a reader of the package, because it does not
+  ship. Where the wrong assumption is genuinely tempting -- the sandbox name, Pester left out of
+  `RequiredModules` -- keep the whole argument: beside the code is the only place it gets read.
+
+- **The root module stays a dot-sourced list. `NestedModules` and classes were weighed and
+  declined**, with PSMutant, whose `CLAUDE.md` records the reasons. Here `tests/Layering.Tests.ps1`
+  would have to stay for every other edge and for acyclicity whatever a nested module did to one.
